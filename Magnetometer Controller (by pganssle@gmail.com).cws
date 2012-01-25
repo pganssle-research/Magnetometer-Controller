@@ -1,0 +1,322 @@
+[Workspace Header]
+Version = 900
+Pathname Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Pathname Line0002 = "/Magnetometer Controller.cws"
+CVI Dir = "/c/program files (x86)/national instruments/cvi90"
+CVI Shared Dir = "/C/Program Files (x86)/National Instruments/Shared/CVI"
+CVI Pub Local Dir = "/C/ProgramData/National Instruments/CVI90"
+CVI Pub Global Dir = "/C/ProgramData/National Instruments/CVI"
+IVI Standard Root Dir = "/C/Program Files (x86)/IVI"
+VXIplug&play Framework Dir = "/c/vxipnp/winnt"
+Number of Projects = 1
+Active Project = 1
+Project 0001 = "Magnetometer Controller.prj"
+Drag Bar Left = 283
+Window Top = 35
+Window Left = 26
+Window Bottom = 537
+Window Right = 816
+Maximized = True
+Maximized Children = True
+Max Number Of Errors = 20
+Track Include File Dependencies = True
+Prompt For Missing Includes = True
+Stop On First Error File = False
+Bring Up Err Win For Warnings = True
+Show Build Dialog = False
+Save Changes Before Running = "Always"
+Hide Windows = False
+Break At First Statement = False
+Sort Type = "File Name"
+Number of Opened Files = 8
+Window Confinement Region Enabled = True
+MainColumnWidth = 264
+FileDateColumnWidth = 70
+FileSizeColumnWidth = 70
+StatusColumnWidth = 70
+
+[Project Header 0001]
+Version = 900
+Don't Update DistKit = False
+Platform Code = 4
+Build Configuration = "Debug"
+Warn User If Debugging Release = 1
+Batch Build Release = False
+Batch Build Debug = False
+Force Rebuild = False
+
+[File 0001]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/Magnetometer Controller.c"
+File Type = "CSource"
+Disk Date = 3392823466
+In Projects = "1,"
+Window Top = 62
+Window Left = 22
+Window Z-Order = 2
+Source Window State Line0001 = "1,7387,7387,7387,29,30,29,0,0,84,16,1950,0,1965,8,9,7380,0,7389,37,349,719,1,610"
+Source Window State Line0002 = "1,"
+Breakpoint 0001 = "284,0,enabled,"
+Breakpoint 0002 = "1992,0,disabled,"
+Breakpoint 0003 = "3079,0,disabled,"
+Breakpoint 0004 = "8023,0,disabled,"
+
+[File 0002]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/Magnetometer Controller.uir"
+File Type = "User Interface Resource"
+Disk Date = 3392823321
+In Projects = "1,"
+Window Top = 122
+Window Left = 42
+Window Height = 349
+Window Width = 663
+Window Z-Order = 5
+
+[File 0003]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/MCTypedef.h"
+File Type = "Include"
+Disk Date = 3371236890
+In Projects = "1,"
+Window Top = 62
+Window Left = 10
+Window Z-Order = 6
+Source Window State = "1,14,14,14,12,18,18,0,0,84,0,3,0,66,0,25,3,0,61,159,349,719,1,10,"
+
+[File 0004]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/Legacy Functions.c"
+File Type = "CSource"
+Disk Date = 3361556824
+In Projects = ""
+Window Top = 212
+Window Left = 102
+Window Z-Order = 8
+Source Window State = "1,1039,1039,1039,13,21,21,0,3,84,0,1217,0,0,0,25,1010,0,1039,13,349,719,1,11,"
+
+[File 0005]
+Path = "/c/SpinCore/SpinAPI/dll/spinapi.h"
+File Type = "Include"
+Disk Date = 3392823446
+In Projects = "1,"
+Window Top = 30
+Window Z-Order = 3
+Source Window State = "1,77,77,77,0,16,16,0,0,84,0,40,0,0,0,25,24,0,77,0,349,719,1,11,"
+
+[File 0006]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/MC.h"
+File Type = "Include"
+Disk Date = 3371475914
+In Projects = "1,"
+Window Top = 302
+Window Left = 150
+Window Z-Order = 4
+Source Window State = "1,0,0,0,0,0,0,0,0,84,0,0,0,0,0,25,0,0,0,0,349,719,1,0,"
+
+[File 0007]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/Defaults.txt"
+File Type = "Unknown"
+Disk Date = 3360689533
+In Projects = "1,"
+
+[File 0008]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/fftw3.f"
+File Type = "Unknown"
+Disk Date = 3353419861
+In Projects = "1,"
+
+[File 0009]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/fftw3.h"
+File Type = "Include"
+Disk Date = 3353419861
+In Projects = "1,"
+Source Window State = "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"
+
+[File 0010]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/LastProgramBuffer.txt"
+File Type = "Unknown"
+Disk Date = 3361399197
+In Projects = "1,"
+
+[File 0011]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/libfftw3-3.def"
+File Type = "Unknown"
+Disk Date = 3353419861
+In Projects = "1,"
+Window Top = 122
+Window Left = 54
+
+[File 0012]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/libfftw3-3.exp"
+File Type = "Unknown"
+Disk Date = 3353420392
+In Projects = "1,"
+
+[File 0013]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/libfftw3-3.lib"
+File Type = "Library"
+Disk Date = 3353420392
+In Projects = "1,"
+
+[File 0014]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/libfftw3f-3.def"
+File Type = "Unknown"
+Disk Date = 3353004620
+In Projects = "1,"
+
+[File 0015]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/libfftw3f-3.exp"
+File Type = "Unknown"
+Disk Date = 3353420830
+In Projects = "1,"
+
+[File 0016]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/libfftw3f-3.lib"
+File Type = "Library"
+Disk Date = 3353420830
+In Projects = "1,"
+
+[File 0017]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/libfftw3l-3.def"
+File Type = "Unknown"
+Disk Date = 3353419861
+In Projects = "1,"
+
+[File 0018]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/libfftw3l-3.exp"
+File Type = "Unknown"
+Disk Date = 3353420405
+In Projects = "1,"
+
+[File 0019]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/FFTW/libfftw3l-3.lib"
+File Type = "Library"
+Disk Date = 3353420405
+In Projects = "1,"
+
+[File 0020]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/Magnetometer Controller.h"
+File Type = "Include"
+Disk Date = 3392823321
+In Projects = "1,"
+Window Top = 310
+Window Left = 1231
+Window Released = True
+Source Window State = "1,196,197,196,16,16,16,0,0,0,0,111,0,0,0,0,37,0,117,16,397,855,0,10,"
+
+[File 0021]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/SavedSessionBuffer.txt"
+File Type = "Unknown"
+Disk Date = 3361399197
+In Projects = "1,"
+Window Top = 32
+Window Left = 6
+
+[File 0022]
+Path = "/c/SpinCore/SpinAPI/dll/spinapi.dll"
+File Type = "DLL"
+Disk Date = 0
+In Projects = "1,"
+
+[File 0023]
+Path = "/c/SpinCore/SpinAPI/dll/spinapi.lib"
+File Type = "Library"
+Disk Date = 3387984174
+In Projects = "1,"
+
+[File 0024]
+Path = "/c/ProgramData/National Instruments/CVI90/include/analysis.h"
+File Type = "Include"
+Disk Date = 3392823435
+In Projects = ""
+Window Top = 92
+Window Left = 42
+Window Z-Order = 7
+Source Window State = "1,538,538,538,0,12,12,0,0,84,0,0,0,0,0,25,508,0,530,32,349,719,1,0,"
+
+[File 0025]
+Path Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+Path Line0002 = "/NIDAQmx.h"
+File Type = "Include"
+Disk Date = 3392823281
+In Projects = ""
+Window Top = 182
+Window Left = 90
+Window Z-Order = 1
+Source Window State = "1,1975,1975,1975,18,33,33,0,0,199,0,0,0,0,0,60,1963,0,1988,37,349,719,1,0,"
+
+[Build Options 0001]
+Generate Browse Info = True
+Enable Uninitialized Locals Runtime Warning = True
+Execution Trace = "Disabled"
+Debugging Level = "Standard"
+Break On Library Errors = True
+Break On First Chance Exceptions = True
+Execution Target Address = "Local desktop computer"
+Execution Target Port = 0
+Execution Target Type = 0
+
+[SCC Options 0001]
+Use global settings = True
+SCC Provider = ""
+SCC Project = ""
+Local Path = ""
+Auxiliary Path = ""
+Perform Same Action For .h File As For .uir File = "Ask"
+Perform Same Action For .cds File As For .prj File = "Ask"
+Username = ""
+Comment = ""
+Use Default Username = False
+Use Default Comment = False
+Suppress CVI Error Messages = False
+Always show confirmation dialog = True
+
+[DLL Debugging Support 0001]
+External Process Path = ""
+
+[DLLs Used By Executable 0001]
+DLL 0001 = "/c/Windows/System32/spinapi.dll"
+
+[Command Line Args 0001]
+Command Line Args = ""
+Working Directory = ""
+
+[Watch Point 1]
+Watch Expression = "file_exists(savedsessionloc)"
+Update Display Continuously = False
+Break When Value Changes = False
+Scope = "Global To Project"
+DllName Line0001 = "c:\\Documents and Settings\\OmegaUser\\My Documents\\Omega Project\\Programs\\Ma"
+DllName Line0002 = "gnetometer Controller\\Magnetometer Controller_dbg.exe"
+
+[Watch Point 2]
+Watch Expression = "file_exists(defaultsloc)"
+Update Display Continuously = False
+Break When Value Changes = False
+Scope = "Global To Project"
+DllName Line0001 = "c:\\Documents and Settings\\OmegaUser\\My Documents\\Omega Project\\Programs\\Ma"
+DllName Line0002 = "gnetometer Controller\\Magnetometer Controller_dbg.exe"
+
+[Distributions]
+Active Index = 1
+AbsCDSPath 0001 Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Magnetometer Controller"
+AbsCDSPath 0001 Line0002 = "/Magnetometer Controller.cds"
+RelCDSPath 0001 = "Magnetometer Controller.cds"
+

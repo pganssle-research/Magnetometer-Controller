@@ -1,0 +1,335 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<usi:tdm xmlns:usi="http://www.ni.com/Schemas/USI/1_0" version="1.0">
+
+  <usi:documentation>
+    <usi:exporter>National Instruments USI</usi:exporter>
+    <usi:exporterVersion>1.9</usi:exporterVersion>
+  </usi:documentation>
+
+  <usi:model modelName="National Instruments USI generated meta file" modelVersion="1.0">
+    <usi:include nsUri="http://www.ni.com/DataModels/USI/TDM/1_0"/>
+  </usi:model>
+
+  <usi:include>
+    <file byteOrder="littleEndian" url="3D4T.tdm;.tdx">
+      <block byteOffset="0" id="inc0" length="15" valueType="eInt32Usi"/>
+      <block byteOffset="60" id="inc1" length="15" valueType="eFloat64Usi"/>
+      <block byteOffset="180" id="inc2" length="15" valueType="eInt32Usi"/>
+      <block byteOffset="240" id="inc3" length="15" valueType="eInt32Usi"/>
+      <block byteOffset="300" id="inc4" length="15" valueType="eInt32Usi"/>
+      <block byteOffset="360" id="inc5" length="2" valueType="eInt32Usi"/>
+      <block byteOffset="368" id="inc6" length="2" valueType="eInt32Usi"/>
+      <block byteOffset="376" id="inc7" length="2" valueType="eInt32Usi"/>
+      <block byteOffset="384" id="inc8" length="2" valueType="eInt32Usi"/>
+      <block byteOffset="392" id="inc9" length="20" valueType="eInt32Usi"/>
+    </file>
+  </usi:include>
+
+  <usi:data>
+    <long_sequence id="usi1">
+      <values external="inc0"/>
+    </long_sequence>
+    <double_sequence id="usi2">
+      <values external="inc1"/>
+    </double_sequence>
+    <long_sequence id="usi3">
+      <values external="inc2"/>
+    </long_sequence>
+    <long_sequence id="usi4">
+      <values external="inc3"/>
+    </long_sequence>
+    <long_sequence id="usi5">
+      <values external="inc4"/>
+    </long_sequence>
+    <long_sequence id="usi6">
+      <values external="inc5"/>
+    </long_sequence>
+    <long_sequence id="usi7">
+      <values external="inc6"/>
+    </long_sequence>
+    <long_sequence id="usi8">
+      <values external="inc7"/>
+    </long_sequence>
+    <long_sequence id="usi9">
+      <values external="inc8"/>
+    </long_sequence>
+    <long_sequence id="usi10">
+      <values external="inc9"/>
+    </long_sequence>
+    <tdm_root id="usi11">
+      <name>3D4T.tdm;</name>
+      <description></description>
+      <title>3D4T.tdm;</title>
+      <author>Magnetometer Controller v1.0</author>
+      <channelgroups>#xpointer(id("usi12"))</channelgroups>
+    </tdm_root>
+    <tdm_channelgroup id="usi12">
+      <name>ProgramGroup</name>
+      <description>The group containing the program</description>
+      <root>#xpointer(id("usi11"))</root>
+      <instance_attributes>
+        <long_attribute name="MaxNSteps">10</long_attribute>
+        <long_attribute name="nCycles">0</long_attribute>
+        <long_attribute name="nDims">2</long_attribute>
+        <long_attribute name="nFuncs">0</long_attribute>
+        <long_attribute name="nInstrs">10</long_attribute>
+        <long_attribute name="nPoints">5000</long_attribute>
+        <long_attribute name="nTransients">4</long_attribute>
+        <long_attribute name="nUniqueInstrs">15</long_attribute>
+        <long_attribute name="nVaried">2</long_attribute>
+        <long_attribute name="RealNSteps">10</long_attribute>
+        <double_attribute name="SampleRate">10000</double_attribute>
+        <long_attribute name="Scan">1</long_attribute>
+        <long_attribute name="Skip">0</long_attribute>
+        <long_attribute name="tFuncs">0</long_attribute>
+        <double_attribute name="TotalTime">0</double_attribute>
+        <long_attribute name="TransAcqMode">1</long_attribute>
+        <long_attribute name="TriggerTTL">23</long_attribute>
+        <long_attribute name="Varied">1</long_attribute>
+      </instance_attributes>
+      <channels>#xpointer(id("usi13") id("usi14") id("usi15") id("usi16") id("usi17") id("usi18") id("usi19") id("usi20") id("usi21") id("usi22"))</channels>
+      <submatrices>#xpointer(id("usi23") id("usi24") id("usi25") id("usi26") id("usi27") id("usi28") id("usi29") id("usi30") id("usi31") id("usi32"))</submatrices>
+    </tdm_channelgroup>
+    <tdm_channel id="usi13">
+      <name>ProgFlag</name>
+      <description>Binary flags for each unique instruction</description>
+      <group>#xpointer(id("usi12"))</group>
+      <unit_string></unit_string>
+      <datatype>DT_LONG</datatype>
+      <local_columns>#xpointer(id("usi33"))</local_columns>
+    </tdm_channel>
+    <tdm_channel id="usi14">
+      <name>ProgTime</name>
+      <description>Instruction delay times for each instruction</description>
+      <group>#xpointer(id("usi12"))</group>
+      <unit_string>ns</unit_string>
+      <datatype>DT_DOUBLE</datatype>
+      <local_columns>#xpointer(id("usi34"))</local_columns>
+    </tdm_channel>
+    <tdm_channel id="usi15">
+      <name>ProgInstr</name>
+      <description>The instruction value for each unique instruction</description>
+      <group>#xpointer(id("usi12"))</group>
+      <unit_string></unit_string>
+      <datatype>DT_LONG</datatype>
+      <local_columns>#xpointer(id("usi35"))</local_columns>
+    </tdm_channel>
+    <tdm_channel id="usi16">
+      <name>ProgID</name>
+      <description>Instruction data for each unique instruction</description>
+      <group>#xpointer(id("usi12"))</group>
+      <unit_string></unit_string>
+      <datatype>DT_LONG</datatype>
+      <local_columns>#xpointer(id("usi36"))</local_columns>
+    </tdm_channel>
+    <tdm_channel id="usi17">
+      <name>ProgUS</name>
+      <description>Bit 0 is whether or not to scan, the remaining bits are units for each instr</description>
+      <group>#xpointer(id("usi12"))</group>
+      <unit_string></unit_string>
+      <datatype>DT_LONG</datatype>
+      <local_columns>#xpointer(id("usi37"))</local_columns>
+    </tdm_channel>
+    <tdm_channel id="usi18">
+      <name>MaxSteps</name>
+      <description>Size of the acquisition space</description>
+      <group>#xpointer(id("usi12"))</group>
+      <unit_string></unit_string>
+      <datatype>DT_LONG</datatype>
+      <local_columns>#xpointer(id("usi38"))</local_columns>
+    </tdm_channel>
+    <tdm_channel id="usi19">
+      <name>VarIns</name>
+      <description>List of the varied instructions</description>
+      <group>#xpointer(id("usi12"))</group>
+      <unit_string></unit_string>
+      <datatype>DT_LONG</datatype>
+      <instance_attributes>
+        <string_attribute name="DataExprs">
+          <s> 
+ 
+</s>        </string_attribute>
+        <string_attribute name="DelayExprs">
+          <s> 
+ 
+</s>        </string_attribute>
+      </instance_attributes>
+      <local_columns>#xpointer(id("usi39"))</local_columns>
+    </tdm_channel>
+    <tdm_channel id="usi20">
+      <name>VarInsDims</name>
+      <description>What dimension(s) the instrs vary along</description>
+      <group>#xpointer(id("usi12"))</group>
+      <unit_string></unit_string>
+      <datatype>DT_LONG</datatype>
+      <local_columns>#xpointer(id("usi40"))</local_columns>
+    </tdm_channel>
+    <tdm_channel id="usi21">
+      <name>VarInsMode</name>
+      <description>Variation mode</description>
+      <group>#xpointer(id("usi12"))</group>
+      <unit_string></unit_string>
+      <datatype>DT_LONG</datatype>
+      <local_columns>#xpointer(id("usi41"))</local_columns>
+    </tdm_channel>
+    <tdm_channel id="usi22">
+      <name>VarInsLocs</name>
+      <description>Instruction indexes, multidimensional linear-indexed array</description>
+      <group>#xpointer(id("usi12"))</group>
+      <unit_string></unit_string>
+      <datatype>DT_LONG</datatype>
+      <local_columns>#xpointer(id("usi42"))</local_columns>
+    </tdm_channel>
+    <submatrix id="usi23">
+      <name>ProgFlag</name>
+      <measurement>#xpointer(id("usi12"))</measurement>
+      <number_of_rows>15</number_of_rows>
+      <local_columns>#xpointer(id("usi33"))</local_columns>
+    </submatrix>
+    <submatrix id="usi24">
+      <name>ProgTime</name>
+      <measurement>#xpointer(id("usi12"))</measurement>
+      <number_of_rows>15</number_of_rows>
+      <local_columns>#xpointer(id("usi34"))</local_columns>
+    </submatrix>
+    <submatrix id="usi25">
+      <name>ProgInstr</name>
+      <measurement>#xpointer(id("usi12"))</measurement>
+      <number_of_rows>15</number_of_rows>
+      <local_columns>#xpointer(id("usi35"))</local_columns>
+    </submatrix>
+    <submatrix id="usi26">
+      <name>ProgID</name>
+      <measurement>#xpointer(id("usi12"))</measurement>
+      <number_of_rows>15</number_of_rows>
+      <local_columns>#xpointer(id("usi36"))</local_columns>
+    </submatrix>
+    <submatrix id="usi27">
+      <name>ProgUS</name>
+      <measurement>#xpointer(id("usi12"))</measurement>
+      <number_of_rows>15</number_of_rows>
+      <local_columns>#xpointer(id("usi37"))</local_columns>
+    </submatrix>
+    <submatrix id="usi28">
+      <name>MaxSteps</name>
+      <measurement>#xpointer(id("usi12"))</measurement>
+      <number_of_rows>2</number_of_rows>
+      <local_columns>#xpointer(id("usi38"))</local_columns>
+    </submatrix>
+    <submatrix id="usi29">
+      <name>VarIns</name>
+      <measurement>#xpointer(id("usi12"))</measurement>
+      <number_of_rows>2</number_of_rows>
+      <local_columns>#xpointer(id("usi39"))</local_columns>
+    </submatrix>
+    <submatrix id="usi30">
+      <name>VarInsDims</name>
+      <measurement>#xpointer(id("usi12"))</measurement>
+      <number_of_rows>2</number_of_rows>
+      <local_columns>#xpointer(id("usi40"))</local_columns>
+    </submatrix>
+    <submatrix id="usi31">
+      <name>VarInsMode</name>
+      <measurement>#xpointer(id("usi12"))</measurement>
+      <number_of_rows>2</number_of_rows>
+      <local_columns>#xpointer(id("usi41"))</local_columns>
+    </submatrix>
+    <submatrix id="usi32">
+      <name>VarInsLocs</name>
+      <measurement>#xpointer(id("usi12"))</measurement>
+      <number_of_rows>20</number_of_rows>
+      <local_columns>#xpointer(id("usi42"))</local_columns>
+    </submatrix>
+    <localcolumn id="usi33">
+      <name>ProgFlag</name>
+      <measurement_quantity>#xpointer(id("usi13"))</measurement_quantity>
+      <submatrix>#xpointer(id("usi23"))</submatrix>
+      <global_flag>15</global_flag>
+      <independent>0</independent>
+      <sequence_representation>explicit</sequence_representation>
+      <values>#xpointer(id("usi1"))</values>
+    </localcolumn>
+    <localcolumn id="usi34">
+      <name>ProgTime</name>
+      <measurement_quantity>#xpointer(id("usi14"))</measurement_quantity>
+      <submatrix>#xpointer(id("usi24"))</submatrix>
+      <global_flag>15</global_flag>
+      <independent>0</independent>
+      <sequence_representation>explicit</sequence_representation>
+      <values>#xpointer(id("usi2"))</values>
+    </localcolumn>
+    <localcolumn id="usi35">
+      <name>ProgInstr</name>
+      <measurement_quantity>#xpointer(id("usi15"))</measurement_quantity>
+      <submatrix>#xpointer(id("usi25"))</submatrix>
+      <global_flag>15</global_flag>
+      <independent>0</independent>
+      <sequence_representation>explicit</sequence_representation>
+      <values>#xpointer(id("usi3"))</values>
+    </localcolumn>
+    <localcolumn id="usi36">
+      <name>ProgID</name>
+      <measurement_quantity>#xpointer(id("usi16"))</measurement_quantity>
+      <submatrix>#xpointer(id("usi26"))</submatrix>
+      <global_flag>15</global_flag>
+      <independent>0</independent>
+      <sequence_representation>explicit</sequence_representation>
+      <values>#xpointer(id("usi4"))</values>
+    </localcolumn>
+    <localcolumn id="usi37">
+      <name>ProgUS</name>
+      <measurement_quantity>#xpointer(id("usi17"))</measurement_quantity>
+      <submatrix>#xpointer(id("usi27"))</submatrix>
+      <global_flag>15</global_flag>
+      <independent>0</independent>
+      <sequence_representation>explicit</sequence_representation>
+      <values>#xpointer(id("usi5"))</values>
+    </localcolumn>
+    <localcolumn id="usi38">
+      <name>MaxSteps</name>
+      <measurement_quantity>#xpointer(id("usi18"))</measurement_quantity>
+      <submatrix>#xpointer(id("usi28"))</submatrix>
+      <global_flag>15</global_flag>
+      <independent>0</independent>
+      <sequence_representation>explicit</sequence_representation>
+      <values>#xpointer(id("usi6"))</values>
+    </localcolumn>
+    <localcolumn id="usi39">
+      <name>VarIns</name>
+      <measurement_quantity>#xpointer(id("usi19"))</measurement_quantity>
+      <submatrix>#xpointer(id("usi29"))</submatrix>
+      <global_flag>15</global_flag>
+      <independent>0</independent>
+      <sequence_representation>explicit</sequence_representation>
+      <values>#xpointer(id("usi7"))</values>
+    </localcolumn>
+    <localcolumn id="usi40">
+      <name>VarInsDims</name>
+      <measurement_quantity>#xpointer(id("usi20"))</measurement_quantity>
+      <submatrix>#xpointer(id("usi30"))</submatrix>
+      <global_flag>15</global_flag>
+      <independent>0</independent>
+      <sequence_representation>explicit</sequence_representation>
+      <values>#xpointer(id("usi8"))</values>
+    </localcolumn>
+    <localcolumn id="usi41">
+      <name>VarInsMode</name>
+      <measurement_quantity>#xpointer(id("usi21"))</measurement_quantity>
+      <submatrix>#xpointer(id("usi31"))</submatrix>
+      <global_flag>15</global_flag>
+      <independent>0</independent>
+      <sequence_representation>explicit</sequence_representation>
+      <values>#xpointer(id("usi9"))</values>
+    </localcolumn>
+    <localcolumn id="usi42">
+      <name>VarInsLocs</name>
+      <measurement_quantity>#xpointer(id("usi22"))</measurement_quantity>
+      <submatrix>#xpointer(id("usi32"))</submatrix>
+      <global_flag>15</global_flag>
+      <independent>0</independent>
+      <sequence_representation>explicit</sequence_representation>
+      <values>#xpointer(id("usi10"))</values>
+    </localcolumn>
+  </usi:data>
+
+</usi:tdm>

@@ -1,0 +1,20 @@
+#ValidPulseProgram#
+NInstructions= 1
+NTransients= 1
+DelayTime= 0.000000
+TriggerTTL= 0
+
+NPoints= 5000
+SamplingRate= 10000.000000
+
+PhaseCycle= 0
+NumCycles= 1
+CycleInstr= 0
+CycleFreq= 60.000000
+
+Dimensions= 1 
+
+[Instructions]
+Instruction 0 0 0 0 0 1.000000 1000000.000000
+[EndInstructions]
+

@@ -1,0 +1,19 @@
+#BoardDefaults#
+NPoints= 10000
+SamplingRate= 10000.000000
+InputChannel= 0
+TriggerChannel= 0
+TriggerTTL= 23
+Path= c:\Documents?and?Settings\OmegaUser\My?Documents\Omega?Project\Programs\Magnetometer?Controller\Experiments\Alignment\
+Filename= Experiments
+LastProgram= 1
+LoadProgram= c:\Documents?and?Settings\OmegaUser\My?Documents\Omega?Project\Programs\Magnetometer?Controller\Programs\Test3.txt
+LastProgramBuffer= LastProgramBuffer.txt
+WriteToFile= 1
+OverWriteFile= 0
+SavedSession= 1
+RunContinuously= 0
+PhaseCycle= 0
+PhaseCycleInstr= 1
+NumCycles= 4
+DefaultsLocation= Defaults.txt
