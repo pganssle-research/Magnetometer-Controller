@@ -1,7 +1,6 @@
 [Workspace Header]
 Version = 900
-Pathname Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
-Pathname Line0002 = " Controller.cws"
+Pathname = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.cws"
 CVI Dir = "/c/program files (x86)/national instruments/cvi90"
 CVI Shared Dir = "/C/Program Files (x86)/National Instruments/Shared/CVI"
 CVI Pub Local Dir = "/C/ProgramData/National Instruments/CVI90"
@@ -52,21 +51,28 @@ Disk Date = 3306499200
 In Projects = "1,"
 
 [File 0002]
+<<<<<<< HEAD
 Path Line0001 = "/c/Program Files (x86)/National Instruments/CVI90/toolslib/custctrl/FileBrowser."
+=======
+Path Line0001 = "/c/program files (x86)/national instruments/cvi90/toolslib/custctrl/FileBrowser."
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 Path Line0002 = "fp"
 File Type = "Function Panel"
 Disk Date = 3306499200
 In Projects = "1,"
 
 [File 0003]
+<<<<<<< HEAD
 Path = "/c/Program Files (x86)/National Instruments/CVI90/toolslib/toolbox/msxmldom.fp"
+=======
+Path = "/c/program files (x86)/national instruments/cvi90/toolslib/toolbox/msxmldom.fp"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Function Panel"
 Disk Date = 3306499200
 In Projects = "1,"
 
 [File 0004]
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/LegacyFuncti"
-Path Line0002 = "ons2.c"
+Path = "/c/Users/Omega/Documents/Programming/MC20/LegacyFunctions2.c"
 File Type = "CSource"
 Disk Date = 3395755880
 In Projects = ""
@@ -76,19 +82,22 @@ Window Z-Order = 12
 Source Window State = "1,1671,1672,1671,5,5,5,0,0,118,0,0,0,0,0,44,2624,0,2630,86,600,991,1,0,"
 
 [File 0005]
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Se"
-Path Line0002 = "ssionSavingLib.c"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/SessionSavingLib.c"
 File Type = "CSource"
 Disk Date = 3411061162
 In Projects = "1,"
 Window Top = 62
 Window Left = 18
 Window Z-Order = 1
+<<<<<<< HEAD
 Source Window State = "0,143,143,143,18,22,22,0,3,192,65,96,0,143,18,1,673,0,920,20,519,1239,1,9958,"
+=======
+Source Window State Line0001 = "0,1963,1963,1963,50,51,51,0,3,192,65,1951,0,1963,50,1,673,0,920,20,519,1239,1,99"
+Source Window State Line0002 = "58,"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 
 [File 0006]
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Ma"
-Path Line0002 = "thParserLib.c"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/MathParserLib.c"
 File Type = "CSource"
 Disk Date = 3403106193
 In Projects = "1,"
@@ -99,7 +108,7 @@ Source Window State = "0,372,372,372,62,67,67,0,3,108,28,353,0,372,62,31,781,0,4
 Line Tags = "647,"
 
 [File 0007]
-Path = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/MC10.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/MC10.h"
 File Type = "Include"
 Disk Date = 3403124694
 In Projects = "1,"
@@ -110,6 +119,7 @@ Source Window State = "1,1,2,2,0,0,0,0,0,89,0,0,0,0,0,25,0,0,16,20,349,759,1,0,"
 
 [File 0008]
 Path = "/c/Program Files (x86)/National Instruments/CVI90/include/cvitdms.h"
+<<<<<<< HEAD
 File Type = "Include"
 Disk Date = 3306499200
 In Projects = ""
@@ -142,11 +152,14 @@ Source Window State = "1,1,3,3,0,23,23,0,0,104,0,0,0,0,0,63,0,0,1,0,843,876,1,0,
 
 [File 0011]
 Path = "/c/Program Files (x86)/National Instruments/CVI90/toolslib/toolbox/msxmldom.h"
+=======
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Include"
 Disk Date = 3306499200
 In Projects = ""
 Window Top = 92
 Window Left = 42
+<<<<<<< HEAD
 Window Z-Order = 8
 Source Window State = "1,0,0,0,0,0,0,0,0,81,0,0,0,0,0,25,0,0,4,1,349,695,1,0,"
 
@@ -200,20 +213,110 @@ Path Line0002 = "taLib.h"
 File Type = "Include"
 Disk Date = 3403124539
 In Projects = "1,"
+=======
+Window Z-Order = 10
+Source Window State = "1,163,163,163,12,25,25,0,3,81,0,0,0,0,0,25,151,0,163,12,349,695,1,0,"
+
+[File 0009]
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/DataLib.c"
+File Type = "CSource"
+Disk Date = 3411057441
+In Projects = "1,"
+Window Top = 32
+Window Left = 10
+Window Z-Order = 2
+Source Window State = "0,105,105,105,0,13,13,0,0,81,24,227,0,231,21,1,2813,0,2828,36,349,695,1,9958,"
+
+[File 0010]
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/MCUserDefinedFunctions.h"
+File Type = "Include"
+Disk Date = 3395153332
+In Projects = "1,"
+Window Top = 45
+Window Left = 363
+Window Z-Order = 9
+Source Window State = "1,1,3,3,0,23,23,0,0,104,0,0,0,0,0,63,0,0,1,0,843,876,1,0,"
+
+[File 0011]
+Path = "/c/Program Files (x86)/National Instruments/CVI90/toolslib/toolbox/msxmldom.h"
+File Type = "Include"
+Disk Date = 3306499200
+In Projects = ""
+Window Top = 92
+Window Left = 42
+Window Z-Order = 8
+Source Window State = "1,0,0,0,0,0,0,0,0,81,0,0,0,0,0,25,0,0,4,1,349,695,1,0,"
+
+[File 0012]
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/PulseProgramLib.c"
+File Type = "CSource"
+Disk Date = 3411057742
+In Projects = "1,"
+Window Top = 32
+Window Left = 10
+Window Z-Order = 5
+Source Window State Line0001 = "0,1468,1468,1468,4,17,17,0,0,81,13,1465,0,1474,11,12,5735,0,5740,30,349,695,1,54"
+Source Window State Line0002 = "01,"
+Line Tags = "2371,"
+
+[File 0013]
+Path = "/c/Program Files (x86)/National Instruments/CVI90/include/userint.h"
+File Type = "Include"
+Disk Date = 3306499200
+In Projects = ""
+Window Top = 32
+Window Left = 10
+Window Z-Order = 7
+Source Window State = "1,2075,2075,2075,12,22,22,0,3,80,0,0,0,0,0,25,2046,0,2075,12,349,687,1,0,"
+
+[File 0014]
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/General.c"
+File Type = "CSource"
+Disk Date = 3411056662
+In Projects = "1,"
+Window Top = 62
+Window Left = 26
+Window Z-Order = 3
+Source Window State = "1,104,104,104,4,23,23,0,0,80,0,10,0,10,0,25,107,0,135,8,349,687,1,0,"
+
+[File 0015]
+Path = "/c/SpinCore/SpinAPI64/spinapi_source/spinapi.h"
+File Type = "Include"
+Disk Date = 3402600642
+In Projects = "1,"
+Window Top = 139
+Window Left = 22
+Window Z-Order = 4
+Source Window State = "1,503,503,503,17,31,31,0,3,81,0,0,0,0,0,25,491,0,503,17,349,695,1,0,"
+
+[File 0016]
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/DataLib.h"
+File Type = "Include"
+Disk Date = 3403124539
+In Projects = "1,"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 Window Top = 171
 Window Left = 2289
 Window Released = True
 Source Window State = "1,1,15,1,0,0,0,0,3,0,0,88,0,88,0,0,0,0,15,0,430,576,0,0,"
 
 [File 0017]
+<<<<<<< HEAD
 Path = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Defaults.txt"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/Defaults.txt"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Unknown"
 Disk Date = 0
 In Projects = "1,"
 
 [File 0018]
+<<<<<<< HEAD
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Ge"
 Path Line0002 = "neral.h"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/General.h"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Include"
 Disk Date = 3403127709
 In Projects = "1,"
@@ -223,15 +326,23 @@ Window Released = True
 Source Window State = "1,15,15,15,32,38,38,0,0,0,0,18,0,18,0,0,0,0,15,43,397,847,0,0,"
 
 [File 0019]
+<<<<<<< HEAD
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/LastProgramB"
 Path Line0002 = "uffer.txt"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/LastProgramBuffer.txt"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Unknown"
 Disk Date = 0
 In Projects = "1,"
 
 [File 0020]
+<<<<<<< HEAD
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
 Path Line0002 = " Controller.c"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.c"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "CSource"
 Disk Date = 3401907507
 In Projects = "1,"
@@ -241,8 +352,12 @@ Window Released = True
 Source Window State = "0,7021,7021,7021,16,40,40,0,0,0,0,7019,0,7062,79,0,132,0,132,84,930,1122,0,9952,"
 
 [File 0021]
+<<<<<<< HEAD
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
 Path Line0002 = " Controller.h"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.h"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Include"
 Disk Date = 3407175147
 In Projects = "1,"
@@ -252,8 +367,12 @@ Window Released = True
 Source Window State = "1,235,235,235,9,29,29,0,3,0,0,111,0,0,0,0,211,0,235,9,714,855,0,10,"
 
 [File 0022]
+<<<<<<< HEAD
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
 Path Line0002 = " Controller.uir"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.uir"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "User Interface Resource"
 Disk Date = 3407175147
 In Projects = "1,"
@@ -264,8 +383,12 @@ Window Width = 1948
 Window Released = True
 
 [File 0023]
+<<<<<<< HEAD
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Ma"
 Path Line0002 = "thParserLib.h"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/MathParserLib.h"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Include"
 Disk Date = 3394196554
 In Projects = "1,"
@@ -274,6 +397,7 @@ Window Left = 459
 Source Window State = "1,19,19,19,70,71,70,0,0,0,0,0,0,0,0,0,11,0,34,18,349,719,1,0,"
 
 [File 0024]
+<<<<<<< HEAD
 Path = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/MC.h"
 File Type = "Include"
 Disk Date = 3393964258
@@ -295,6 +419,28 @@ Source Window State = "1,779,779,779,12,19,19,0,0,0,0,362,0,372,30,0,191,0,210,1
 [File 0026]
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Pu"
 Path Line0002 = "lseProgramLib.h"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/MC.h"
+File Type = "Include"
+Disk Date = 3393964258
+In Projects = "1,"
+Window Top = 76
+Window Left = 46
+Source Window State = "1,366,367,367,0,39,39,0,0,0,0,225,0,0,0,0,477,0,235,2,803,978,1,12,"
+
+[File 0025]
+Path = "/c/Users/Omega/Documents/Programming/MC20/MC10.c"
+File Type = "CSource"
+Disk Date = 3411054344
+In Projects = "1,"
+Window Top = 183
+Window Left = 418
+Window Released = True
+Source Window State = "1,779,779,779,12,19,19,0,0,124,0,362,0,372,30,39,191,0,210,1,585,1033,0,0,"
+
+[File 0026]
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/PulseProgramLib.h"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Include"
 Disk Date = 3403287837
 In Projects = "1,"
@@ -304,8 +450,12 @@ Window Released = True
 Source Window State = "1,89,89,89,0,35,35,0,0,0,0,3,0,0,0,0,49,0,89,0,660,850,0,0,"
 
 [File 0027]
+<<<<<<< HEAD
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Pu"
 Path Line0002 = "lseProgramTypes.h"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/PulseProgramTypes.h"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Include"
 Disk Date = 3402513529
 In Projects = "1,"
@@ -315,8 +465,12 @@ Window Released = True
 Source Window State = "1,26,82,26,8,29,8,0,0,0,0,10,0,85,0,0,13,0,42,52,442,872,0,90,"
 
 [File 0028]
+<<<<<<< HEAD
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/SavedSession"
 Path Line0002 = "Buffer.txt"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/SavedSessionBuffer.txt"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Unknown"
 Disk Date = 0
 In Projects = "1,"
@@ -324,8 +478,12 @@ Window Top = 32
 Window Left = 6
 
 [File 0029]
+<<<<<<< HEAD
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Sa"
 Path Line0002 = "veSessionLib.h"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/SaveSessionLib.h"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Include"
 Disk Date = 3403035781
 In Projects = "1,"
@@ -347,8 +505,12 @@ Disk Date = 3402600652
 In Projects = "1,"
 
 [File 0032]
+<<<<<<< HEAD
 Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/UI"
 Path Line0002 = "Controls.h"
+=======
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/UIControls.h"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 File Type = "Include"
 Disk Date = 3403127729
 In Projects = "1,"
@@ -387,7 +549,11 @@ Always show confirmation dialog = True
 External Process Path = ""
 
 [DLLs Used By Executable 0001]
+<<<<<<< HEAD
 DLL 0001 = "/c/Windows/System32/spinapi64.dll"
+=======
+DLL 0001 = "/C/Windows/system32/spinapi64.dll"
+>>>>>>> 9dc079fc3b841f9bfecb547ffc0d98206f8c1296
 
 [Command Line Args 0001]
 Command Line Args = ""
@@ -395,7 +561,6 @@ Working Directory = ""
 
 [Distributions]
 Active Index = 1
-AbsCDSPath 0001 Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
-AbsCDSPath 0001 Line0002 = " Controller.cds"
+AbsCDSPath 0001 = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.cds"
 RelCDSPath 0001 = "Magnetometer Controller.cds"
 
