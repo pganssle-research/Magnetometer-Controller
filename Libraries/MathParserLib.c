@@ -175,6 +175,7 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 		expr_out = expr_buff; // Point the main pointer at the new one.
 		
 		if(err_val[0] != 0) {
+			free(expr_out);
 			return NULL; // Error.
 		}
 	}
@@ -203,10 +204,12 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 					expr_buff2 = replace_chars(expr_out, expr_buff, ind, offset+ind+1, &e_val); // Replace the function in parens with whatever it evaluates to, inclusive of the parens.
 					
 					free(expr_buff);
+					expr_buff = NULL;
 				}
 			
 				if(e_val != 0) {
 					free(expr_buff2);
+					expr_buff2 = NULL;
 					err_val[0] = 2; // String replacement error.
 				}
 
@@ -222,6 +225,7 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 		
 			free(substring); // Free the substring.
 			free(expr_out);
+			expr_out = NULL;
 		
 			if(err_val[0] != 0) {
 				return NULL;
@@ -272,6 +276,8 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 			double val = parse_math(expr_buff, NULL, err_val, n_pos); // Parse what we just found.
 			
 			free(expr_buff); // Not needed anymore.
+			expr_buff = NULL;
+			
 			if(err_val[0] != 0) { // Clean up
 				free(expr_out);
 				return NULL;
@@ -287,10 +293,12 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 			
 			// Now replace the expression with the inverted boolean value.
 			int e_val = 0; // Error value.
-			expr_buff2 = replace_chars(expr_out, expr_buff, (pos-expr_out), (pos-expr_out)+sublen-1, &e_val);
+			expr_buff2 = replace_chars(expr_out, expr_buff, (pos-expr_out-1), (pos-expr_out)+sublen-1, &e_val);
 			
 			free(expr_out);
 			free(expr_buff);
+			expr_out = NULL;
+			expr_buff = NULL;
 			
 			if(e_val > 0) {
 				err_val[0] = 2; // String replacement error.
@@ -397,6 +405,7 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 					vals[j] = parse_math(expr_buff, NULL, err_val, n_pos); // Parse the substring.
 			
 					free(expr_buff); // Free the old buffer.
+					expr_buff = NULL;
 			
 					if(err_val[0] != 0) { // Error checking.
 						free(vals);
@@ -409,6 +418,7 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 			
 				// Now we just need op_ar and the values.
 				free(expr_out);
+				expr_out = NULL;
 			
 				// Initialize the boolean list
 				int bool = 1;
@@ -471,11 +481,11 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 	// Order of operations: Powers, multiplication/division/modulo, addition/subtraction, bitwise
 	for(j = 0; j<4; j++) {
 		if(s_pos <= ++n_pos) {
-			char *dels = malloc(4);
+			char *dels = NULL;
 			switch(j) {
 				case(0):
 					dels = "&|"; // Bitwise AND and OR. OK to do just this since we are past the boolean evaluation stage.
-					break;
+					 break;
 				case(1):
 					dels = "+-";
 					break;
@@ -485,6 +495,11 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 				case(3):
 					dels = "^";
 					break;
+			}
+			
+			if(dels == NULL) {
+				free(expr_out);
+				return 6;
 			}
 			
 			char *tok = strpbrk(expr_out, dels), delimiter;
@@ -499,7 +514,8 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 				double val = parse_math(expr_buff, c, err_val, n_pos);
 	
 				free(expr_buff); // Don't need this anymore.
-	
+				expr_buff = NULL;
+				
 				if(err_val[0] != 0) {
 					free(expr_out);
 					return NULL;
@@ -508,7 +524,8 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 				double v2 = parse_math(tok+1, c, err_val, n_pos); //Now parse everything after the token.
 		
 				free(expr_out); // Don't need this either, since tok isn't used anymore.
-		
+				expr_out = NULL;
+				
 				if(err_val[0] != 0) {
 					return NULL;
 				}
@@ -548,7 +565,11 @@ double parse_math(char *expr, constants *c, int *err_val, int s_pos) {
 	
 	// At this point it must just be a number that was passed to this
 	// There's not a good way of error checking this.
-	return atof(expr_out);
+	double rv = atof(expr_out);
+	free(expr_out);
+	expr_out = NULL;
+	
+	return rv;
 }
 
 int find_paren_contents(char *string, char *outstring) {
@@ -625,7 +646,8 @@ char *eval_funcs_and_constants(char *expr, constants *c, int *err_val, int n_pos
 			while(pos != NULL) {
 				expr_buff = replace_chars(expr_out, vals, (pos-expr_out), (pos-expr_out)+n_len-1, &e_val); // Replace the appropriate section.
 				free(expr_out); // Free the original memory.
-
+				expr_out = NULL;
+				
 				if(e_val > 0) {
 					free(expr_buff);
 					free(vals);
@@ -679,7 +701,7 @@ char *eval_funcs_and_constants(char *expr, constants *c, int *err_val, int n_pos
 					
 					if(err_val[0] == 0) {
 						free(expr_buff); // Free this guy.
-						
+
 						expr_buff = malloc(400); // Going to print our double to this.
 						sprintf(expr_buff, "%lf", val);
 						
@@ -689,15 +711,19 @@ char *eval_funcs_and_constants(char *expr, constants *c, int *err_val, int n_pos
 						if(e_val != 0) {
 							err_val[0] = 2; // String replacement error
 							free(expr_buff2); // Avoid memory leaks.
+							expr_buff2 = NULL;
 						}
 					}
 				}
 
 				// We've moved the pointers, so to avoid memory leaks, free expr_buff.
 				free(expr_buff);
-
+				expr_buff = NULL;
+				
 			} 
 			free(substring);
+			substring = NULL;
+			
 			if(offset < 0) {
 				err_val[0] = 1; // Parenthesis mismatch.
 			} else if(offset == 0) {
@@ -707,12 +733,14 @@ char *eval_funcs_and_constants(char *expr, constants *c, int *err_val, int n_pos
 				{
 					err_val[0] = 2; // String replacement error.
 					free(expr_buff2);
+					expr_buff2 = NULL;
 				}
 			}
 
 
 			free(expr_out); // Either there's an error or this pointer is going to be moved. Either way, free what it's pointing at now.
-
+			expr_out = NULL;
+			
 			if(err_val[0] != 0)
 				return NULL;
 
@@ -748,7 +776,6 @@ void add_constant(constants *c, char *name, int type, void *val) {
 	char *n = malloc(n_l+1);
 	strcpy(n, name);
 	c->c_names = realloc(c->c_names, n_el*sizeof(char*)); // Allocate one more for a pointer to a name.
-	c->c_names[n_el-1] = malloc(n_l+1); // Allocate space for the name
 	c->c_types = realloc(c->c_types, n_el*sizeof(int));  // Allocate space for one more type
 	c->c_locs = realloc(c->c_locs, sizeof(int)*n_el--); // Allocate space for the locations, decrement n_el for later use
 	
@@ -883,13 +910,15 @@ void free_constants(constants *c) {
 	if(c == NULL)
 		return;
 	
-	free(c->c_locs);
-	free(c->c_types);
-	free(c->c_ints);
-	free(c->c_doubles);
+	if(c->c_locs != NULL) { free(c->c_locs); }
+	if(c->c_types != NULL) { free(c->c_types); }
+	if(c->c_ints != NULL) { free(c->c_ints); }
+	if(c->c_doubles != NULL) { free(c->c_doubles); }
 
-	for(int i = 0; i<c->num; i++) {
-		free(c->c_names[i]);
+	if(c->c_names != NULL) { 
+		for(int i = 0; i<c->num; i++)
+			free(c->c_names[i]);
+		free(c->c_names);
 	}
 	
 	free(c);
@@ -1003,6 +1032,9 @@ int get_parse_error(int err_code, char *err_message) {
 			break;
 		case 5:
 			err_buff = "No return value";
+			break;
+		case 6:
+			err_buff = "Internal problem with mathematical operation.";
 			break;
 		case 7:
 			err_buff = "Malformed input string.";

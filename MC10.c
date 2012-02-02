@@ -144,6 +144,7 @@ Descrip	: Use the netCDF serialization format to save user preferences as well
 #include <Magnetometer Controller.h>	// Then the libraries specific to
 #include <PulseProgramTypes.h>			// this software.
 #include <cvitdms.h>
+#include <cviddc.h>
 #include <UIControls.h>
 #include <MathParserLib.h>
 #include <MCUserDefinedFunctions.h>
@@ -151,6 +152,7 @@ Descrip	: Use the netCDF serialization format to save user preferences as well
 #include <DataLib.h>
 #include <PulseProgramLib.h>
 #include <SaveSessionLib.h>
+#include <General.h>
 
 static TaskHandle acquireSignal, counterTask;    
 extern PVOID RtlSecureZeroMemory(PVOID ptr, SIZE_T cnt);
@@ -159,10 +161,12 @@ extern PVOID RtlSecureZeroMemory(PVOID ptr, SIZE_T cnt);
 DefineThreadSafeScalarVar(int, QuitUpdateStatus, 0); 
 DefineThreadSafeScalarVar(int, QuitIdle, 0);
 DefineThreadSafeScalarVar(int, DoubleQuitIdle, 0);
-DefineThreadSafeScalarVar(int, Status, 0);
+DefineThreadSafeScalarVar(int, Status, PB_STOPPED);
+DefineThreadSafeScalarVar(int, Running, 0);
+DefineThreadSafeScalarVar(int, Initialized, 0);
 
-int update_thread = NULL, idle_thread = NULL;	// Threads
-int lock_pb, lock_pp, lock_DAQ, lock_plot; 		// Thread locks
+int lock_pb, lock_DAQ, lock_tdm; 		// Thread locks
+int lock_uidc, lock_uipc, lock_ce, lock_af; 
 
 //////////////////////////////////////////////////////
 //                                                  //
@@ -174,17 +178,28 @@ int main (int argc, char *argv[])
 {
 	//Generate locks, thread safe variables
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_pb);
-	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_pp);
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_DAQ);
-	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_plot);
+	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_tdm);
+	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_uidc);
+	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_uipc);
+	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_ce);
+	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_af);
+	
 	
 	InitializeQuitUpdateStatus();
 	InitializeQuitIdle();
 	InitializeDoubleQuitIdle();
 	InitializeStatus();
-	idle_thread = NULL;
-	update_thread = NULL;
-
+	InitializeInitialized();
+	InitializeRunning();
+	
+	SetQuitUpdateStatus(0);
+	SetQuitIdle(0);
+	SetDoubleQuitIdle(0);
+	SetStatus(PB_STOPPED);
+	SetRunning(0);
+	SetInitialized(0);
+	
 	if (InitCVIRTE (0, argv, 0) == 0)
 		return -1;	/* out of memory */
 	
@@ -193,19 +208,23 @@ int main (int argc, char *argv[])
 	
 	if(load_ui(uifname)) // This function loads the UI and creates the structs.
 		return -1;
-
-	RunUserInterface ();
+ RunUserInterface ();
 	DiscardPanel (mc.mp);
 	
 	//Discard Locks
 	CmtDiscardLock(lock_pb);
-	CmtDiscardLock(lock_pp);
 	CmtDiscardLock(lock_DAQ);
-	CmtDiscardLock(lock_plot);
+	CmtDiscardLock(lock_tdm);
+	CmtDiscardLock(lock_uidc);
+	CmtDiscardLock(lock_uipc);
+	CmtDiscardLock(lock_ce);
+	CmtDiscardLock(lock_af);
 	UninitializeQuitIdle();
 	UninitializeDoubleQuitIdle();
 	UninitializeStatus();
 	UninitializeQuitUpdateStatus();
+	UninitializeInitialized();
+	UninitializeRunning();
 
 	return 0;
 }
@@ -225,6 +244,17 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			// This is the button which starts the main program, or if the pulseblaster
 			// is waiting for a trigger, it sends a software trigger.
 			
+			// Send a software trigger if it's waiting for one.
+			int status = update_status(0);
+			if(status & PB_WAITING) {
+				pb_start_safe(1);
+				break;
+			}
+			
+			// Don't do anything if we're running.
+			if(status & PB_RUNNING || GetRunning())
+				break;
+			
 			// Get the filename and description.
 			int len, len2;
 			char *path = NULL, *fname = NULL, *desc = NULL;
@@ -243,7 +273,7 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			// Now the current filename.
 			fname = malloc(len2+5);
 			GetCtrlVal(mc.basefname[1], mc.basefname[0], fname);
-			if(get_current_fname(path, fname) != 1)
+			if(get_current_fname(path, fname, 1) != 1)
 				goto error;
 			
 			SetCtrlVal(mc.cdfname[1], mc.cdfname[0], fname);
@@ -251,9 +281,10 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 				sprintf(path, "%s\\", path);
 			}
 			
-			sprintf(path, "%s%s.tdms", path, fname);	// Update the path with the full filename
+			sprintf(path, "%s%s.tdm", path, fname);	// Update the path with the full filename
 			
 			// Copy these into the current experiment structure
+			CmtGetLock(lock_ce);
 			if(ce.path != NULL)
 				free(ce.path);
 			
@@ -278,6 +309,7 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			
 			ce.desc = malloc(strlen(desc)+1);
 			strcpy(ce.desc, desc);
+			CmtReleaseLock(lock_ce);
 			
 			// Start an asynchronous thread to run the experiment.
 			CmtScheduleThreadPoolFunctionAdv(DEFAULT_THREAD_POOL_HANDLE, IdleAndGetData, NULL, 0, discardIdleAndGetData, EVENT_TP_THREAD_FUNCTION_END, NULL, RUN_IN_SCHEDULED_THREAD, NULL); 
@@ -304,6 +336,23 @@ int CVICALLBACK StopProgram (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			// This is for shutting down the execution of the program. It does this in a 
+			// thread-safe manner by changing the thread-safe variables QuitIdle, 
+			// DoubleQuitIdle and QuitUpdateStatus. QuitIdle triggers at the end of the
+			// current acquisition. DoubleQuitIdle triggers during acquisition.
+			
+			if(GetQuitIdle())
+				SetDoubleQuitIdle(1);
+			else
+				SetQuitIdle(1);
+			
+			SetQuitUpdateStatus(1);
+			
+			if(!GetInitialized())
+				pb_init_safe(1);
+			
+			pb_stop_safe(1);
+		
 			break;
 	}
 	return 0;
@@ -315,6 +364,21 @@ int CVICALLBACK QuitCallback (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			int ldm;
+			GetCtrlVal(mc.ldatamode[1], mc.ldatamode[0], &ldm);
+			
+			// If someone edited the description, update it before you exit.
+			if(ldm) {
+				int len;
+				GetCtrlValStringLength(mc.datafbox[1], mc.datafbox[0], &len);
+				char *path = malloc(len+1);
+				GetCtrlVal(mc.datafbox[1], mc.datafbox[0], path);
+				
+				update_file_info(path);
+				
+				free(path);
+			}
+			
 			save_session(NULL);	// Save the session before we leave.
 			QuitUserInterface(0); 
 			break;
@@ -357,7 +421,7 @@ void CVICALLBACK LoadConfigurationFromFile (int menuBar, int menuItem, void *cal
 		int panel)
 {
 	char *filename = malloc(MAX_PATHNAME_LEN+MAX_FILENAME_LEN+1);
-	int rv = FileSelectPopup("", ".nc", ".nc", "Load Configuration From File", VAL_LOAD_BUTTON, 0, 0, 1, 1, filename);
+	int rv = FileSelectPopup("", ".xml", ".xml", "Load Configuration From File", VAL_LOAD_BUTTON, 0, 1, 1, 1, filename);
 	if(rv == 0)
 		return;
 	
@@ -365,7 +429,7 @@ void CVICALLBACK LoadConfigurationFromFile (int menuBar, int menuItem, void *cal
 	free(filename);
 
 	if(ev)
-		display_tdms_error(ev);
+		display_ddc_error(ev);
 	
 }
 
@@ -375,7 +439,149 @@ int CVICALLBACK DirectorySelect (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			char *path = malloc(MAX_PATHNAME_LEN+1); 
+			int rv = DirSelectPopup(uidc.dlpath, "Select new save dir", 1, 1, path);
+			if(rv != VAL_NO_DIRECTORY_SELECTED)
+				select_directory(path);
+			
+			free(path);
+			
+			break;
+	}
+	return 0;
+}
 
+int CVICALLBACK ChangeDataBox (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			select_data_item();
+			break;
+		case EVENT_VAL_CHANGED:
+			int len, ldm;
+			GetCtrlVal(mc.ldatamode[1], mc.ldatamode[0], &ldm);
+			
+			GetCtrlValStringLength(panel, control, &len);
+			char *path = malloc(len+1);
+			GetCtrlVal(panel, control, path);
+			
+			// Grab the old path.
+			GetCtrlAttribute(panel, control, ATTR_DFLT_VALUE_LENGTH, &len);
+			char *old_path = (len >= 1)?malloc(len+1):NULL;
+			if(old_path != NULL)
+				GetCtrlAttribute(panel, control, ATTR_DFLT_VALUE, old_path);
+			
+			if(ldm) 
+				load_file_info(path, old_path);
+		 
+			// Save the new position if it's a file.
+			int ind, icon;
+			GetCtrlIndex(panel, control, &ind);
+			GetListItemImage(panel, control, ind, &icon);
+			if(icon != VAL_FOLDER) 
+				SetCtrlAttribute(mc.datafbox[1], mc.datafbox[0], ATTR_DFLT_VALUE, path);
+			else
+				SetCtrlAttribute(mc.datafbox[1], mc.datafbox[1], ATTR_DFLT_VALUE, "");
+			
+			if(path != NULL)
+				free(path);
+			
+			if(old_path != NULL)
+				free(old_path);
+		
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeLoadInfoMode (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			// Turning this on loads the data info that is currently selected.
+			// Turning this off moves us to the "next experiment" mode.
+			int mode;
+			GetCtrlVal(panel, control, &mode);
+			
+			if(mode) {
+				int len;
+				char *name = NULL;
+				
+				GetCtrlValStringLength(mc.datafbox[1], mc.datafbox[0], &len);
+				name = malloc(len+1);
+				GetCtrlVal(mc.datafbox[1], mc.datafbox[0], name);
+				
+				load_file_info(name, NULL); // Nowhere to save the old description.
+				
+				SetActiveCtrl(mc.datafbox[1], mc.datafbox[0]);
+				
+				free(name);
+			} else {
+				int len;
+				char *name, *path;
+				
+				GetCtrlValStringLength(mc.basefname[1], mc.basefname[0], &len);
+				name = malloc(len+5);
+				GetCtrlVal(mc.basefname[1], mc.basefname[0], name);
+				
+				GetCtrlValStringLength(mc.path[1], mc.path[0], &len);
+				path = malloc(len+strlen(name)+10);
+				GetCtrlVal(mc.path[1], mc.path[0], path); 
+				
+				get_current_fname(path, name, 1);
+				
+				SetCtrlVal(mc.cdfname[1], mc.cdfname[0], name);
+				
+				free(name);
+				free(path);
+			}
+				
+				
+				
+			break;
+	}
+	return 0;
+}
+
+
+int CVICALLBACK PopoutTab (int panel, int control, int event, void *callbackData, int eventData1, int eventData2)
+{
+	switch(event) {
+		case EVENT_RIGHT_CLICK:
+			/*int top, left;
+			int old_pan = pc.PPConfigPan;
+			pc.PPConfigPan = DuplicatePanel(0, pc.PPConfigPan, "Pulse Program Config", 250, 150);
+			
+			GetPanelAttribute(pc.PPConfigCPan, ATTR_TOP, &top);
+			GetPanelAttribute(pc.PPConfigCPan, ATTR_LEFT, &left);
+			
+			pc.PPConfigCPan = DuplicatePanel(pc.PPConfigPan, pc.PPConfigCPan, "", top, left);
+			
+			for(int i = 0; i < uipc.max_ni; i++) {
+				GetPanelAttribute(pc.cinst[i], ATTR_TOP, &top);
+				GetPanelAttribute(pc.cinst[i], ATTR_LEFT, &left);
+			
+				pc.cinst[i] = DuplicatePanel(pc.PPConfigCPan, pc.cinst[i], "", top, left);
+				if(i < uipc.ni)
+					DisplayPanel(pc.cinst[i]);
+			}
+			
+			DeleteTabPage(mc.mtabs[1], mc.mtabs[0], 3, 1);
+
+			int quit = NewCtrl(pc.PPConfigPan, CTRL_SQUARE_PUSH_BUTTON, "Quit", 0, 0);
+			SetCtrlAttribute(pc.PPConfigPan, quit, ATTR_VISIBLE, 0);
+			InstallCtrlCallback(pc.PPConfigPan, quit, ppconfig_popin, NULL);
+			
+			SetPanelAttribute(pc.PPConfigPan, ATTR_TITLEBAR_VISIBLE, 1);
+			SetPanelAttribute(pc.PPConfigPan, ATTR_CLOSE_CTRL, quit);
+			
+			DisplayPanel(pc.PPConfigCPan);
+			DisplayPanel(pc.PPConfigPan);
+			*/	
 			break;
 	}
 	return 0;
@@ -476,9 +682,8 @@ int CVICALLBACK ChangeInstDelay (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-			double val;
-			int units;
-
+			change_instr_delay(panel);
+			
 			break;
 	}
 	return 0;
@@ -508,7 +713,7 @@ int CVICALLBACK ChangeTUnits (int panel, int control, int event,
 			int num;
 			GetCtrlVal(panel, pc.ins_num, &num);
 			
-			//change_instr_units(panel);
+			change_instr_units(panel);
 			break;
 	}
 	return 0;
@@ -520,7 +725,7 @@ int CVICALLBACK InstrDataCallback (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+			change_instr_data(panel);
 			break;
 	}
 	return 0;
@@ -621,7 +826,10 @@ int CVICALLBACK ChangeInitOrFinal (int panel, int control, int event,
 			int num;
 			GetCtrlVal(panel, pc.cins_num, &num);
 			
-			update_nd_increment(num, MC_INC);
+			if(control == pc.del_fin || control == pc.dat_fin)
+				update_nd_increment(num, MC_INC);
+			else
+				update_nd_increment(num, MC_FINAL);
 			break;
 	}
 	return 0;
@@ -1131,8 +1339,10 @@ int CVICALLBACK ChangeNDTimeUnits (int panel, int control, int event,
 			val *= pow(1000, old_units-new_units);
 			
 			SetCtrlVal(panel, time_ctrl, val);
-			SetCtrlAttribute(panel, time_ctrl, ATTR_PRECISION, get_precision(val, 6));
+			SetCtrlAttribute(panel, time_ctrl, ATTR_PRECISION, get_precision(val, 5));
 			SetCtrlAttribute(panel, control, ATTR_DFLT_INDEX, new_units);
+			SetCtrlAttribute(panel, time_ctrl, ATTR_PRECISION, get_precision(val, MCUI_DEL_PREC));
+
 			break;
 	}
 	return 0;
@@ -1307,6 +1517,18 @@ int CVICALLBACK ChangeDevice (int panel, int control, int event, void *callbackD
 	return 0;
 }
 
+int CVICALLBACK ChangePBDevice (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
 // Channel range setup
 int CVICALLBACK ChangeCurrentChan (int panel, int control, int event, void *callbackData, int eventData1, int eventData2) {
 	switch (event)
@@ -1376,7 +1598,7 @@ void CVICALLBACK BrokenTTLsMenu (int menuBar, int menuItem, void *callbackData,
 	free(TTLs);
 	
 	// Dim the menu bar until we destroy the panel later.
-	SetMenuBarAttribute(mc.mainmenu, MainMenu_SetupMenu_BrokenTTLsMenu, ATTR_DIMMED, 1);
+	SetMenuBarAttribute(mc.mainmenu, mc.sbttls, ATTR_DIMMED, 1);
 }
 
 void CVICALLBACK ChangeNDPointMenu (int menuBar, int menuItem, void *callbackData,
@@ -1407,7 +1629,7 @@ int CVICALLBACK BrokenTTLsExit (int panel, int control, int event, void *callbac
 			DiscardPanel(panel);
 			
 			// Un-dim the menu bar item
-			SetMenuBarAttribute(mc.mainmenu, MainMenu_SetupMenu_BrokenTTLsMenu, ATTR_DIMMED, 0);
+			SetMenuBarAttribute(mc.mainmenu, mc.sbttls, ATTR_DIMMED, 0);
 			break;
 	}
 	return 0;
@@ -1439,9 +1661,13 @@ int CVICALLBACK ToggleBrokenTTL (int panel, int control, int event, void *callba
 					free(resp);
 				}
 				
+				CmtGetLock(lock_uipc);
 				uipc.broken_ttls = uipc.broken_ttls|flag;	// Add the flag
+				CmtReleaseLock(lock_uipc);
 			} else {
+				CmtGetLock(lock_uipc);
 				uipc.broken_ttls = uipc.broken_ttls-(uipc.broken_ttls&flag);	// Remove the flag
+				CmtReleaseLock(lock_uipc);
 			}
 				
 			setup_broken_ttls(); // Update the controls.
@@ -1461,7 +1687,9 @@ int CVICALLBACK BrokenTTLsClearAll (int panel, int control, int event, void *cal
 			
 			free(TTLs);
 			
+			CmtGetLock(lock_uipc);
 			uipc.broken_ttls = 0;
+			CmtReleaseLock(lock_uipc);
 			setup_broken_ttls();
 			break;
 	}
@@ -1581,33 +1809,13 @@ void CVICALLBACK LoadDataMenu (int menuBar, int menuItem, void *callbackData,
 }
 
 /********* Acquisition Space Navigation ***********/
-int CVICALLBACK ChangeBinding (int panel, int control, int event,
-		void *callbackData, int eventData1, int eventData2)
-{
-	switch (event)
-	{
-		case EVENT_COMMIT:
-			// This is a synchroinzed binding, so if it's true for one, it needs to be
-			// true also for the other one.
-			int bind;
-			GetCtrlVal(panel, control, &bind);
-			if(panel == dc.cloc[0])
-				SetCtrlVal(dc.cloc[1], control, bind);
-			else if(panel == dc.cloc[1])
-				SetCtrlVal(dc.cloc[0], control, bind);
-			
-			break;
-	}
-	return 0;
-}
-
 int CVICALLBACK DatChangeIDPos (int panel, int control, int event,
 		void *callbackData, int eventData1, int eventData2)
 {
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+				set_data_from_nav(panel);
 			break;
 	}
 	return 0;
@@ -1619,7 +1827,9 @@ int CVICALLBACK ChangeViewingTransient (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+			
+			set_data_from_nav(panel);
+			
 			break;
 	}
 	return 0;
@@ -1627,7 +1837,28 @@ int CVICALLBACK ChangeViewingTransient (int panel, int control, int event,
 
 void CVICALLBACK ChangeTransientView (int menuBar, int menuItem, void *callbackData,
 		int panel)
-{
+{   
+	// This is the callback for when you switch between the various transient views.
+	// The mechanism is that when the callbacks are initialized, the callbackData for
+	// each one is installed to indicate what uidc.disp_update should be. Casting
+	// callbackData to an int returns this value.
+	// 0 = Show average
+	// 1 = Latest transient
+	// 2 = No change
+	
+	int new, old = mc.vtviewopts[uidc.disp_update];
+	
+	CmtGetLock(lock_uidc);
+	uidc.disp_update = (int)callbackData;	// Update the uidc variable.
+	CmtReleaseLock(lock_uidc);
+	
+	new = mc.vtviewopts[uidc.disp_update];
+	
+	// Update which one's checked.
+	if(new != old) {
+		SetMenuBarAttribute(mc.mainmenu, new, ATTR_CHECKED, 1);
+		SetMenuBarAttribute(mc.mainmenu, old, ATTR_CHECKED, 0);
+	}
 }
 
 /************** Fitting Callbacks *****************/ 
@@ -1743,7 +1974,9 @@ int CVICALLBACK ChangeFIDChanColor (int panel, int control, int event,
 			if(num < 0 || num >= 8)
 				break;
 			
+			CmtGetLock(lock_uidc);
 			GetCtrlVal(dc.fid, dc.fccol, &uidc.fcol[num]);
+			CmtReleaseLock(lock_uidc);
 			change_fid_chan_col(num);
 			break;
 	}
@@ -1770,7 +2003,9 @@ int CVICALLBACK ChangeSpectrumChannel (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			CmtGetLock(lock_uidc);
 			GetCtrlIndex(panel, control, &uidc.schan); // Update this value
+			CmtReleaseLock(lock_uidc);
 			
 			update_spec_fft_chan();
 			break;
@@ -1893,7 +2128,9 @@ int CVICALLBACK ChangeSpectrumChanColor (int panel, int control, int event,
 			if(num < 0 || num >= 8)
 				break;
 			
+			CmtGetLock(lock_uidc);
 			GetCtrlVal(dc.spec, dc.sccol, &uidc.scol[num]);
+			CmtReleaseLock(lock_uidc);
 			change_spec_chan_col(num);
 			break;
 	}
@@ -1949,5 +2186,3 @@ int CVICALLBACK ColorVal (int panel, int control, int event,
 	}
 	return 0;
 }
-
-

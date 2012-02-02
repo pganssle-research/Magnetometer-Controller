@@ -25,16 +25,19 @@
 #include <toolbox.h>
 #include <userint.h>
 #include <ansi_c.h>
+#include <formatio.h>  
 #include <spinapi.h>					// SpinCore functions
 
 #include <PulseProgramTypes.h>
 #include <cvitdms.h>
+#include <cviddc.h> 
 #include <UIControls.h>					// For manipulating the UI controls
 #include <MathParserLib.h>				// For parsing math
 #include <DataLib.h>
 #include <MCUserDefinedFunctions.h>		// Main UI functions
 #include <PulseProgramLib.h>			// Prototypes and type definitions for this file
 #include <SaveSessionLib.h>
+#include <General.h>
 
 //////////////////////////////////////////////////////////////
 // 															//
@@ -48,7 +51,9 @@ int CVICALLBACK IdleAndGetData (void *functionData) {
 	PPROGRAM *p = get_current_program();
 	
 	// Run the experiment
-	run_experiment(p);
+	int rv = run_experiment(p);
+	
+	CmtExitThreadPoolThread(rv);	
 	
 	return 0;
 }
@@ -56,25 +61,60 @@ int CVICALLBACK IdleAndGetData (void *functionData) {
 void CVICALLBACK discardIdleAndGetData (int poolHandle, int functionID, unsigned int event, int value, void *callbackData)
 {
 	
+	// Clear out the data stuff.
+	CmtGetLock(lock_ce);
+	CmtGetLock(lock_DAQ);
+	
 	if(ce.ctset) {
-		CmtGetLock(lock_DAQ);
 		DAQmxClearTask(ce.cTask);
 		ce.ctset = 0;
 		ce.cTask = NULL;
-		CmtReleaseLock(lock_DAQ);
 	}
 	
 	if(ce.atset) {
-		CmtGetLock(lock_DAQ);
 		DAQmxClearTask(ce.aTask);
 		ce.atset = 0;
 		ce.aTask = NULL;
-		CmtReleaseLock(lock_DAQ);
 	}
 	
-	SetCtrlVal(mc.mainstatus[1], mc.mainstatus[0], 0);	// Experiment is done!
-	SetCtrlAttribute(mc.mainstatus[1], mc.mainstatus[0], ATTR_LABEL_TEXT, "Stopped");
+	// Clear out some current experiment stuff.
+	if(ce.ilist != NULL) {
+		free(ce.ilist);
+		ce.ilist = NULL;
+	}
+	
+	CmtReleaseLock(lock_DAQ);
+	CmtReleaseLock(lock_ce);
+	
+	if(GetInitialized)
+		pb_close_safe(0);
+	
+	SetMenuBarAttribute(mc.mainmenu, mc.fload, ATTR_DIMMED, 0); // People can load data again.
 
+}
+
+int CVICALLBACK UpdateStatus (void *functiondata)
+{
+	// Checks the pb status 20 times a second and updates
+	// the controls accordingly. Can't find a way to have any
+	// kind of pushed notification for that.
+	int rv;
+	while(!GetQuitUpdateStatus())
+	{
+		rv = update_status(1);
+		if(rv < 0 || rv > 32 || rv & PB_STOPPED) 
+			break;
+
+		Delay(0.05);
+	}
+	
+	CmtGetLock(lock_ce);
+	ce.update_thread = -1;
+	CmtReleaseLock(lock_ce);
+	
+	CmtExitThreadPoolThread(0);
+	
+	return 0;
 }
 
 int run_experiment(PPROGRAM *p) {
@@ -86,10 +126,21 @@ int run_experiment(PPROGRAM *p) {
 	int cont_mode = 1;		// If cont_mode is on, it is checked in the first iteration of the loop anyway.
 							// This will be more relevant when cont_run in ND is implemented
 	
+	double *data = NULL, *avg_data = NULL;
+	
+	SetQuitIdle(0);
+	SetDoubleQuitIdle(0);
+	SetQuitUpdateStatus(0);
+	
+	// Update some controls for the running experiment.
+	SetMenuBarAttribute(mc.mainmenu, mc.fload, ATTR_DIMMED, 1); // Can't have people loading new data now.
+	
 	SetCtrlVal(mc.mainstatus[1], mc.mainstatus[0], 1);	// Experiment is running!
 	SetCtrlAttribute(mc.mainstatus[1], mc.mainstatus[0], ATTR_LABEL_TEXT, "Running");
+	SetRunning(1);
 	
 	// Initialize ce
+	CmtGetLock(lock_ce);
 	ce.ct = 0;
 	ce.p = p;
 	
@@ -102,6 +153,7 @@ int run_experiment(PPROGRAM *p) {
 		ce.cstep = malloc(sizeof(int)*(p->nCycles+p->nDims));
 		get_cstep(0, ce.cstep, p->maxsteps, p->nCycles+p->nDims); 
 	}
+	CmtReleaseLock(lock_ce);
 	
 	if(scan) {
 		if(setup_DAQ_task() != 0) {
@@ -109,10 +161,19 @@ int run_experiment(PPROGRAM *p) {
 			goto error;
 		}
 		
-		// Initialize the TDMS file
-		initialize_tdms();
+		// Initialize the TDM file
+		if(ev = initialize_tdm()) { goto error; }
+
+		update_experiment_nav();
 	}
 	
+	// Make sure the pulseblaster is initiated.
+	if(!GetInitialized()) {
+		ev = pb_init_safe(1);
+		if(ev < 0) 
+			goto error;
+	}
+
 	// For the moment, continuous acquisition in ND is not implemented
 	// In the future, it will just repeat whatever experiment you tell it to
 	// indefinitely.
@@ -128,7 +189,9 @@ int run_experiment(PPROGRAM *p) {
 		if(done = prepare_next_step(p) != 0)
 		{
 			if(cont_mode && done == 1) {
+				CmtGetLock(lock_ce);
 				ce.ct--;
+				CmtReleaseLock(lock_ce);
 				p->nt++;
 				done = prepare_next_step(p);
 			}
@@ -140,42 +203,108 @@ int run_experiment(PPROGRAM *p) {
 				break;
 		}
 
-		if(!done && scan) {
+		if(!done) {
 			// This is the part where data acquisition takes place.
-		
-			/******* PLACEHOLDER ********
-			double *data = malloc(p->np*ce.nchan*sizeof(double));
-			for(int i = 0; i< p->np*ce.nchan; i++)
-				data[i] = ce.ct+((double)i+4)/347; 
-			/***************************/
 			
-			// Get data from device
-			CmtGetLock(lock_DAQ);
-			DAQmxStartTask(ce.cTask);
-			DAQmxStartTask(ce.aTask);
-			CmtReleaseLock(lock_DAQ);
+			if(scan) {
+				// Get data from device
+				CmtGetLock(lock_DAQ);				// Multithreading requires these locks
+
+				DAQmxStartTask(ce.cTask);			// Tasks should be started BEFORE the program is run.
+				DAQmxStartTask(ce.aTask);
 			
-			double *data = get_data(ce.p, &ev);
+				CmtReleaseLock(lock_DAQ);
+			}
+
+			//  Program and start the pulseblaster.
+			if(program_pulses(ce.ilist, ce.ninst, 1) < 0) { goto error; }
+			if(pb_start_safe(1) < 0) { goto error; }
 			
-			CmtGetLock(lock_DAQ);
-			DAQmxStopTask(ce.cTask);
-			DAQmxStopTask(ce.aTask);
-			CmtReleaseLock(lock_DAQ);
+			// Check the status once now.
+			update_status(0);
 			
-			if(ev)
-				goto error;
+			// Start checking for updates in another thread.
+			CmtGetLock(lock_ce);
+			if(ce.update_thread == -1)
+				CmtScheduleThreadPoolFunction(DEFAULT_THREAD_POOL_HANDLE, UpdateStatus, NULL, &ce.update_thread);
+			else {
+				int threadstat;
+				CmtGetThreadPoolFunctionAttribute(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, ATTR_TP_FUNCTION_EXECUTION_STATUS, &threadstat);
+				if(threadstat > 1) 
+					CmtWaitForThreadPoolFunctionCompletion(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, 0);
+			}
+			CmtReleaseLock(lock_ce);
 			
-			// Plot the data
-			plot_data(data, p->np, p->sr, ce.nchan);
+			if(scan) {
+				// Get the data.
+				while(!GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
+					Delay(0.01);
+				}
+				
+				data = get_data(ce.p, &ev);
 			
-			int err = save_data(data);
-		
-			free(data);
+				CmtGetLock(lock_DAQ);			
+			
+				DAQmxStopTask(ce.cTask);			// Stop the tasks when you are done with them. They can be
+				DAQmxStopTask(ce.aTask);			// started again later. Clear them when you are really done.
+			
+				CmtReleaseLock(lock_DAQ);
+				
+				if(ev)
+					goto error;
+				
+				// Update the navigation controls.
+				if(ce.p->nDims) { update_experiment_nav(); }
+			
+				update_transients();
+
+				// Only request the average data if you need it.
+				if(avg_data != NULL) {
+					free(avg_data);
+					avg_data = NULL;
+				}
+			
+				if(ev = save_data(data, (uidc.disp_update == 0)?&avg_data:NULL)) { goto error; }
+			
+				if(uidc.disp_update < 2) {	// We're plotting stuff for 0 (Avg) or 1 (Latest)
+					if(uidc.disp_update && ce.ct > 1)
+						plot_data(avg_data, p->np, p->sr, ce.nchan);
+					else
+						plot_data(data, p->np, p->sr, ce.nchan);
+				
+					// Update the nav controls now.
+					for(int i = 0; i < 2; i++)
+						set_nav_from_lind(ce.cind, dc.cloc[i], !uidc.disp_update);
+				
+				}
+			
+				// Free memory
+				if(avg_data != NULL) {
+					free(avg_data);
+					avg_data = NULL;
+				}
+			
+				free(data);
+				data = NULL;
+			}
 		}
 
 	}
 	
 	error:
+	
+	SetCtrlVal(mc.mainstatus[1], mc.mainstatus[0], 0);	// Experiment is done!
+	SetCtrlAttribute(mc.mainstatus[1], mc.mainstatus[0], ATTR_LABEL_TEXT, "Stopped");
+	SetRunning(0);
+	
+	if(data != NULL) 
+		free(data);
+	
+	if(avg_data != NULL)
+		free(avg_data);
+
+	if(ev)
+		display_ddc_error(ev);
 
 	return ev;
 }
@@ -212,7 +341,7 @@ double *get_data(PPROGRAM *p, int *error) {
 	double time = Timer();
 	errmess = malloc(400);
 	
-	while(i < 402 && !GetDoubleQuitIdle()) {
+	while(!GetDoubleQuitIdle()) {
 		CmtGetLock(lock_DAQ);
 		DAQmxGetReadAttribute(ce.aTask, DAQmx_Read_AvailSampPerChan, &bc);
 		CmtReleaseLock(lock_DAQ);
@@ -221,6 +350,7 @@ double *get_data(PPROGRAM *p, int *error) {
 			break;
 		
 		// Timeout condition.
+		/*
 		if(i == 20) {
 			sprintf(errmess, "The readout task is about to time out. It has been occuring for %lf seconds and has read %d samples. Allow it to wait another 2 seconds?", Timer() - time, bc);
 			j = ConfirmPopup("Timeout Warning", errmess);
@@ -234,7 +364,9 @@ double *get_data(PPROGRAM *p, int *error) {
 		}
 		
 		i++;
-		Delay(0.05);
+		*/
+		
+		Delay(0.1);
 	}
 	
 	if(GetDoubleQuitIdle()) {
@@ -276,15 +408,22 @@ int prepare_next_step (PPROGRAM *p) {
 
 	// It's all the same if you aren't using varied instructions
 	if(!p->nVaried) {
-		if(++ce.ct <= p->nt) {
-			if(ce.ilist == NULL)
+		CmtGetLock(lock_ce);
+		ce.cind = ++ce.ct;
+		CmtReleaseLock(lock_ce);
+		if(ce.ct <= p->nt) {
+			if(ce.ilist == NULL) {
+				CmtGetLock(lock_ce);
 				ce.ilist = generate_instructions(p, NULL, &ce.ninst);
+				CmtReleaseLock(lock_ce);
+			}
 			return 0;
 		} else
 			return 1;
 	}
 
 	// Free the old ilist
+	CmtGetLock(lock_ce);
 	if(ce.ilist != NULL) {
 		free(ce.ilist);
 		ce.ilist = NULL;
@@ -298,7 +437,15 @@ int prepare_next_step (PPROGRAM *p) {
 	else
 		dli = 0;
 	
-	int mcli = p->nCycles?(get_lindex(p->maxsteps, p->maxsteps, p->nCycles)):1, mdli = p->nDims?get_lindex(&p->maxsteps[p->nCycles], &p->maxsteps[p->nCycles], p->nDims):-1;
+	int mcli = 1, mdli = 1;
+	
+	for(i = 0; i < p->nCycles; i++)
+		mcli *= p->maxsteps[i];
+	
+	for(i = 0; i < p->nDims; i++)
+		mdli *= p->maxsteps[p->nCycles+i];
+	
+	CmtReleaseLock(lock_ce);
 	
 	if(p->nt%mcli != 0)
 		return -1;
@@ -309,21 +456,39 @@ int prepare_next_step (PPROGRAM *p) {
 			return 1;	
 		else {
 			// Reset the transients and increase the dimension index.
+			CmtGetLock(lock_ce);
 			ce.ct = 1;
 			cli = 0;
 			dli++;
+			CmtReleaseLock(lock_ce);
 		}
 	} else 
 		cli = (ce.ct-1)%mcli;	// Transients are 1-based index, so we need to convert.
 	
 	// Update the cstep vars.
+	CmtGetLock(lock_ce);
 	if(p->nCycles) { get_cstep(cli, ce.cstep, p->maxsteps, p->nCycles); }
 	if(p->nDims) { get_cstep(dli, &ce.cstep[p->nCycles], &p->maxsteps[p->nCycles], p->nDims); }
-
+	CmtReleaseLock(lock_ce);
+	
+	// Keep going (recursive function call - probably a bad idea) if this is in the skips.
+	int lind = get_lindex(ce.cstep, p->maxsteps, p->nCycles+p->nDims);
+	if(p->skip & 1) {
+		if(p->skip_locs[lind]) {
+			prepare_next_step(p);
+		}
+	}
+	
+	CmtGetLock(lock_ce);
 	ce.ilist = generate_instructions(p, ce.cstep, &ce.ninst); // Generate the next instructions list.
-
+	CmtReleaseLock(lock_ce);
+	
 	if(ce.ilist == NULL)
 		return -2;
+	
+	CmtGetLock(lock_ce);
+	ce.cind = dli*p->nt+ce.ct-1;	// Current index in [nt {dim1, ... , dimn}] space
+	CmtReleaseLock(lock_ce);
 	
 	return 0;
 }
@@ -333,9 +498,10 @@ int prepare_next_step (PPROGRAM *p) {
 //				File Read/Write Operations					//
 // 															//
 //////////////////////////////////////////////////////////////
+/********************* Data Operations ******************/
 
-int initialize_tdms() {
-	// This is the first thing you should call if you are trying to save data to a TDMS
+int initialize_tdm() {
+	// This is the first thing you should call if you are trying to save data to a TDM
 	// file. It will put all the metadata and set everything up, returning what you need.
 	// This assumes that ce is properly initialized.
 	
@@ -358,8 +524,9 @@ int initialize_tdms() {
 	ncyc = p->nCycles;
 	np = p->np;
 	
-	TDMSFileHandle data_file = NULL;
-	TDMSChannelGroupHandle mcg = NULL, acg = NULL;
+	DDCFileHandle data_file = NULL;
+	DDCChannelGroupHandle mcg = NULL, acg = NULL;
+	DDCChannelHandle *chans = NULL, *achans = NULL;
 
 	// This is the case where we are first creating the file - these are stored in the ce.
 	name = malloc(strlen(ce.fname)+1);
@@ -373,66 +540,62 @@ int initialize_tdms() {
 	vname = malloc(strlen("Magnetometer Controller Version ")+10);
 	sprintf(vname, "Magnetometer Controller Version %0.1f", MC_VERSION);
 	
-	if(rv = TDMS_CreateFile(filename, TDMS_Streaming, name, desc, name, vname, &data_file)) { goto error; }
-	if(rv = TDMS_AddChannelGroup(data_file, MCTD_MAINDATA, "", &mcg)) { goto error; }
-	//if(p->nt > 1 && rv = TDMS_AddChannelGroup(data_file, MCTD_AVGDATA, "", &acg)) { goto error; }
+	CmtGetLock(lock_tdm);
+	if(rv = DDC_CreateFile(filename, "TDM", name, desc, name, vname, &data_file)) { goto error; }
+	if(rv = DDC_AddChannelGroup(data_file, MCTD_MAINDATA, "Main Data Group", &mcg)) { goto error; }
+	if(p->nt > 1) {
+		if(rv = DDC_AddChannelGroup(data_file, MCTD_AVGDATA, "", &acg)) { goto error; }
+	}
 	
 	free(vname);
 	free(desc);
 	free(name);
 	vname = desc = name = NULL;
 	
+	CmtGetLock(lock_ce);
+	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tdone);
+	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tstart);
+	CmtReleaseLock(lock_ce);
+
 	// Now since it's the first time, we need to set up the attributes, metadata and program.
-	if(rv = TDMS_SetChannelGroupProperty(mcg, MCTD_NP, TDMS_Int32, np)) { goto error; } 
-	if(rv = TDMS_SetChannelGroupProperty(mcg, MCTD_SR, TDMS_Double, p->sr)) { goto error; }
-	if(rv = TDMS_SetChannelGroupProperty(mcg, MCTD_NT, TDMS_Int32, p->nt)) { goto error; }
-	if(rv = TDMS_SetChannelGroupProperty(mcg, MCTD_TIMESTART, TDMS_Timestamp, ce.tstart)) { goto error; }
-	if(rv = TDMS_SetChannelGroupProperty(mcg, MCTD_NDIM, TDMS_Int8, nd+1)) { goto error; }
-	if(rv = TDMS_SetChannelGroupProperty(mcg, MCTD_NCYCS, TDMS_Int8, ncyc)) { goto error; }
-	if(rv = TDMS_SetChannelGroupProperty(mcg, MCTD_NCHANS, TDMS_Int8, ce.nchan)) { goto error; }
-	if(rv = TDMS_SetChannelGroupProperty(mcg, MCTD_PTMODE, TDMS_Int32, p->tmode)) { goto error; }
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_NP, DDC_Int32, np)) { goto error; } 
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_SR, DDC_Double, p->sr)) { goto error; }
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_NT, DDC_Int32, p->nt)) { goto error; }
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_TIMESTART, DDC_Timestamp, ce.tstart)) { goto error; }
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_NDIM, DDC_UInt8, nd+1)) { goto error; }
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_NCYCS, DDC_UInt8, ncyc)) { goto error; }
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_NCHANS, DDC_UInt8, ce.nchan)) { goto error; }
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_PTMODE, DDC_Int32, p->tmode)) { goto error; }
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_CSTEP, DDC_Int32, -1)) { goto error; }
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_CSTEPSTR, DDC_String, "")) { goto error; }
+	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_TIMEDONE, DDC_Timestamp, ce.tdone)) { goto error; }
 	
 	// Now save the program.
-	TDMSChannelGroupHandle pcg = NULL;
-	TDMS_AddChannelGroup(data_file, MCTD_PGNAME, "", &pcg);
-	tdms_save_program(pcg, p);
+	DDCChannelGroupHandle pcg = NULL;
+	DDC_AddChannelGroup(data_file, MCTD_PGNAME, "", &pcg);
+	
+	CmtGetLock(lock_pb);
+	save_program(pcg, p);
+	CmtReleaseLock(lock_pb);
 
-	// Initialize current experiment.
-	if(ce.chans != NULL)
-		free(ce.chans);
-	
-	if(ce.achans != NULL) 
-		free(ce.achans);
-	
-	ce.chans = malloc(sizeof(TDMSChannelHandle)*ce.nchan);
-	ce.achans = (p->nt>1)?malloc(sizeof(TDMSChannelHandle)*ce.nchan):NULL;
-	
 	// Create the data channels
+	chans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
+	achans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
 	for(i = 0; i < ce.nchan; i++) {
-		if(rv = TDMS_AddChannel(mcg, TDMS_Double, ce.icnames[i], "", "V", &ce.chans[i])) { goto error; }
+		if(rv = DDC_AddChannel(mcg, DDC_Double, ce.icnames[i], "", "V", &chans[i])) { goto error; }
 		if(p->nt > 1)
-			if(rv = TDMS_AddChannel(acg, TDMS_Double, ce.icnames[i], "", "V", &ce.achans[i])) { goto error; }
+			if(rv = DDC_AddChannel(acg, DDC_Double, ce.icnames[i], "", "V", &achans[i])) { goto error; }
 	}
 	
-	// Save this before we're done.
-	TDMS_SaveFile(data_file);
+	// Save the file
+	DDC_SaveFile(data_file);
 	
 	error:
+
+	if(data_file != NULL)
+		DDC_CloseFile(data_file);
 	
-	if(rv != 0) {
-		ce.td_file = data_file;
-		ce.mcg = mcg;
-		ce.acg = acg;
-	} else {	
-		ce.td_file = NULL;
-		ce.mcg = NULL;
-		if(ce.chans != NULL)
-			free(ce.chans);
-		ce.chans = NULL;
-		
-		if(data_file != NULL)
-			TDMS_CloseFile(data_file);
-	}
+	CmtReleaseLock(lock_tdm);
 	
 	if(name != NULL)
 		free(name);
@@ -443,10 +606,16 @@ int initialize_tdms() {
 	if(vname != NULL)
 		free(vname);
 	
+	if(chans != NULL)
+		free(chans);
+	
+	if(achans != NULL)
+		free(achans);
+	
 	return rv;
 }
 
-int save_data(double *data) {
+int save_data(double *data, double **avg) {
 	// In order for this to work, the ce variable needs to be set up appropriately. This function is
 	// used to write data to an existing and open file. If for whatever reason 
 	
@@ -463,47 +632,69 @@ int save_data(double *data) {
 	int i, np = p->np, nd = p->nDims;
 	char *csstr = NULL;
 	double *avg_data = NULL;
+	DDCFileHandle file = NULL;
+	DDCChannelGroupHandle *cgs = NULL;
+	DDCChannelHandle *achans = NULL, *mchans = NULL;
+	DDCChannelGroupHandle mcg, acg;
+
+	char *names[2] = {MCTD_MAINDATA, MCTD_AVGDATA};
+
+	// Open the file.
+	CmtGetLock(lock_tdm);
+	if(rv = DDC_OpenFileEx(ce.path, "TDM", 0, &file)) { goto error; }
 	
-	int dli;
-	// Get the linear index in only the indirect dimension acquisition space
-	if(nd)
-		dli = get_lindex(&ce.cstep[p->nCycles], p->maxsteps, p->nDims);
-	else
-		dli = 0;
+	// Get the channel groups -> Allocate space for two, but only look for 1 if nt == 1
+	cgs = malloc(sizeof(DDCChannelGroupHandle)*2);
+	cgs[0] = NULL;
+	cgs[1] = NULL;
 	
-	dli *= p->nt;		// Least significant bit is number of transients.
-	dli += ce.ct-1;		// I believe that ct is on a 1-based index.
+	if(rv = get_ddc_channel_groups(file, names, (p->nt > 1)?2:1, cgs)) { goto error; }
 	
+	mcg = cgs[0];
+	acg = cgs[1];
+		
 	// Save the current step as a linear index and as a string (for readability)
-	if(rv = TDMS_SetChannelGroupProperty(ce.mcg, MCTD_CSTEP, TDMS_Int32, dli)) { goto error; }
+	if(rv = DDC_SetChannelGroupProperty(mcg, MCTD_CSTEP, ce.cind)) { goto error; }
 	
 	csstr = malloc(12*(p->nDims+2)+3); // Signed maxint is 10 digits, plus - and delimiters.
 	sprintf(csstr, "[%d", ce.ct-1);
 	for(i = 0; i < p->nDims; i++)
-		sprintf(csstr, "; %d", ce.cstep[i+p->nCycles]);	
+		sprintf(csstr, "%s; %d", csstr, ce.cstep[i+p->nCycles]);	
 	sprintf(csstr, "%s]", csstr);
 	
-	if(rv = TDMS_SetChannelGroupProperty(ce.mcg, MCTD_CSTEPSTR, TDMS_String, csstr)) { goto error; }
+	if(rv = DDC_SetChannelGroupProperty(mcg, MCTD_CSTEPSTR, csstr)) { goto error; }
 	free(csstr);
 	csstr = NULL;
 	
 	// Save the time completed
-	if(rv = TDMS_SetChannelGroupProperty(ce.mcg, MCTD_TIMEDONE, TDMS_Timestamp, ce.tdone)) { goto error; }
-
+	CmtGetLock(lock_ce);
+	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tdone);
+	if(rv = DDC_SetChannelGroupProperty(mcg, MCTD_TIMEDONE, ce.tdone)) { goto error; }
+	CmtReleaseLock(lock_ce);
+	
+	// Grab the channels.
+	mchans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
+	if(rv = DDC_GetChannels(mcg, mchans, ce.nchan)) { goto error; }
+	
 	// Save the data
 	for(i = 0; i < ce.nchan; i++) {
-		if(rv = TDMS_AppendDataValues(ce.chans[i], &data[i*np], np, 1)) { goto error; }
+		if(rv = DDC_AppendDataValues(mchans[i], &data[i*np], np)) { goto error; }
 	}
 	
 	// Save the average data if needed.
-/*	if(p->nt > 1 && ce.achans != NULL) {
+	if(p->nt > 1) {
+		// Grab the average channels.
+		achans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
+		if(rv = DDC_GetChannels(acg, achans, ce.nchan)) { goto error; }
+
 		if(ce.ct == 1) {	// First run.
 			for(i = 0; i < ce.nchan; i++) {
-				if(rv = TDMS_AppendDataValues(ce.achans[i], &data[i*np], np, 1)) { goto error;}
+				if(rv = DDC_AppendDataValues(achans[i], &data[i*np], np)) { goto error;}
 			}
 		} else {
 			// First get the old data
-			avg_data = load_data_tdms(dli, ce.td_file, ce.acg, ce.achs, ce.p, ce.cind, ce.nchan, &rv);
+			int dli = (int)((ce.cind-1)/p->nt); // ct is a 1-based index.
+			avg_data = load_data_tdm(dli, file, acg, achans, ce.p, ce.nchan, &rv);
 			
 			if(rv != 0)
 				goto error;
@@ -514,25 +705,35 @@ int save_data(double *data) {
 			}
 			
 			// And write it to file again.
-			if(rv = TDMS_
+			for(i = 0; i < ce.nchan; i++) {
+				if(rv = DDC_ReplaceDataValues(achans[i], dli*np, &avg_data[i*np], np)) { goto error; }
+			}
 		}
-	
 	}
 	
-*/	
+	// Save the data
+	DDC_SaveFile(file);
+	
 	error:
 	if(csstr != NULL)
 		free(csstr);
 	
-	if(avg_data != NULL)
+	if(avg != NULL) {
+		*avg = avg_data;
+	} else if (avg_data != NULL) {
 		free(avg_data);
+	}
 	
+	if(file != NULL)
+		DDC_CloseFile(file);
+	CmtReleaseLock(lock_tdm);
+
 	return rv;
 }
 
 int load_experiment(char *filename) {
 	// Loads the experiment into the uidc file and loads the first experiment to the controls.
-	// Filename must end in .tdms
+	// Filename must end in .tdm
 	// Pass NULL to p if you are not interested in the program.
 	// Otherwise, use free_pprog() when you are done with p.
 	//
@@ -546,106 +747,71 @@ int load_experiment(char *filename) {
 	int ev = 0, i, cind = -1;
 	double *data = NULL;
 	PPROGRAM *p = NULL;
-	TDMSFileHandle file = NULL;
-	TDMSChannelGroupHandle mcg = NULL, pcg = NULL, *groups = NULL;
-	TDMSChannelHandle *chs = NULL;
+	DDCFileHandle file = NULL;
+	DDCChannelGroupHandle mcg = NULL, pcg = NULL, acg = NULL, *groups = NULL;
+	DDCChannelHandle *chs = NULL, *achans = NULL;
 	int ng, g = 40, s = 40, len;
 	char *name_buff = NULL;
 	char **cnames = NULL;
 	int nc = -1;
-	
-	
+					   
 	// Check that the filename is conforming.
-	if(filename == NULL || strlen(filename) < 5 || sscanf(&filename[strlen(filename)-5], ".tdms") != 0 || !FileExists(filename, NULL))  {
+	if(filename == NULL || strlen(filename) < 5 || sscanf(&filename[strlen(filename)-4], ".tdm") != 0 || !FileExists(filename, NULL))  {
 		ev = -248;
 		goto error;
 	}
 	
 	// Open the file for reading
-	if(ev = TDMS_OpenFile(filename, TRUE, &file))
-		goto error;
+	CmtGetLock(lock_tdm);
+	if(ev = DDC_OpenFileEx(filename, "TDM", 1, &file)) { goto error; }
 	
-	if(ev = TDMS_GetNumChannelGroups(file, &ng))
-		goto error;
-	else if (ng < 2) {
-		ev = -249;
-		goto error;
-	}
+	// Get the main and program channel names first (don't know if we need the average yet.
+	char *names[2] = {MCTD_MAINDATA, MCTD_PGNAME};
+	groups = malloc(sizeof(DDCChannelGroupHandle)*2);
 	
-	groups = malloc(sizeof(TDMSChannelGroupHandle)*ng);
+	if(ev = get_ddc_channel_groups(file, names, 2, groups)) { goto error; }
 	
-	if(ev = TDMS_GetChannelGroups(file, groups, ng))
-		goto error;
-	
-	// Search for the program and main groups in the list of groups.
-	int mcg_f = 0, pcg_f = 0; // Whether or not the main channel group and program channel group have been found.
-	name_buff = malloc(g);
-	for(i = 0; i < ng; i++) {
-		if(ev = TDMS_GetChannelGroupStringPropertyLength(groups[i], TDMS_CHANNELGROUP_NAME, &len))
-			goto error;
-		
-		if(g < ++len)
-			name_buff = realloc(name_buff, g+=((int)((len-g)/s)+1)*s);
-		
-		if(ev = TDMS_GetChannelGroupProperty(groups[i], TDMS_CHANNEL_NAME, name_buff, len))
-			goto error;
-		
-		if(!pcg_f && strcmp(name_buff, MCTD_PGNAME) == 0) {
-			// If we found it, copy from groups to pcg.
-			pcg = malloc(sizeof(TDMSChannelGroupHandle));
-			memcpy(&pcg, &groups[i], sizeof(TDMSChannelGroupHandle));
-			pcg_f = 1;
-		}
-		
-		if(!mcg_f && strcmp(name_buff, MCTD_MAINDATA) == 0) {
-			// If we found it, copy from groups to mcg.
-			mcg = malloc(sizeof(TDMSChannelGroupHandle));
-			memcpy(&mcg, &groups[i], sizeof(TDMSChannelGroupHandle));
-			mcg_f = 1;
-		}
-		
-		if(mcg_f && pcg_f)
-			break;
-	}
-	
-	if(!mcg_f || !pcg_f) {
-		ev = -249;
-		goto error;
-	}
-	
-	// We now have both groups, we don't need this list anymore. 
-	free(groups);
+	memcpy(&mcg, &groups[0], sizeof(DDCChannelGroupHandle));
+	memcpy(&pcg, &groups[1], sizeof(DDCChannelGroupHandle));
+
+	free(groups);	// Don't need this anymore.
 	groups = NULL;
 	
 	// Grab the program.
 	int err_val;
-	p = tdms_load_program(pcg, &ev);
+	p = load_program(pcg, &ev);
 	if(ev || p == NULL)
 		goto error;
 	
     // Get the current step index.
-	if(ev = TDMS_GetChannelGroupProperty(mcg, MCTD_CSTEP, &cind, sizeof(int)))
-		goto error;
+	if(ev = DDC_GetChannelGroupProperty(mcg, MCTD_CSTEP, &cind, sizeof(int))) { goto error; }
 	
 	// Get the number of channels in two ways, and check that they are consistent.
 	unsigned char c_buff;
-	if(ev = TDMS_GetChannelGroupProperty(mcg, MCTD_NCHANS, &c_buff, sizeof(unsigned char)))
-		goto error;
+	if(ev = DDC_GetChannelGroupProperty(mcg, MCTD_NCHANS, &c_buff, sizeof(unsigned char))) { goto error; }
 	
 	int nchs = (int)c_buff;
 	
-	if(ev = TDMS_GetNumChannels(mcg, &nc))
-		goto error;
-	
+	if(ev = DDC_GetNumChannels(mcg, &nc)) { goto error; }
 	if(nc != nchs) {
 		ev = -251;
 		goto error;
 	}
 	
 	// Allocate the channel array - I'm assuming they are in order.
-	chs = malloc(sizeof(TDMSChannelHandle)*nc);
-	if(ev = TDMS_GetChannels(mcg, chs, nc))
-		goto error;
+	chs = malloc(sizeof(DDCChannelHandle)*nc);
+	
+	if(p->nt > 1) {
+		char *avg_name = MCTD_AVGDATA;
+		if(ev = get_ddc_channel_groups(file, &avg_name, 1, &acg)) { goto error; } 
+		
+		achans = malloc(sizeof(DDCChannelHandle)*nc);
+		if(ev = DDC_GetChannels(acg, achans, nc)) { goto error; }
+	
+		
+	}
+	
+	if(ev = DDC_GetChannels(mcg, chs, nc)) { goto error; }
 	
 	// Now allocate the array of cnames, then grab them. Currently these are not used, but I could see them
 	// being useful in the future and it's easy to implement.
@@ -654,84 +820,74 @@ int load_experiment(char *filename) {
 		cnames[i] = NULL;
 	
 	for(i = 0; i < nc; i++) {
-		if(TDMS_GetChannelStringPropertyLength(chs[i], TDMS_CHANNEL_NAME, &len))
+		if(DDC_GetChannelStringPropertyLength(chs[i], DDC_CHANNEL_NAME, &len))
 			goto error;
 		
 		cnames[i] = malloc(++len);
 		
-		if(TDMS_GetChannelProperty(chs[i], TDMS_CHANNEL_NAME, cnames[i], len))
+		if(DDC_GetChannelProperty(chs[i], DDC_CHANNEL_NAME, cnames[i], len))
 			goto error;
 	}
 	
 	// Finally get the data for the 0th index
-	data = load_data_tdms(0, file, mcg, chs, p, cind, nc, &ev);
+	if(p->nt > 1 && acg != NULL)
+		data = load_data_tdm(0, file, acg, achans, p, nc, &ev);
+	else 
+		data = load_data_tdm(0, file, mcg, chs, p, nc, &ev);
+
 	if(ev != 0)
 		goto error;
 	
 	// If we're here, then we've finished loading all the data without any errors. We can now safely clear the 
 	// old stuff and load the new stuff (hopefully).
-	if(uidc.file != NULL)
-		TDMS_CloseFile(uidc.file);
-	uidc.file = file;
-	uidc.mcg = mcg;
-	uidc.cind = cind;
+	CmtGetLock(lock_ce);
+	ce.cind = cind;
+	ce.nchan = nc; 
 	
-	if(uidc.chs != NULL) {
-		free(uidc.chs);
-		uidc.chs = NULL;
-	}
+	if(ce.p != NULL)
+		free_pprog(ce.p);
+	ce.p = p;
 	
-	uidc.chs = chs;
+	if(ce.path != NULL)
+		free(ce.path);
 	
-	if(uidc.cnames != NULL) {
-		for(i = 0; i < uidc.nch; i++) {
-			if(uidc.cnames[i] != NULL) {
-				free(uidc.cnames[i]);
-				uidc.cnames[i] = NULL;
-			}
-		}
-		free(uidc.cnames);
-		uidc.cnames = NULL;
-	}
-	
-	uidc.cnames = cnames;
-	uidc.nch = nc; 
-	
-	if(uidc.p != NULL)
-		free_pprog(uidc.p);
-	uidc.p = p;
+	ce.path = malloc(strlen(filename)+1);
+	strcpy(ce.path, filename);
+	CmtReleaseLock(lock_ce);
 	
 	// Now we want to plot the data and set up the experiment navigation.
-	plot_data(data, p->np, p->sr, uidc.nch);
+	plot_data(data, p->np, p->sr, ce.nchan);
 	free(data);
 	
 	update_experiment_nav();
-	
+	update_transients();
+
 	error:
 	
 	// Free a bunch of memory - some of these things shouldn't be freed if ev wasn't reset,
-	// as the pointer has been assigned to a field of uidc.
-	if(ev != 0) {
-		if(file != NULL)
-			TDMS_CloseFile(file);
-		
-		if(p != NULL)
-			free_pprog(p);
-		
-		if(chs != NULL)
-			free(chs);
-		
-		if(cnames != NULL) {
-			for(i = 0; i < nc; i++) {	// Don't reuse nc, or this will break.
-				if(cnames[i] != NULL)
-					free(cnames[i]);
-			}
-			
-			free(cnames);
-		}
-	}
+	// as the pointer has been assigned to a field of ce.
+	if(ev != 0 && p != NULL)
+		free_pprog(p);
 	
-	// The rest of this should always be freed.
+	if(file != NULL)
+		DDC_CloseFile(file);
+	CmtReleaseLock(lock_tdm);
+		
+	if(chs != NULL)
+		free(chs);
+	
+	if(achans != NULL)
+		free(achans);
+	
+	if(cnames != NULL) {
+		for(i = 0; i < nc; i++) {	// Don't reuse nc, or this will break.
+			if(cnames[i] != NULL)
+				free(cnames[i]);
+		}
+		
+		free(cnames);
+	}
+
 	if(groups != NULL)
 		free(groups);
 	
@@ -746,17 +902,63 @@ int load_experiment(char *filename) {
 	return ev;
 }
 
-double *load_data(int lindex, int *rv) {
-	// With uidc.p, uidc.file, uidc.mcg, uidc.chs and uidc.cind already set, 
-	// this will load the data corresponding to a given linear index and transient
-	// It is important to note that the lindex has dimensionality [nt p->nDims], rather than [p->nCycles p->nDims]
-	//
-	// Error: -250 => lindex exceeds bounds.
+double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv) {
+	// Loads data from a not-opened file. If avg evaluates as TRUE, it gets from the 
+	// average channel. Otherwise it gets data from the main channel. Returns malloced
+	// data of size p->np*nchans.
 	
-	return load_data_tdms(lindex, uidc.file, uidc.mcg, uidc.chs, uidc.p, uidc.cind, uidc.nch, rv);
+	int ev = 0;
+	
+	// Make sure it's a real file.
+	if(filename == NULL || !FileExists(filename, NULL)) {
+		*rv = -1;
+		return NULL;
+	}
+	
+	DDCFileHandle file = NULL;
+	DDCChannelGroupHandle cg;
+	DDCChannelHandle *chs = NULL;
+	double *data = NULL;
+	
+	// Open the file for reading.
+	CmtGetLock(lock_tdm);
+	if(ev = DDC_OpenFileEx(filename, "TDM", 1, &file)) { goto error; }
+	
+	
+	// Get the channel group from the name.
+	char *name = avg?MCTD_AVGDATA:MCTD_MAINDATA;
+	if(ev = get_ddc_channel_groups(file, &name, 1, &cg)) { goto error; }
+	
+	int nc;
+	if(ev = DDC_GetNumChannels(cg, &nc)) { goto error; }
+	
+	if(nc < nch) {		// Not enough channels present, that's a problem.
+		ev = -2;
+		goto error;
+	}
+	
+	// Get the channels in that group.
+	chs = malloc(sizeof(DDCChannelHandle)*nch); // Allocate the buffer
+	if(ev = DDC_GetChannels(cg, chs, nch)) { goto error; }
+	
+	data = load_data_tdm(lindex, file, cg, chs, p, nch, rv);
+		
+	error:
+	
+	if(file != NULL)
+		DDC_CloseFile(file);
+	
+	CmtReleaseLock(lock_tdm);
+	
+	if(chs != NULL) { free(chs); }
+	
+	*rv = ev;
+	return data;
+	
+	
 }
 
-double *load_data_tdms(int lindex, TDMSFileHandle file, TDMSChannelGroupHandle mcg, TDMSChannelHandle *chs, PPROGRAM *p, int cind, int nch, int *rv) {
+double *load_data_tdm(int lindex, DDCFileHandle file, DDCChannelGroupHandle mcg, DDCChannelHandle *chs, PPROGRAM *p, int nch, int *rv) {
 	// This grabs data from an already open file and returns it as a malloced array of data. Make sure to free this when done with it.
 	// This will return data of size np*nch. 
 	
@@ -777,7 +979,7 @@ double *load_data_tdms(int lindex, TDMSFileHandle file, TDMSChannelGroupHandle m
 	
 	// I believe that the data we want is np points and is at position lindex*np, so let's get that.
 	for(i = 0; i < nch; i++) {
-		if(ev = TDMS_GetDataValuesEx(chs[i], lindex*np, np, &data[i*np]))
+		if(ev = DDC_GetDataValues(chs[i], lindex*np, np, &data[i*np]))
 			goto error;
 	}
 	
@@ -790,25 +992,291 @@ double *load_data_tdms(int lindex, TDMSFileHandle file, TDMSChannelGroupHandle m
 	if(maxsteps != NULL)
 		free(maxsteps);
 	
+	*rv = ev;  // Pass on the return value
+	
 	return data;
+} 
+
+int get_ddc_channel_groups(DDCFileHandle file, char **names, int num, DDCChannelGroupHandle *cgs) {
+	// Pass this a list of channel group names in the DDC file "file" and it returns an array of the handles.
+	//
+	// file = the file to get them from
+	// names = an array of the names (size num)
+	// num = the number of channel group handles to get
+	// cgs = the array, malloced, of size sizeof(DDCChannelGroupHandle)*num.
+	//
+	// Errors:
+	// -1: Invalid inputs
+	// -2: Not enough channel groups found.
+	// -3: All channel groups not found.
+	
+	if(num < 1 || file == NULL || names == NULL || cgs == NULL)
+		return -1;
+	
+	int rv, i, j, g = 40, s = 40;
+	char *buff = malloc(g);
+	
+	int ncg, len;
+	DDCChannelGroupHandle *all_cgs = NULL;
+	int *found = NULL;
+	
+	// Get all the channel groups so we can find the one we're looking for.
+	if(rv = DDC_GetNumChannelGroups(file, &ncg)) { goto error; }
+	if(ncg < num) {
+		rv = -2;
+		goto error;
+	}
+	
+	all_cgs = malloc(sizeof(DDCChannelGroupHandle)*ncg);
+	if(rv = DDC_GetChannelGroups(file, all_cgs, ncg)) { goto error; }
+	
+	// Go through each one and compare the names to find the one we're looking for
+	found = calloc(sizeof(int)*num, sizeof(int));	// Starts out allocated with 0s.
+	int nleft = num;
+	for(i = 0; i < ncg; i++) {
+		// Get the channel name from the list of all channels
+		DDC_GetChannelGroupStringPropertyLength(all_cgs[i], DDC_CHANNELGROUP_NAME, &len); 
+		g = realloc_if_needed(buff, g, ++len, s);	// Allocate space for the name if we need it.
+		DDC_GetChannelGroupProperty(all_cgs[i], DDC_CHANNELGROUP_NAME, buff, len);
+		
+		for(j = 0; j < num; j++) {
+			// Compare it to each of the channel names in the list
+			if(!found[j]) {
+				if(strcmp(names[j], buff) == 0) {
+					found[j] = 1;
+					nleft--;
+					memcpy(&cgs[j], &all_cgs[i], sizeof(DDCChannelGroupHandle));	// Copy it over so we can free all_cgs
+					break;
+				}
+			}
+		}
+		
+		if(nleft == 0)
+			break;
+	}
+	
+	if(nleft) 
+		rv = -3;
+		
+	error:
+	
+	if(buff != NULL)
+		free(buff);
+		
+	if(all_cgs != NULL)
+		free(all_cgs);
+	
+	if(found != NULL)
+		free(found);
+	
+	return rv;
+	
 }
 
-int write_data() {
-	double *data = malloc(200*sizeof(double));
+/******************** File Navigation *******************/
+void select_data_item() {
+	int index, type, len;
+	char *path = NULL;
 	
-	TDMSFileHandle data_file;
-	TDMS_CreateFile("DataOut.tdms", TDMS_Streaming, "Test", "", "Test", "Porcelain Kristallnacht", &data_file);
+	GetCtrlIndex(mc.datafbox[1], mc.datafbox[0], &index);
+	GetListItemImage(mc.datafbox[1], mc.datafbox[0], index, &type);
 	
-	TDMSChannelGroupHandle maingroup;
-	TDMSChannelHandle datachannel;
-	TDMS_AddChannelGroup(data_file, "Main Group", "Some Description", &maingroup); 
-	TDMS_AddChannel(maingroup, TDMS_Double, "Main Channel", "desc", "", &datachannel);
+	GetCtrlValStringLength(mc.datafbox[1], mc.datafbox[0], &len);
+	path = malloc(len+1);
+	GetCtrlVal(mc.datafbox[1], mc.datafbox[0], path);
 	
-	// Write the data.
-	SinePattern(200, 1, 0, 1.0, data);
-	TDMS_AppendDataValues(datachannel, data, 200, 1); 
+	if(type == VAL_FOLDER)
+		select_directory(path);
+	else if(type == VAL_NO_IMAGE)
+		select_file(path);
 	
-	return 0;	
+	free(path);
+}
+
+void select_directory(char *path) {
+	// Pass this a path, which is a folder. If it's not a folder, the folder that contains it will
+	// be used. Path is set as the directory for load operations and the main UI objects associated
+	// will be populated.
+	
+	if(!FileExists(path, NULL))
+		return;				// Invalid path.
+	
+	SetCtrlVal(mc.path[1], mc.path[0], path);
+	
+	DeleteListItem(mc.datafbox[1], mc.datafbox[0], 0, -1);	// Clear the list.
+	int ind = 0;											// Running tally of tine index
+	
+	char *spath = calloc(strlen(path)+strlen("*.tdm")+2, sizeof(char));
+
+	int pchanged = 0;
+	
+	if(path[strlen(path)-1] == '\\') {						// Want to make sure we always know if there's
+		path[strlen(path)-1] = '\0';						// a trailing backspace.
+		pchanged = 1;	// Take note that we changed it -> this var is on loan.
+	}
+	
+	// Add upwards navigation.
+	char *c = strrchr(path, '\\');
+	if(c != NULL) {
+		strncpy(spath, path, c-path);
+		if(FileExists(spath, NULL)) {
+			InsertListItem(mc.datafbox[1], mc.datafbox[0], ind, "..", spath);
+			SetListItemImage(mc.datafbox[1], mc.datafbox[0], ind++, VAL_FOLDER);
+		}
+	}
+	
+	sprintf(spath, "%s\\*", path);
+	
+	// Load the subfolders first
+	char *filename = malloc(MAX_FILENAME_LEN+1);
+	char *fullpath = malloc(MAX_PATHNAME_LEN+1);
+	int rv = GetFirstFile(spath, 0, 0, 0, 0, 0, 1, filename);
+	while(rv == 0) {	// Get the rest of them.
+		sprintf(fullpath, "%s\\%s", path, filename);
+		InsertListItem(mc.datafbox[1], mc.datafbox[0], ind, filename, fullpath);
+		SetListItemImage(mc.datafbox[1], mc.datafbox[0], ind++, VAL_FOLDER);
+		rv = GetNextFile(filename);
+	}
+	
+	// Now load all the files.
+	sprintf(spath, "%s\\%s", path, "*.tdm");
+	
+	rv = GetFirstFile(spath, 1, 0, 0, 0, 0, 1, filename);
+	while(rv == 0) {	// Get the rest of them.
+		sprintf(fullpath, "%s\\%s", path, filename);
+		InsertListItem(mc.datafbox[1], mc.datafbox[0], ind, filename, fullpath);
+		SetListItemImage(mc.datafbox[1], mc.datafbox[0], ind++, VAL_NO_IMAGE);
+		rv = GetNextFile(filename);
+	}
+	
+	if(pchanged)
+		path[strlen(path)] = '\\';
+	
+	free(filename);
+	free(spath);
+	free(fullpath);
+}
+
+void select_file(char *path) {
+	// Loads the file selected in the mc.datafbox list control. There is an "Are you sure?" message
+	// before it actually loads. 
+	
+	char *fname = malloc(MAX_PATHNAME_LEN+1);
+	char *msg = malloc(MAX_PATHNAME_LEN+1+strlen("Do you really want to load the file ?"));
+	
+	SplitPath(path, NULL, NULL, fname);
+	sprintf(msg, "Do you really want to load the file %s?", fname);
+	free(fname);
+	
+	int rv = ConfirmPopup("Really load data?", msg);
+	
+	free(msg);
+	
+	if(rv) {
+		rv = load_experiment(path);
+		
+		if(rv != 0)
+			display_ddc_error(rv);
+	}
+}
+
+void load_file_info(char *path, char *old_path) {
+	// First we'll try to save the old description.
+	if(old_path != NULL)
+		update_file_info(old_path);
+
+	if(!FileExists(path, NULL))	
+		return;
+
+	int rv;
+	DDCFileHandle file = NULL;
+	int len;
+	char *desc = NULL, *name = NULL;
+	
+	CmtGetLock(lock_tdm);
+	if(rv = DDC_OpenFileEx(path, "TDM", 1, &file)) { goto error; }
+	
+	// Get the base filename
+	DDC_GetFileStringPropertyLength(file, DDC_FILE_NAME, &len);
+	name = malloc(++len+10);
+	DDC_GetFileProperty(file, DDC_FILE_NAME, name, len);
+
+	// Set the base file name
+	SetCtrlVal(mc.basefname[1], mc.basefname[0], name);
+
+	// Calculate the next actual file name
+	// First we need the base path.
+	char *c = strrchr(path, '\\');
+	if(c != NULL) {
+		strncpy(name, c+1, strlen(c+1)-3);  // Copy filename without extension.
+		name[strlen(c+1)-4] = '\0';		// Null terminate
+		SetCtrlVal(mc.cdfname[1], mc.cdfname[0], name);
+	}
+	// Now get and set the description
+	DDC_GetFileStringPropertyLength(file, DDC_FILE_DESCRIPTION, &len);
+	desc = malloc(++len);
+	
+	DDC_GetFileProperty(file, DDC_FILE_DESCRIPTION, desc, len);
+	
+	ResetTextBox(mc.datadesc[1], mc.datadesc[0], desc);
+	SetCtrlAttribute(mc.datadesc[1], mc.datadesc[0], ATTR_DFLT_VALUE, desc);
+	
+	error:
+	if(file != NULL)
+		DDC_CloseFile(file);
+	CmtReleaseLock(lock_tdm);
+	
+	if(name != NULL)
+		free(name);
+	
+	if(desc != NULL)
+		free(desc);
+}
+
+void update_file_info(char *path) {
+	// Saves a new description for a TDM file.
+	if(!FileExists(path, NULL))
+		return;
+	
+	int rv;
+	DDCFileHandle file = NULL;
+	int len;
+	char *desc = NULL, *old_desc = NULL;
+	
+	// Get the description.
+	GetCtrlValStringLength(mc.datadesc[1], mc.datadesc[0], &len);
+	desc = (len >= 1)?malloc(len+1):NULL;
+	if(desc != NULL)
+		GetCtrlVal(mc.datadesc[1], mc.datadesc[0], desc);
+	
+	// Check if there's been a change. If not, don't bother.
+	GetCtrlAttribute(mc.datadesc[1], mc.datadesc[0], ATTR_DFLT_VALUE_LENGTH, &len);
+	old_desc = (len >= 1)?malloc(len+1):NULL;
+	if(old_desc != NULL)
+		GetCtrlAttribute(mc.datadesc[1], mc.datadesc[0], ATTR_DFLT_VALUE, old_desc);
+	
+	// If they are both NULL or they are the same, don't bother opening the file.
+	if(old_desc == NULL && desc == NULL || 
+		(old_desc != NULL && desc != NULL && strcmp(old_desc, desc) == 0)) { goto error; }
+		
+	CmtGetLock(lock_tdm);
+	if(rv = DDC_OpenFileEx(path, "TDM", 0, &file)) { goto error; }
+	
+	
+	if(rv = DDC_SetFileProperty(file, DDC_FILE_DESCRIPTION, desc)) { goto error; }
+	
+	DDC_SaveFile(file);
+	
+	error:
+	if(desc != NULL)
+		free(desc);
+	
+	if(old_desc != NULL)
+		free(old_desc);
+	
+	if(file != NULL)
+		DDC_CloseFile(file);
+	CmtReleaseLock(lock_tdm);
 }
 
 //////////////////////////////////////////////////////////////
@@ -819,7 +1287,7 @@ int write_data() {
 void load_data_popup() {
 	// The callback called from loading data.
 	char *path = malloc(MAX_FILENAME_LEN+MAX_PATHNAME_LEN);
-	int rv = FileSelectPopup((uidc.dlpath != NULL)?uidc.dlpath:"", "*.tdms", ".tdms", "Load Experiment from File", VAL_LOAD_BUTTON, 0, 1, 1, 1, path);
+	int rv = FileSelectPopup((uidc.dlpath != NULL)?uidc.dlpath:"", "*.tdm", ".tdm", "Load Experiment from File", VAL_LOAD_BUTTON, 0, 1, 1, 1, path);
 	
 	if(rv == VAL_NO_FILE_SELECTED) {
 		free(path);
@@ -832,7 +1300,7 @@ void load_data_popup() {
 	free(path);
 	
 	if(err_val != 0)
-		display_tdms_error(err_val);
+		display_ddc_error(err_val);
 	
 }
 
@@ -853,12 +1321,14 @@ void add_data_path_to_recent(char *opath) {
 	c[1] = '\0';				   // Truncate after the last separator.
 
 	if(c != NULL && FileExists(path, NULL)) {
+		CmtGetLock(lock_uidc);
 		if(uidc.dlpath == NULL)
 			uidc.dlpath = malloc(strlen(path)+1);
 		else
 			uidc.dlpath = realloc(uidc.dlpath, strlen(path)+1);
-
+		
 		strcpy(uidc.dlpath, path);
+		CmtReleaseLock(lock_uidc);
 	}
 	
 	free(path);
@@ -870,6 +1340,10 @@ int plot_data(double *data, int np, double sr, int nc) {
 	// np = Number of points
 	// sr = sampling rate
 	// nc = number of channels
+	//
+	// mode == 0 -> Plot FID only
+	// mode == 1 -> Plot Spectrum only
+	// mode == 2 -> Plot both.
 	//
 	// Data should be stored such that data[0->np-1] = channel 1, data[np+1->2*np] = channel 2, etc
 	//
@@ -887,7 +1361,9 @@ int plot_data(double *data, int np, double sr, int nc) {
 		return 1;
 	
 	clear_plots();	// Clear previous plot data.
+	CmtGetLock(lock_uidc);
 	uidc.sr = sr; 	// Update the UIDC variable.
+	CmtReleaseLock(lock_uidc);
 	
 	// Turn on autoscale if checked
 	int as;
@@ -943,7 +1419,9 @@ int plot_data(double *data, int np, double sr, int nc) {
 				curr_data[j] = curr_data[j]*uidc.fgain[i] + uidc.foff[i];
 		}
 		
+		CmtGetLock(lock_uidc);
 		uidc.fplotids[i] = PlotY(dc.fid, dc.fgraph, curr_data, np, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, uidc.fchans[i]?uidc.fcol[i]:VAL_TRANSPARENT);
+		CmtReleaseLock(lock_uidc);
 		
 		// Prepare the data.
 		PolyEv1D(freq, npfft/2, (double *)uidc.sphase[i], 3, phase);
@@ -965,9 +1443,11 @@ int plot_data(double *data, int np, double sr, int nc) {
 			col[uidc.schan] = 1;
 		}
 		
+		CmtGetLock(lock_uidc);
 		uidc.splotids[i][0] = PlotY(dc.spec, dc.sgraph, fft_re, npfft/2, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, col[0]?uidc.scol[i]:VAL_TRANSPARENT);
 		uidc.splotids[i][1] = PlotY(dc.spec, dc.sgraph, fft_im, npfft/2, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, col[1]?uidc.scol[i]:VAL_TRANSPARENT);
 		uidc.splotids[i][2] = PlotY(dc.spec, dc.sgraph, fft_mag, npfft/2, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, col[2]?uidc.scol[i]:VAL_TRANSPARENT);
+		CmtReleaseLock(lock_uidc);
 	}
 	
 	for(i = 0; i < 8; i++) {
@@ -1079,11 +1559,14 @@ int change_phase(int chan, double phase, int order) {
 	free(orc);
 	free(oic);
 	
+	CmtGetLock(lock_uidc);
 	uidc.sphase[c][order] = phase;
+	CmtReleaseLock(lock_uidc);
 	
 	return 0;
 
 }
+
 
 void update_experiment_nav() {
 	// Call this to update things like the number of transients available, the number of
@@ -1092,11 +1575,13 @@ void update_experiment_nav() {
 	// controls and un-hides the relevant controls.
 	
 	int i, j;
-	if(uidc.p == NULL || uidc.p->nt < 1){
+	if(ce.p == NULL || ce.p->nt < 1){
 		// If there is no program saved, no navigation is possible, dim/hide everything. 
 		for(j = 0; j < 2; j++) {
-			for(i = 0; i < 8; i++)
+			for(i = 0; i < 8; i++) {
 				SetCtrlAttribute(dc.cloc[j], dc.idrings[i], ATTR_VISIBLE, 0);
+				SetCtrlAttribute(dc.cloc[j], dc.idlabs[i], ATTR_VISIBLE, 0);
+			}
 			SetCtrlAttribute(dc.cloc[j], dc.ctrans, ATTR_DIMMED, 1);
 			DeleteListItem(dc.cloc[j], dc.ctrans, 0, -1);
 		}
@@ -1104,34 +1589,34 @@ void update_experiment_nav() {
 		return;  // And done - that was easy.
 	}
 	
-	PPROGRAM *p = uidc.p; // Convenience
-
-	// Get an array from the linear index
-	size_t size = sizeof(int)*(p->nDims+1);
-	int *maxsteps = malloc(size);
-	int *steps = malloc(size);
-
-	// The dimensionality of the cstep, which should be [nt, {dim1, ..., dimn}]
-	// p->maxstep is stored as {pc1, ... pcn, dim1, ... , dimn}
-	maxsteps[0] = p->nt;
-	if(p->nDims) 		// It's just a number if it's not multidimensional 
-		memcpy(&maxsteps[1], &p->maxsteps[p->nCycles], sizeof(int)*p->nDims);
-
-	if(get_cstep(uidc.cind, steps, maxsteps, p->nDims+1) != 1) { // On error, return
-		free(maxsteps);
-		free(steps);
-		return;
-	}
+	PPROGRAM *p = ce.p; // Convenience
 	
-	char **c = NULL;
+	int *steps = NULL;
 	
-	// If it's multidimensional, go through and turn on each of the controls.
-	for(j = 0; j < 2; j++) {
-		// Update the multidimensional bit
-		if(p->nDims) {
+	if(p->nDims) {   
+		// Get an array from the linear index
+		// The dimensionality of the cstep, which should be [nt, {dim1, ..., dimn}]
+		// p->maxstep is stored as {pc1, ... pcn, dim1, ... , dimn}
+		steps = malloc(sizeof(int)*(p->nDims));
+		
+		if(get_cstep((int)(ce.cind/(p->nt)), steps, &p->maxsteps[p->nCycles], p->nDims) != 1) { // On error, return
+			free(steps);
+			return;
+		}
+		
+		for(i = 0; i < p->nDims; i++)
+			steps[i]++;	// Convert to a 1-based index for this.
+		
+		char **c = NULL;
+	
+		// If it's multidimensional, go through and turn on each of the controls.
+		for(j = 0; j < 2; j++) {
+			// Update the multidimensional bit
 			int nl, elems, step;
 			for(i = 0; i < p->nDims; i++) { 
 				SetCtrlAttribute(dc.cloc[j], dc.idrings[i], ATTR_VISIBLE, 1);
+				SetCtrlAttribute(dc.cloc[j], dc.idlabs[i], ATTR_VISIBLE, 1);
+
 				GetNumListItems(dc.cloc[j], dc.idrings[i], &nl);
 				if(nl > 0)
 					GetCtrlIndex(dc.cloc[j], dc.idrings[i], &step);
@@ -1139,12 +1624,12 @@ void update_experiment_nav() {
 					step = -1;
 				
 				// Update the number of steps in each dimension.
-				if(nl > steps[i+1])
-					DeleteListItem(dc.cloc[j], dc.idrings[i], steps[i+1], -1);	
-				else if(nl < steps[i + 1]) {
-					c = generate_char_num_array(nl, steps[i+1], &elems);
-					for(int k = 0; k < elems; k++) {
-						InsertListItem(dc.cloc[j], dc.idrings[i], -1, c[k], k+nl);
+				if(nl > steps[i])
+					DeleteListItem(dc.cloc[j], dc.idrings[i], steps[i], -1);	
+				else if(nl < steps[i]) {
+					c = generate_char_num_array(nl, steps[i], &elems);
+					for(int k = 0; k < elems-1; k++) {
+						InsertListItem(dc.cloc[j], dc.idrings[i], -1, c[k], k+nl); // Zero-based index in the vals.
 						free(c[k]);
 					}
 					free(c);
@@ -1161,26 +1646,32 @@ void update_experiment_nav() {
 			}
 		}
 	}
+
+	if(steps != NULL) { free(steps); }
+	
+	for(j = 0; j < 2; j++) {
+		for(i = p->nDims; i < 8; i++) {
+			SetCtrlAttribute(dc.cloc[j], dc.idrings[i], ATTR_VISIBLE, 0);
+			SetCtrlAttribute(dc.cloc[j], dc.idlabs[i], ATTR_VISIBLE, 0);
+		}
+	}
 	
 	// Now update the transients
 	update_transients();
-	
-	free(maxsteps);
-	free(steps);
 }
 
 void update_transients() {
 	// Call this after you've changed the position in acquisition space, or in the event of a new
 	// addition to the number of transients. uidc.p must be set.
 	
-	if(uidc.p == NULL)
+	if(ce.p == NULL)
 		return;
 	
-	PPROGRAM *p = uidc.p;
+	PPROGRAM *p = ce.p;
 	
 	// Define variables so we don't have to do it twice in-line.
 	int nt, nl, ind, pan;
-	char *tc = malloc(strlen("Transient ")+(int)ceil(log10(p->nt))+1); // Allocate maximum needed.
+	char *tc = malloc(strlen("Transient ")+(int)ceil(log10(p->nt))+2); // Allocate maximum needed.
 
 	// Whole thing needs to be done twice, once for fft and once for fid.
 	for(int i = 0; i < 2; i++) {
@@ -1188,9 +1679,9 @@ void update_transients() {
 		// How many transients to display
 		if(p->nDims) {
 			ind = get_selected_ind(pan, 0, NULL);
-			nt = calculate_num_transients(uidc.cind, ind, p->nt);
+			nt = calculate_num_transients(ce.cind, ind, p->nt);
 		} else
-			nt = uidc.cind;
+			nt = ce.cind;
 		
 		if(nt)
 			SetCtrlAttribute(pan, dc.ctrans, ATTR_DIMMED, 0);
@@ -1209,17 +1700,14 @@ void update_transients() {
 				nl = 0;
 			} else if(nl > 1) {
 				// Check to make sure that the "Average" entry is there.
-				int len;
-				GetCtrlValStringLength(pan, dc.ctrans, &len);
+				int len, buff;
 				
-				char *buff = malloc(len+1);
-				GetCtrlVal(pan, dc.ctrans, buff);
-				if(strcmp(buff, "Average") != 0) {
+				GetCtrlVal(pan, dc.ctrans, &buff);
+				
+				if(buff != 0) { 					// Average has value 0.
 					DeleteListItem(pan, dc.ctrans, 0, -1); // Delete them all and start over.
 					nl = 0;
 				}
-				
-				free(buff);
 			}
 			if(nl == 0) {
 				InsertListItem(pan, dc.ctrans, 0, "Average", 0);
@@ -1238,6 +1726,65 @@ void update_transients() {
 	free(tc);
 }
 
+void set_nav_from_lind(int lind, int panel, int avg) {
+	// Feed this a lind vector and a parent panel (CurrentLoc-based) and it
+	// sets the nav controls to what you want them to be. lind is a linear 
+	// index in a space with size [nt {dim1, ..., dimn}]. ce.p must be set.
+	// If you want to ignore the transient value and plot the average, set
+	// avg = 1, otherwise 0 will give you the relevant transient.
+	
+	PPROGRAM *p = ce.p; 	// Convenience
+	int i, t;
+	
+	// Break the lindex up into a vector we can iterate through 
+	int *cstep = malloc(sizeof(int)*(p->nDims+1));
+	int *steps = malloc(sizeof(int)*(p->nDims+1));
+	for(i = 0; i < p->nDims; i++)
+		steps[i+1] = p->maxsteps[p->nCycles+i];
+	steps[0] = p->nt;
+	
+	if(get_cstep(lind, cstep, steps, p->nDims+1) != 1)
+		return;	// Error getting the current step.
+	
+	// Set the values, then we're done.
+	SetCtrlVal(panel, dc.ctrans, avg?0:cstep[0]+1);
+	for(i = 0; i < p->nDims; i++)
+		SetCtrlVal(panel, dc.idrings[i], cstep[i+1]);
+	
+	free(cstep);
+	free(steps);
+}
+
+void set_data_from_nav(int panel) {
+	// Grabs the current index from the nav and plots the data from the file.
+	// Panel should be a CurrentLoc panel
+	int lind, t;
+	
+	// Gets the position from the nav.
+	GetCtrlVal(panel, dc.ctrans, &t);
+	
+	if(ce.p->nDims) {
+		lind = get_selected_ind(panel, (t != 0), NULL); // If t == 0, we're getting an average. 
+		set_nav_from_lind(lind, dc.cloc[(panel == dc.cloc[0])?1:0], (t == 0));	// Setup the corresponding other tab.
+	} else
+		lind = (t == 0)?0:t-1;
+	
+	int rv = 0;
+	
+	double *data = load_data(ce.path, lind, ce.p, (t == 0), ce.nchan, &rv);
+	
+	if(rv != 0) {
+		display_ddc_error(rv);
+		goto error;
+	} 
+	
+	plot_data(data, ce.p->np, ce.p->sr, ce.nchan);	// Plot the data.
+	
+	error:
+	if(data != NULL)
+		free(data);
+}
+
 void clear_plots() {
 	// Running this will clear all plots currently on the screen. Unlike in the previous version
 	// this function will NOT clear the "location" bar. That is a separate function.
@@ -1249,11 +1796,13 @@ void clear_plots() {
 	DeleteGraphAnnotation(dc.spec, dc.sgraph, -1);
 	
 	// Replace the plotids with -1 to indicate that they are no longer in use.
+	CmtGetLock(lock_uidc);
 	for(int i = 0; i < 8; i++) {
 		uidc.fplotids[i] = -1;
 		for(int j = 0; j < 3; j++)
 			uidc.splotids[i][j] = -1;
 	}
+	CmtReleaseLock(lock_uidc);
 }
 
 int get_selected_ind(int panel, int t_inc, int *step) {
@@ -1266,9 +1815,9 @@ int get_selected_ind(int panel, int t_inc, int *step) {
 	//
 	// Panel should be a CurrentLoc panel, otherwise this will be terrible.
 	//
-	// uidc.p must already be set.
+	// ce.p must already be set.
 	
-	PPROGRAM *p = uidc.p;
+	PPROGRAM *p = ce.p;
 	if(p == NULL)
 		return -1;
 	
@@ -1287,7 +1836,7 @@ int get_selected_ind(int panel, int t_inc, int *step) {
 		if(!t_inc)	
 			return -3;   // Not multidimensional, didn't ask for transients.
 		else
-			return t;
+			return t-1;
 	}
 	
 	// We'll start by generating the vector.
@@ -1314,13 +1863,13 @@ int get_selected_ind(int panel, int t_inc, int *step) {
 	// Add in transient if necessary.
 	if(t_inc) {
 		ind *= p->nt;
-		ind += t;
+		ind += t-1; 
 	}
 	
 	if(step != NULL) {
 		memcpy(&step[t_inc?1:0], cstep, sizeof(int)*p->nDims); // Skip the first index if that one should have the transient in it.
 		if(t_inc)
-			step[0] = t;
+			step[0] = t-1;
 	}
 	
 	free(cstep); // No longer needed
@@ -1575,6 +2124,8 @@ void toggle_fid_chan(int num) {
 	// Update UIDC
 	int i, on;
 	GetCtrlVal(dc.fid, dc.fchans[num], &on);
+	
+	CmtGetLock(lock_uidc);
 	uidc.fchans[num] = on;
 	
 	if(on) {
@@ -1582,6 +2133,8 @@ void toggle_fid_chan(int num) {
 	} else {
 		uidc.fnc--;			// One fewer channel is on
 	}
+	CmtReleaseLock(lock_uidc);
+
 	
 	// Turn the data on or off
 	if(uidc.fplotids[num] >= 0)
@@ -1614,6 +2167,8 @@ void toggle_spec_chan(int num) {
 	
 	int i, on;
 	GetCtrlVal(dc.spec, dc.schans[num], &on);
+	
+	CmtGetLock(lock_uidc);
 	uidc.schans[num] = on;
 	
 	if(on) {
@@ -1621,7 +2176,8 @@ void toggle_spec_chan(int num) {
 	} else {
 		uidc.snc--;
 	}
-	
+	CmtReleaseLock(lock_uidc);
+
 	// Turn the data on or off
 	if(uidc.schan >= 0 && uidc.schan < 3 && uidc.splotids[num][uidc.schan] >= 0) {
 		SetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[num][uidc.schan], ATTR_TRACE_COLOR, on?uidc.scol[num]:VAL_TRANSPARENT);
@@ -1764,9 +2320,12 @@ void update_fid_chan_box() {
 
 /********* Device Interaction Settings ********/
 
-int get_current_fname (char *path, char *fname) {
+int get_current_fname (char *path, char *fname, int next) {
 	// Make sure that fname has been allocated to the length of the fname + 4 chars.
 	// Output is "fname", which is overwritten.
+	// 
+	// If "next" is TRUE, passes the next available one. Otherwise it
+	// passes the most recent one.
 	//
 	// Errors are:
 	// -1: Path or fname missing
@@ -1814,17 +2373,17 @@ int get_current_fname (char *path, char *fname) {
 	
 	// Check which ones are available.
 	for(i = 0; i < 10000; i++) {
-		sprintf(npath, "%s\\%s%04d.tdms", path, fname, i);
+		sprintf(npath, "%s\\%s%04d.tdm", path, fname, i);
 		if(!FileExists(npath, NULL))
 			break;
 	}
 	
-	if(i >= 10000) {
-		free(npath);
-		return -3;
-	}
+	free(npath);
 	
-	sprintf(fname, "%s%04d", fname, i); // The output
+	if(i >= 10000)
+		return -3;
+	
+	sprintf(fname, "%s%04d", fname, i-((next)?0:1)); // The output
 	return 1; 
 }
 
@@ -1844,7 +2403,10 @@ int get_devices () {		// Updates the device ring control.
 		GetCtrlValStringLength(pc.dev[1], pc.dev[0], &len);
 		old_dev = malloc(len+1);
 		GetCtrlVal(pc.dev[1], pc.dev[0], old_dev);
+		
+		CmtGetLock(lock_uidc);
 		GetCtrlIndex(pc.dev[1], pc.dev[0], &uidc.devindex);
+		CmtReleaseLock(lock_uidc);
 	}
 	
 	DeleteListItem(pc.dev[1], pc.dev[0], 0, -1);	// Delete devices if they exist.
@@ -1883,6 +2445,7 @@ int get_devices () {		// Updates the device ring control.
 	
 	// Get the index as close to what it used to be as we can.
 	if(nd >= 1) {
+		CmtGetLock(lock_uidc);
 		if(old_dev != NULL) {
 			int ind;
 			GetIndexFromValue(pc.dev[1], pc.dev[0], &ind, old_dev);
@@ -1894,6 +2457,7 @@ int get_devices () {		// Updates the device ring control.
 			uidc.devindex = nd-1;
 		
 		SetCtrlIndex(pc.dev[1], pc.dev[0], uidc.devindex);
+		CmtReleaseLock(lock_uidc);
 	} else {
 		MessagePopup("Error", "No devices available!\n");
 		rv = -1;
@@ -1990,6 +2554,7 @@ int load_DAQ_info() {
 	
 	// Change the uidc variable as appropriate.
 	if(nc != uidc.nchans) {
+		CmtGetLock(lock_uidc);
 		if(uidc.chans == NULL) {
 			uidc.chans = malloc(sizeof(int)*nc);
 			uidc.nchans = 1;
@@ -2001,15 +2566,20 @@ int load_DAQ_info() {
 			uidc.chans[i] = 0;
 		
 		uidc.nchans = nc;
+		CmtReleaseLock(lock_uidc);
 	}
 	
 	// Build an array of the names of the input channels
 	// Note: channel names are Device/Channel in this case, so we need to offset by devlen
 	// for UI purposes, otherwise the ring controls would look crowded.
+	CmtGetLock(lock_uidc);
 	uidc.onchans = 0;
+	CmtReleaseLock(lock_uidc);
 	channel_name = malloc(bsi);
 	char *buff_string = malloc(bsi);
 	p = p2 = input_chans;
+	
+	CmtGetLock(lock_uidc);
 	for(i = 0; i < nc; i++) {
 		p2 = strchr(p, ',');
 		if(p2 == NULL)
@@ -2031,8 +2601,10 @@ int load_DAQ_info() {
 			uidc.onchans++;
 		}
 		
+		
 		p = (p2 == NULL)?NULL:p2+2;	// Increment if necessary. Skip the ", "
 	}
+	CmtReleaseLock(lock_uidc);
 	
 	// Fix up the current channel setup while we're at it.
 	if(uidc.onchans)
@@ -2207,8 +2779,10 @@ void toggle_ic() {
 	free(value);
 	
 	// Update the uidc var now.
+	CmtGetLock(lock_uidc);
 	uidc.chans[val] = !uidc.chans[val];		// Toggle its place in the var
-
+	CmtReleaseLock(lock_uidc);
+	
 	// Finally, we'll do the bit where we set this to the right value.
 	if(!uidc.chans[val]) {
 		if(oval != val) {
@@ -2260,12 +2834,14 @@ void add_chan(char *label, int val) {
 	
 	InsertListItem(pc.curchan[1], pc.curchan[0], ind, label, val);
 	
+	CmtGetLock(lock_uidc);
 	// Now update the range controls
 	for(int j = uidc.onchans; j > i; j--)
 		uidc.range[j] = uidc.range[j-1];
 
 	GetCtrlAttribute(pc.range[1], pc.range[0], ATTR_DFLT_VALUE, &uidc.range[i]);
 	uidc.onchans++;
+	CmtReleaseLock(lock_uidc);
 }
 
 void remove_chan(int val) {
@@ -2285,10 +2861,12 @@ void remove_chan(int val) {
 	DeleteListItem(pc.curchan[1], pc.curchan[0], i, 1);
 	
 	// Move over all the range values
+	CmtGetLock(lock_uidc);
 	for(i; i < uidc.onchans-1; i++) 
 		uidc.range[i] = uidc.range[i+1];
 	
 	uidc.onchans--;
+	CmtReleaseLock(lock_uidc);
 	
 	change_chan();	// In case we deleted the current channel.
 }
@@ -2313,8 +2891,10 @@ void change_range() {
 	GetCtrlIndex(pc.curchan[1], pc.curchan[0], &chan);
 	GetCtrlVal(pc.range[1], pc.range[0], &val);
 	
+	CmtGetLock(lock_uidc);
 	if(chan >= 0 && chan < 8)
 		uidc.range[chan] = val;
+	CmtReleaseLock(lock_uidc);
 }
 //////////////////////////////////////////////////////////////
 // 															//
@@ -2336,6 +2916,7 @@ int setup_DAQ_task() {
 		goto error;
 	
 	CmtGetLock(lock_DAQ);
+	CmtGetLock(lock_ce);
 	
 	// First we create the tasks
 	ce.atname = "AcquireTask";
@@ -2381,7 +2962,7 @@ int setup_DAQ_task() {
 		GetValueFromIndex(pc.curchan[1], pc.curchan[0], i, &ic); // Channel index
 		
 		// Make sure there's enough room for the channel name.
-		GetValueLengthFromIndex(pc.ic[1], pc.ic[0], i, &len);
+		GetValueLengthFromIndex(pc.ic[1], pc.ic[0], ic, &len);
 		if(len > insize) {
 			insize = insize+len;
 			ic_name = realloc(ic_name, insize);
@@ -2389,7 +2970,7 @@ int setup_DAQ_task() {
 		
 		ce.icnames[i] = malloc(sizeof(char)*insize+1);
 		
-		GetValueFromIndex(pc.ic[1], pc.ic[0], i, ic_name); 	// Input channel name
+		GetValueFromIndex(pc.ic[1], pc.ic[0], ic, ic_name); 	// Input channel name
 		
 		strcpy(ce.icnames[i], ic_name);
 		
@@ -2444,20 +3025,21 @@ int setup_DAQ_task() {
 	GetCtrlVal(pc.trigc[1], pc.trigc[0], tc_name);	// Trigger channel name
 	GetCtrlVal(pc.trige[1], pc.trige[0], &edge);	// Trigger edge (rising or falling)
 	
-	if(rv = DAQmxCfgDigEdgeStartTrig(ce.cTask, tc_name, (int32)edge))
-		goto error;
-	
-	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_StartTrig_Retriggerable, TRUE))
-		goto error;
+	// Set up the trigger - use a 6.425 microsecond trigger.
+	if(rv = DAQmxCfgDigEdgeStartTrig(ce.cTask, tc_name, (int32)edge)) { goto error; }
+	if(rv = DAQmxCfgImplicitTiming(ce.cTask, DAQmx_Val_FiniteSamps, np)) { goto error; }
+	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_StartTrig_Retriggerable, TRUE)) { goto error; }
+	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_Enable, 1)) { goto error; }
+	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_MinPulseWidth, 6.425e-6)) { goto error; }
 	
 	// Set the counter output channel as the clock foro the analog task
-	if (rv = DAQmxCfgSampClkTiming(ce.aTask, cc_out_name, (float64)sr, DAQmx_Val_Rising, 
-									DAQmx_Val_ContSamps, np)) { goto error;}
+	if (rv = DAQmxCfgSampClkTiming(ce.aTask, cc_out_name, (float64)sr, DAQmx_Val_Rising, DAQmx_Val_ContSamps, np)) { goto error;}
 	
 	// Set the buffer for the input. Currently there is no programmatic protection against overruns
 	rv = DAQmxSetBufferAttribute(ce.aTask, DAQmx_Buf_Input_BufSize, (np*nc)+1000); // Extra 1000 in case
 	
 	error:
+	
 	if(tname != NULL)
 		free(tname);
 	
@@ -2483,6 +3065,7 @@ int setup_DAQ_task() {
 			DAQmxClearTask(ce.cTask);
 	}
 	
+	CmtReleaseLock(lock_ce);
 	CmtReleaseLock(lock_DAQ);
 	return rv;
 }
@@ -2490,6 +3073,7 @@ int setup_DAQ_task() {
 int clear_DAQ_task() {
 	int rv = 0;
 	CmtGetLock(lock_DAQ);
+	CmtGetLock(lock_ce);
 	
 	// Acquisition task
 	if(ce.atset) {
@@ -2506,6 +3090,7 @@ int clear_DAQ_task() {
 		}
 	}
 	
+	CmtReleaseLock(lock_ce);
 	CmtReleaseLock(lock_DAQ);
 	return rv;
 	
@@ -2516,7 +3101,6 @@ int clear_DAQ_task() {
 //				   PulseBlaster Interaction					//	
 // 															//
 //////////////////////////////////////////////////////////////
-
 
 
 

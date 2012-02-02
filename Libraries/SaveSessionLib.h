@@ -16,17 +16,21 @@
 //// Preferences
 // Elements
 #define MCXML_NPSRAT "NPSRATPrefs"			// Preferences on what happens when you change np, sr or at
+#define MCXML_TVIEW "TransientView"			// Preference for what transient to show on data acquisition.
 
 //// General
 #define MCXML_ACTIVETAB "ActiveTab"			// Active tab index.
 #define MCXML_DFBNAME "BaseDataFName" 		// Base filename for data files
 #define MCXML_DFPATH "DataPath"				// Data path
 #define MCXML_DLPATH "DataLoadPath"			// Data path for loading data files.
+#define MCXML_DDESC "DataDescription"		// Data file description
 #define MCXML_PPATH "ProgPath"				// Program path.
+#define MCXML_LFINFO "LoadFileInfo"			// Load file info -> boolean
 
 //// PulseProgConfig
 // Elements
 #define MCXML_DEV "Device"					// Device name
+#define MCXML_PBDEV "PulseBlaster_Dev"		// Spincore device index - int
 #define MCXML_CHANSON "ChansOn"				// Acquisition channels on (pas la chanson)
 #define MCXML_CHANNAMES "ChanNames"			// The names of the channels that are on.
 #define MCXML_CHANRANGE "ChanRanges"		// Ranges of the channels - ints.
@@ -51,11 +55,13 @@
 			  
 // Attributes
 #define MCXML_AUTOSCALE "Autoscale"			// Whether or not autoscale is on.
-#define MCXML_BOUND "NavBinding"			// Binding the navigation between spec/fid
 /************************* Function Declarations *************************/
 // UI Manipulation
 extern int load_ui(char *uifname);
 extern void setup_broken_ttls(void);
+
+extern void ppconfig_popout(void);
+extern int CVICALLBACK ppconfig_popin(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 
 // Struct Initialization
 extern void initialize_program(void);

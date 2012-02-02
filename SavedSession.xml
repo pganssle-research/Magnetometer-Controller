@@ -1,26 +1,37 @@
 <?xml version="1.0"?>
 <SSRoot Version="Magnetometer Controller Version 1.0">
 <Preferences>
-<NPSRATPrefs>0;0;2</NPSRATPrefs>
+<NPSRATPrefs>1;2;2</NPSRATPrefs>
+<TransientView>0</TransientView>
 </Preferences>
 <General>
-<ActiveTab>0</ActiveTab>
-<BaseDataFName>Experiment</BaseDataFName>
-<DataPath>C:\Omega\Data\Tests</DataPath>
-<DataLoadPath>c:\Omega\Data\Tests\</DataLoadPath>
-<ProgPath>c:\Users\Omega\Documents\SugarSync Shared Folders\Paul Ganssle\MC20\Programs\</ProgPath>
+<ActiveTab>3</ActiveTab>
+<BaseDataFName>120202-DiffusionTest</BaseDataFName>
+<DataPath>c:\Omega\Data\Diffusion\DiffusionTests</DataPath>
+<DataLoadPath>c:\Omega\Data\Diffusion</DataLoadPath>
+<ProgPath>c:\Users\Omega\Documents\Programming\MC20\Programs\</ProgPath>
+<DataDescription>Diffusion, +z, anti-helmholtz coil, now with sense resistor set at 10Ohms.</DataDescription>
+<LoadFileInfo>0</LoadFileInfo>
 </General>
-<PulseProgConfig TriggerTTL="23">
-<Device Index="0">Dev1</Device>
-<ChansOn Number="3">0;1;2</ChansOn>
-<ChanNames>ai0;ai1;ai2</ChanNames>
-<ChanRanges>10.0;10.0;10.0</ChanRanges>
-<CurrentChan Index="0">ai0</CurrentChan>
-<CounterChan Index="0">ctr0</CounterChan>
-<TrigChannel TrigEdge="10280">100kHzTimebase</TrigChannel>
-<BrokenTTLS>0</BrokenTTLS>
+<PulseProgConfig TriggerTTL="0">
+<Device Index="-1">
+</Device>
+<PulseBlaster_Dev>34680952</PulseBlaster_Dev>
+<ChansOn Number="0">
+</ChansOn>
+<ChanNames>
+</ChanNames>
+<ChanRanges>
+</ChanRanges>
+<CurrentChan Index="-1">
+</CurrentChan>
+<CounterChan Index="-1">
+</CounterChan>
+<TrigChannel TrigEdge="10280">
+</TrigChannel>
+<BrokenTTLS>8</BrokenTTLS>
 </PulseProgConfig>
-<DataDisp NavBinding="1">
+<DataDisp>
 <FID Autoscale="1">
 <ChansOn Number="1">0</ChansOn>
 <Colors>ffffff;00ff00;ff0000;00ffff;ffff00;a0a0a0;ff00ff;ff6103</Colors>
@@ -29,7 +40,7 @@
 </FID>
 <Spectrum Autoscale="1">
 <ChansOn Number="1">0</ChansOn>
-<Colors>ffffff;33cc33;ff0000;00ffff;ffff00;a0a0a0;ff00ff;ff6103</Colors>
+<Colors>ffffff;00ff00;ff0000;00ffff;ffff00;a0a0a0;ff00ff;ff6103</Colors>
 <Gains>1.0000000;1.0000000;1.0000000;1.0000000;1.0000000;1.0000000;1.0000000;1.0000000</Gains>
 <Offsets>0.0000000;0.0000000;0.0000000;0.0000000;0.0000000;0.0000000;0.0000000;0.0000000</Offsets>
 </Spectrum>
