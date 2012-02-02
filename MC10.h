@@ -1,12 +1,4 @@
 /************** Static Function Declarations **************/
-/************** Global Variable Declarations **************/
-extern int update_thread;
-extern int idle_thread;
-extern int lock_pb;
-extern int lock_pp;
-extern int lock_DAQ;
-extern int lock_plot;
-
 /************** Global Function Declarations **************/
 extern void *PtrToPtr64(const void *p);
 extern void *Ptr64ToPtr(const void *p);

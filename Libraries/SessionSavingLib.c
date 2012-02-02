@@ -19,16 +19,17 @@
 *****************************************************************************/
 
 // Includes
+#include "FileBrowser.h"
 #include <cvixml.h>
 #include "toolbox.h"
 #include <userint.h>
 #include <ansi_c.h>
 #include <spinapi.h>					// SpinCore functions
-#include <netcdf.h>						// NetCDF functions
 #include <NIDAQmx.h>
 
 #include <PulseProgramTypes.h>
 #include <cvitdms.h>
+#include <cviddc.h>
 #include <UIControls.h>					// For manipulating the UI controls
 #include <MathParserLib.h>
 #include <MCUserDefinedFunctions.h>
@@ -36,6 +37,7 @@
 #include <SaveSessionLib.h>
 #include <DataLib.h>
 #include <Magnetometer Controller.h>
+#include <General.h>
 
 // Globals
 char *session_fname = "SavedSession";
@@ -98,11 +100,15 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	initialize_program();
 	initialize_ce();
 	
-	// Load the DAQ values.
+	// Load the DAQ and PB values.
 	load_DAQ_info();
-	
+	load_pb_info(0);
+
 	// Now load the previous session
 	int rv = load_session(NULL);
+	
+	if(rv)
+		display_xml_error(rv);
 	
 	// Now load what UI stuff that needs to be loaded
 	setup_broken_ttls();
@@ -111,12 +117,63 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 		change_spec_chan_col(i);
 	}
 	
-	DisplayPanel (mc.mp);
-
-	if(rv)
-		display_xml_error(rv);
+	// Initialize the data navigation box
+	int len;
+	GetCtrlValStringLength(mc.datafbox[1], mc.datafbox[0], &len);
+	char *path = malloc(len+1);
+	GetCtrlVal(mc.path[1], mc.path[0], path);
+	select_directory(path);
 	
+	// Initialize the experiment choice
+	GetCtrlValStringLength(mc.basefname[1], mc.basefname[0], &len);
+	char *fname = malloc(len+5);	// Need to add 0000.tdm to this eventually.
+	GetCtrlVal(mc.basefname[1], mc.basefname[0], fname);
+	
+	int ldm;
+	GetCtrlVal(mc.ldatamode[1], mc.ldatamode[0], &ldm);
+	
+	get_current_fname(path, fname, !ldm);
+
+	if(path[strlen(path)-1] == '\\')
+		path[strlen(path)-1] = '\0';
+	
+	path = realloc(path, strlen(path)+strlen(fname)+6);
+	
+	strcat(path, "\\");
+	strcat(path, fname);
+	strcat(path, ".tdm");
+	
+	SetCtrlVal(mc.datafbox[1], mc.datafbox[0], path);
+	if(ldm)
+		load_file_info(path, NULL);
+	else 
+		SetCtrlVal(mc.cdfname[1], mc.cdfname[0], fname);
+	
+	free(fname);
+	free(path);
+
+	SetCtrlVal(pc.trig_ttl[1], pc.trig_ttl[0], uipc.trigger_ttl);
+	set_ttl_trigger(pc.inst[0], -1, 1);
+	
+	
+	// Do this for whatever reason.
 	update_experiment_nav();
+	
+	DisplayPanel (mc.mp);
+	
+	// If necessary, select the pulseblaster.
+	int nl;
+	GetNumListItems(pc.pbdev[1], pc.pbdev[0], &nl);
+	
+	if(nl) {
+		int pb;
+		GetCtrlVal(pc.pbdev[1], pc.pbdev[0], &pb);
+		pb_select_board(pb);
+	}
+	
+	// Add the tooltip to the skip condition
+	SetCtrlToolTipAttribute(pc.skiptxt[1], pc.skiptxt[0], CTRL_TOOLTIP_ATTR_TEXT, get_tooltip(1));
+	SetCtrlToolTipAttribute(pc.skiptxt[1], pc.skiptxt[0], CTRL_TOOLTIP_ATTR_ENABLE, 1);
 	
 	return 0;
 }
@@ -131,22 +188,35 @@ void setup_broken_ttls() {
 	}
 }
 
+/*************************** Panel Releases ***************************/
+
+void ppconfig_popout() {
+	// Releases the ppconfig panel.	
+	
+}
+
+int CVICALLBACK ppconfig_popin(int panel, int control, int event, void *callbackData, int eventData1, int eventData2) {
+	// Confines the ppconfig window.
+	
+	DiscardPanel(panel);
+	
+	return 0;
+}
+
+
 /*************************** Struct Initialization ***************************/
 
 void initialize_program() {
 	// Gets the initial values for uipc. For now it just initializes to
 	// a blank program, but eventually this will load a program from file
-	
-	/*  Uncomment this when you get session saving working.
-	char last_prog[16] = "SavedSession.nc";
-	PPROGRAM *p = malloc(sizeof(PPROGRAM));
-	LoadPulseProgram(last_prog, p, "program");
-	*/
 
+	CmtGetLock(lock_uipc);
+	
 	uipc.ni = 1;
 	uipc.max_ni = 1;
 	uipc.broken_ttls = 0;
 	uipc.total_time = 0.0;
+	uipc.trigger_ttl = 0;
 	
 	uipc.nd = 0;
 	uipc.max_nd = 0;
@@ -183,6 +253,8 @@ void initialize_program() {
 	uipc.max_cinstrs = NULL;
 	
 	uipc.ppath = NULL;
+	CmtReleaseLock(lock_uipc);
+
 	
 	//	Now allocate memory for the instruction arrays, then create one of each
 	pc.inst = malloc(sizeof(int));
@@ -199,20 +271,19 @@ void initialize_program() {
 	DisplayPanel(pc.cinst[0]);			// Display the first MD instruction
 	SetPanelAttribute(pc.cinst[0], ATTR_DIMMED, 1);
 	
-	// Set up the trigger ttl
-	GetCtrlVal(pc.trig_ttl[1], pc.trig_ttl[0], &uipc.trigger_ttl);
-	set_ttl_trigger(pc.inst[0], -1, 1);
-	
 	// Set up the initial callback data for np, sr and at callbacks.
 	InstallCtrlCallback(pc.sr[1], pc.sr[0], ChangeNP_AT_SR, (void *)0);
 	InstallCtrlCallback(pc.at[1], pc.at[0], ChangeNP_AT_SR, (void *)1);
-	InstallCtrlCallback(pc.np[1], pc.np[0], ChangeNP_AT_SR, (void *)0); 
+	InstallCtrlCallback(pc.np[1], pc.np[0], ChangeNP_AT_SR, (void *)0);
 	
+	// Set up the callback data for the transient view selection menu
+	for(int i = 0; i < 3; i++)
+		InstallMenuCallback(mc.mainmenu, mc.vtviewopts[i], ChangeTransientView, (void *)i);
 }
 
 void initialize_data() {
 	// Set up the default values in the uidc variable.
-	
+	CmtGetLock(lock_uidc);
 	uidc.nt = 1;
 	uidc.nd = 0;
 	
@@ -255,23 +326,14 @@ void initialize_data() {
 	uidc.nchans = 0;					// There are no channels before we get them
 	uidc.chans = NULL;
 	
-	// The loaded program indexing stuff
-	uidc.file = NULL;
-	uidc.mcg = NULL;
-	uidc.acg = NULL;
-	uidc.chs = NULL;
-	uidc.achs = NULL;
-	uidc.cnames = NULL;
-	uidc.p = NULL;
-	uidc.cind = -1;
-	uidc.nch = -1;
+	uidc.disp_update = 0;
 	
 	uidc.dlpath = NULL;
-
+	CmtReleaseLock(lock_uidc);
 }
 
 void initialize_uicontrols() {
-	// Function that populates the static portions of mc, pc and dc;
+	// Function that populates the static portions of mc, pc and dc;  
 	int i;
 	// Populate the main panel controls
 	mc.mtabs[0] = MainPanel_MainTabs;
@@ -280,6 +342,7 @@ void initialize_uicontrols() {
 	mc.cdfname[0] = MainPanel_CurrentFile;
 	mc.datadesc[0] = MainPanel_DataDescription;
 	mc.datafbox[0] = MainPanel_DataDirectory;
+	mc.ldatamode[0] = MainPanel_LoadInfoMode;
 	mc.basefname[0] = MainPanel_Filename;
 	mc.pbrun[0] = MainPanel_Running;
 	mc.pbwait[0] = MainPanel_Waiting;
@@ -295,6 +358,7 @@ void initialize_uicontrols() {
 	mc.cdfname[1] = mc.mp;
 	mc.datadesc[1] = mc.mp;
 	mc.datafbox[1] = mc.mp;
+	mc.ldatamode[1] = mc.mp;
 	mc.basefname[1] = mc.mp;
 	mc.pbrun[1] = mc.mp;
 	mc.pbwait[1] = mc.mp;
@@ -302,7 +366,42 @@ void initialize_uicontrols() {
 	mc.mainstatus[1] = mc.mp;
 	mc.startbut[1] = mc.mp;
 	mc.stopbut[1] = mc.mp;
+	
+	// Populate the menu bars
 
+	// Parent menus:
+	mc.file = MainMenu_File;	
+	mc.view = MainMenu_View;	
+	mc.setup = MainMenu_SetupMenu;
+	
+	// File controls
+	mc.fnew = MainMenu_File_New;	
+	mc.fnewacq = MainMenu_File_New_NewAcquisition;
+	mc.fnewprog = MainMenu_File_New_NewProgram;		
+	mc.fsave = MainMenu_File_Save;				
+	mc.fsavedata = MainMenu_File_Save_SaveData;		
+	mc.fsaveprog = MainMenu_File_Save_SaveProgram;			
+	mc.fload = MainMenu_File_Load;				
+	mc.floaddata = MainMenu_File_Load_LoadData;			
+	mc.floadrecdat = MainMenu_File_Load_LoadRecentData;
+	mc.floadprog = MainMenu_File_Load_LoadProgram;
+	mc.floadrecprog	= MainMenu_File_Load_LoadRecentProgram;	
+	mc.fquit = MainMenu_File_Quit;				
+	
+	// View controls
+	mc.vpchart = MainMenu_View_ProgramChart;			
+	mc.vtview = MainMenu_View_TransView;		
+	mc.vtviewopts[0] = MainMenu_View_TransView_ViewAverage;	
+	mc.vtviewopts[1] = MainMenu_View_TransView_ViewLatestTrans;	
+	mc.vtviewopts[2] = MainMenu_View_TransView_ViewNoUpdate;	
+	mc.vcstep = MainMenu_View_ChangeDimension;			
+	
+	// Setup controls
+	mc.supdaq = MainMenu_SetupMenu_UpdateDAQ;
+	mc.ssaveconfig = MainMenu_SetupMenu_SaveCurrentConfig;
+	mc.ssaveconfig_file = MainMenu_SetupMenu_SaveConfig;
+	mc.sloadconfig = MainMenu_SetupMenu_LoadConfigFromFile;
+	mc.sbttls = MainMenu_SetupMenu_BrokenTTLsMenu;
 	
 	// Populate the data tab controls
 	dc.fgraph = FID_Graph;		//FID controls first
@@ -354,7 +453,6 @@ void initialize_uicontrols() {
 	dc.sfftring[1] = dc.spec;
 	
 	dc.ctrans = CurrentLoc_TransientNum; 	// Now the current location controls
-	dc.bound = CurrentLoc_Bound;			// Binding LED
 	dc.idrings[0] = CurrentLoc_IDVal1;		// Ring control
 	dc.idlabs[0] = CurrentLoc_ID1;			// Label
 	dc.idrings[1] = CurrentLoc_IDVal2;		
@@ -417,6 +515,7 @@ void initialize_uicontrols() {
 	pc.np[0] = PPConfig_NPoints;
 	pc.at[0] = PPConfig_AcquisitionTime;
 	pc.dev[0] = PPConfig_Device;
+	pc.pbdev[0] = PPConfig_PBDeviceSelect;
 	pc.nc[0] = PPConfig_NumChans;
 	pc.ic[0] = PPConfig_AcquisitionChannel;
 	pc.cc[0] = PPConfig_CounterChan;
@@ -436,6 +535,7 @@ void initialize_uicontrols() {
 	pc.np[1] = pc.PPConfigPan;
 	pc.at[1] = pc.PPConfigPan;
 	pc.dev[1] = pc.PPConfigPan;
+	pc.pbdev[1] = pc.PPConfigPan;
 	pc.nc[1] = pc.PPConfigPan;
 	pc.ic[1] = pc.PPConfigPan;
 	pc.cc[1] = pc.PPConfigPan;
@@ -515,17 +615,19 @@ void initialize_uicontrols() {
 void initialize_ce() {
 	// Initializes ce. This will cause memory leaks if ce has already been set
 	// and the memory has not been freed. This mainly sets things to be NULL and such.
+	CmtGetLock(lock_ce);
 	
 	ce.ct = 0; 			// First transient
 	ce.nchan = -1;		// Allows for a test condition to see if this is set.
 	ce.ninst = -1;
-	ce.t_fist = 1;	
+	ce.t_first = 1;	
 	
 	// Null for a bunch of stuff
 	ce.fname = NULL;
 		
 	ce.aTask = ce.cTask = NULL;
 	ce.ctname = ce.atname = NULL;
+	ce.update_thread = -1;
 	ce.atset = 0;
 	ce.ctset = 0;
 
@@ -539,11 +641,9 @@ void initialize_ce() {
 	ce.path = NULL;
 	ce.desc = NULL;
 	
-	ce.td_file = NULL;
-	ce.mcg = NULL;
-	ce.acg = NULL;
-	ce.chans = NULL;
-	ce.achans = NULL;
+	ce.cind = -1;
+	
+	CmtReleaseLock(lock_ce);
 }
 
 int *get_broken_ttl_ctrls() {
@@ -632,7 +732,7 @@ int save_session(char *filename) { // Primary session saving function
 	char *fname = NULL, *buff = NULL, *buff2 = NULL;
 
 	// General stuff
-	char *bfname = NULL, *fpath = NULL, *dlpath = NULL, *ppath = NULL;
+	char *bfname = NULL, *fpath = NULL, *dlpath = NULL, *ppath = NULL, *ddesc = NULL;
 	
 	// PulseProgConfig stuff
 	char *devname, *cnames, *trige, *trigc, *countc, *curcc; 
@@ -647,7 +747,7 @@ int save_session(char *filename) { // Primary session saving function
 	fname = malloc(strlen(fbuff)+strlen(".tdms")+1);
 	
 	// We're going to start by saving the program, because that has a ui_cleanup call in it
-	sprintf(fname, "%s.tdms", fbuff);
+	sprintf(fname, "%s.tdm", fbuff);
 	SavePulseProgram(fname, NULL);
 	
 	sprintf(fname, "%s.xml", fbuff);
@@ -655,11 +755,12 @@ int save_session(char *filename) { // Primary session saving function
 	// Now create an XML file
 	CVIXMLDocument xml_doc = -1;
 	CVIXMLElement r_e = 0, pref_e = 0, gen_e = 0, ppc_e = 0, dd_e = 0;
-	CVIXMLElement npsrat_e = 0;
-	CVIXMLElement bf_e = 0, fpath_e = 0, at_e = 0, dlpath_e = 0, ppath_e = 0;
-	CVIXMLElement dev_e, chans_e, chann_e, chanr_e, trig_e, bttls_e, curcc_e, countc_e;
+	CVIXMLElement npsrat_e = 0, tview_e = 0;					 
+	CVIXMLElement bf_e, fpath_e, at_e, dlpath_e, ppath_e, lfinfo_e, ddesc_e;
+	CVIXMLElement dev_e, pbdev_e, chans_e, chann_e, chanr_e, trig_e, bttls_e, curcc_e, countc_e;
    	CVIXMLElement fid_e, spec_e, col_e, gain_e, off_e, con_e;
-	dev_e = chans_e = chann_e = chanr_e = trig_e = bttls_e = curcc_e = countc_e = 0;
+	bf_e = fpath_e = at_e = dlpath_e = ppath_e = lfinfo_e = ddesc_e = 0;
+	dev_e = pbdev_e = chans_e = chann_e = chanr_e = trig_e = bttls_e = curcc_e = countc_e = 0;
 	fid_e = spec_e = col_e = gain_e = off_e = con_e = 0;
 	
 	int g = 200, s = 200, len, g2 = 200;
@@ -682,17 +783,10 @@ int save_session(char *filename) { // Primary session saving function
 
 	
 	// Now create the highest-level child elements.
-	if(rv = CVIXMLNewElement(r_e, -1, MCXML_PREFS, &pref_e))	// User preferences
-		goto error;
-	
-	if(rv = CVIXMLNewElement(r_e, -1, MCXML_GEN, &gen_e))		// General controls
-		goto error;
-	
-	if(rv = CVIXMLNewElement(r_e, -1, MCXML_PPC, &ppc_e))		// Pulse program configuration
-		goto error;
-	
-	if(rv = CVIXMLNewElement(r_e, -1, MCXML_DDISP, &dd_e))		// Data display info
-		goto error;
+	if(rv = CVIXMLNewElement(r_e, -1, MCXML_PREFS, &pref_e)) { goto error; }	// User preferences
+	if(rv = CVIXMLNewElement(r_e, -1, MCXML_GEN, &gen_e)) { goto error; }		// General controls
+	if(rv = CVIXMLNewElement(r_e, -1, MCXML_PPC, &ppc_e)) { goto error; }		// Pulse program configuration
+	if(rv = CVIXMLNewElement(r_e, -1, MCXML_DDISP, &dd_e)) { goto error; }		// Data display info
 	
 	CVIXMLDiscardElement(r_e);
 	r_e = 0;
@@ -721,9 +815,17 @@ int save_session(char *filename) { // Primary session saving function
 	if(rv = CVIXMLNewElement(pref_e, -1, MCXML_NPSRAT, &npsrat_e)) { goto error; }
 	if(rv = CVIXMLSetElementValue(npsrat_e, buff)) { goto error; }
 	
+	
+	// Get the transient view preferences.
+	sprintf(buff, "%d", uidc.disp_update);
+	
+	if(rv = CVIXMLNewElement(pref_e, -1, MCXML_TVIEW, &tview_e)) { goto error; }
+	if(rv = CVIXMLSetElementValue(tview_e, buff)) { goto error; }
+	
+	CVIXMLDiscardElement(tview_e);
 	CVIXMLDiscardElement(npsrat_e);
 	CVIXMLDiscardElement(pref_e);
-	npsrat_e = pref_e =  0;
+	tview_e = npsrat_e = pref_e =  0;
 	
 	//////////////////////////////////////////////////
 	//												//
@@ -741,45 +843,79 @@ int save_session(char *filename) { // Primary session saving function
 	CVIXMLDiscardElement(at_e);
 	at_e = 0;
 	
-	// Get the filenames and such that we need to save..
+	// Get the filenames and such that we need to save.
 	GetCtrlValStringLength(mc.basefname[1], mc.basefname[0], &len);
 	bfname = malloc(len+1);
 	
 	GetCtrlValStringLength(mc.path[1], mc.path[0], &len);
+	
 	fpath = malloc(len+1);
+	
+	GetCtrlValStringLength(mc.datadesc[1], mc.datadesc[0], &len);
+	if(len > 0) { 
+		ddesc = malloc(len+1);
+		GetCtrlVal(mc.datadesc[1], mc.datadesc[0], ddesc);
+	}
 	
 	GetCtrlVal(mc.basefname[1], mc.basefname[0], bfname);
 	GetCtrlVal(mc.path[1], mc.path[0], fpath);
-	
+
+	CmtGetLock(lock_uidc);
 	if(uidc.dlpath == NULL) 
 		uidc.dlpath = fpath;
+	CmtReleaseLock(lock_uidc);
 	
+	CmtGetLock(lock_uipc);
 	if(uipc.ppath == NULL)
 		uipc.ppath = "Programs";
+	CmtReleaseLock(lock_uipc);
 	
 	// Create the elements
+	// Base data file name
 	if(rv = CVIXMLNewElement(gen_e, -1, MCXML_DFBNAME, &bf_e)) { goto error; }
 	if(rv = CVIXMLSetElementValue(bf_e, bfname)) { goto error; }
 
+	// Data path (as displayed)
 	if(rv = CVIXMLNewElement(gen_e, -1, MCXML_DFPATH, &fpath_e)) { goto error; }
 	if(rv = CVIXMLSetElementValue(fpath_e, fpath)) { goto error; }
 	
+	// Data load path
 	if(rv = CVIXMLNewElement(gen_e, -1, MCXML_DLPATH, &dlpath_e)) { goto error; }
 	if(rv = CVIXMLSetElementValue(dlpath_e, uidc.dlpath)) { goto error; }
 	
+	// Pulse program load path
 	if(rv = CVIXMLNewElement(gen_e, -1, MCXML_PPATH, &ppath_e)) { goto error; }
 	if(rv = CVIXMLSetElementValue(ppath_e, uipc.ppath)) { goto error; }
 	
+	// Data description
+	if(rv = CVIXMLNewElement(gen_e, -1, MCXML_DDESC, &ddesc_e)) { goto error; }
+	if(ddesc != NULL){  
+		if(rv = CVIXMLSetElementValue(ddesc_e, ddesc)) { goto error; }
+	} else {
+		if(rv = CVIXMLSetElementValue(ddesc_e, " ")) { goto error; }
+	}
+	
+	// Load data preference
+	int lfinfo;
+	GetCtrlVal(mc.ldatamode[1], mc.ldatamode[0], &lfinfo);
+	sprintf(buff, "%d", lfinfo);
+	
+	if(rv = CVIXMLNewElement(gen_e, -1, MCXML_LFINFO, &lfinfo_e)) { goto error; }
+	if(rv = CVIXMLSetElementValue(lfinfo_e, buff)) { goto error; }
+	
+	free(ddesc);
 	free(bfname);
 	free(fpath);
-	bfname = fpath = NULL;
+	ddesc = bfname = fpath = NULL;
 	
 	CVIXMLDiscardElement(bf_e);
 	CVIXMLDiscardElement(fpath_e);
 	CVIXMLDiscardElement(ppath_e);
 	CVIXMLDiscardElement(dlpath_e);
+	CVIXMLDiscardElement(lfinfo_e);
+	CVIXMLDiscardElement(ddesc_e);
 	CVIXMLDiscardElement(gen_e);
-	gen_e = bf_e = fpath_e = dlpath_e = ppath_e = 0;
+	gen_e = bf_e = fpath_e = dlpath_e = ppath_e = lfinfo_e = ddesc_e = 0;
 
 	//////////////////////////////////////////////////
 	//												//
@@ -827,6 +963,20 @@ int save_session(char *filename) { // Primary session saving function
 	a = malloc(1);
 	free(a);
 	
+	// Now save the Pulseblaster device.
+	int pb_dev;
+	GetCtrlVal(pc.pbdev[1], pc.pbdev[0], &pb_dev);
+	
+	if(pb_dev >= 0) {
+		sprintf(buff, "%d", pb_dev);
+		
+		if(rv = CVIXMLNewElement(ppc_e, -1, MCXML_PBDEV, &pbdev_e)) { goto error; }
+		if(rv = CVIXMLSetElementValue(pbdev_e, buff)) { goto error; }
+		
+		CVIXMLDiscardElement(pbdev_e);
+		pbdev_e = 0;
+	}
+	
 	// Now the channels that are on and various information about them.
 	int nchans, conlen = 0, cnamelen = 0;
 	GetNumListItems(pc.curchan[1], pc.curchan[0], &nchans);
@@ -854,7 +1004,7 @@ int save_session(char *filename) { // Primary session saving function
 			g2 = realloc_if_needed(buff2, g2, len, s);
 			g3 = realloc_if_needed(cnames, g3, cinlen, s);
 			
-			GetLabelFromIndex(pc.ic[1], pc.ic[0], i, buff2);
+			GetLabelFromIndex(pc.ic[1], pc.ic[0], cind, buff2);
 			
 			sprintf(buff, "%s%d;", buff, cind);
 			sprintf(cnames, "%s%s;", cnames, &buff2[1]);
@@ -985,18 +1135,11 @@ int save_session(char *filename) { // Primary session saving function
 	//			      Data Display					//
 	//												//
 	//////////////////////////////////////////////////
-	// Add the "bound" attribute to the Data Display element
-	int bind;
-	
-	GetCtrlVal(dc.cloc[0], dc.bound, &bind);
-	sprintf(buff, "%d", bind);
-	if(rv = CVIXMLAddAttribute(dd_e, MCXML_BOUND, buff)) { goto error; }
-	
 	//// Make the FID and Spectrum elements
 	int as;
 	if(rv = CVIXMLNewElement(dd_e, -1, MCXML_FID, &fid_e)) { goto error; }
 	
-	// Add the autoscale and binding attributes on the FID element.
+	// Add the autoscale attribute to  FID element.
 	GetCtrlVal(dc.fid, dc.fauto, &as);
 	sprintf(buff, "%d", as);
 	if(rv = CVIXMLAddAttribute(fid_e, MCXML_AUTOSCALE, buff)) {	goto error; }	// Autoscale on/off
@@ -1168,6 +1311,7 @@ int save_session(char *filename) { // Primary session saving function
 	if(fpath != NULL) { free(fpath); }
 	if(dlpath != NULL) { free(dlpath); }
 	if(ppath != NULL) { free(ppath); }
+	if(ddesc != NULL) { free(ddesc); }
 	if(devname != NULL) { free(buff); }
 	if(cnames != NULL) { free(cnames); }
 	if(trige != NULL) { free(trige); }
@@ -1186,12 +1330,16 @@ int save_session(char *filename) { // Primary session saving function
 	if(ppc_e != 0) { CVIXMLDiscardElement(ppc_e); }
 	if(dd_e != 0) { CVIXMLDiscardElement(dd_e); }
 	if(npsrat_e != 0) { CVIXMLDiscardElement(npsrat_e); }
+	if(tview_e != 0) { CVIXMLDiscardElement(tview_e); }
 	if(bf_e != 0) { CVIXMLDiscardElement(bf_e); }
 	if(fpath_e != 0) { CVIXMLDiscardElement(fpath_e); }
 	if(dlpath_e != 0) { CVIXMLDiscardElement(dlpath_e); }
+	if(ddesc_e != 0) { CVIXMLDiscardElement(ddesc_e); }
+	if(lfinfo_e != 0) { CVIXMLDiscardElement(lfinfo_e); }
 	if(ppath_e != 0) { CVIXMLDiscardElement(ppath_e); }
 	if(at_e != 0) { CVIXMLDiscardElement(at_e); }
 	if(dev_e != 0) { CVIXMLDiscardElement(dev_e); }
+	if(pbdev_e != 0) { CVIXMLDiscardElement(pbdev_e); }
 	if(chans_e != 0) { CVIXMLDiscardElement(chans_e); }
 	if(chann_e != 0) { CVIXMLDiscardElement(chann_e); }
 	if(chanr_e != 0) { CVIXMLDiscardElement(chanr_e); }
@@ -1264,9 +1412,9 @@ int load_session(char *filename) { // Primary session loading function
 	char *fbuff = (filename == NULL)?session_fname:filename;
 	char *fname = NULL, *buff = NULL, *buff2 = NULL, *p = NULL;
 
-	// PulseProgConfig
-	char *devname, *cnames, *trige, *trigc, *countc, *curcc;
-	devname = cnames = trige = trigc = countc = curcc = NULL;
+	// PulseProgConfig and also ddesc
+	char *devname, *cnames, *trige, *trigc, *countc, *curcc, *ddesc;
+	devname = cnames = trige = trigc = countc = curcc = ddesc = NULL;
 	
 	// Our first memory allocation stuff.
 	int g = 200, s = 200, g2 = 200;
@@ -1279,17 +1427,18 @@ int load_session(char *filename) { // Primary session loading function
 	
 	// Elements
 	CVIXMLElement r_e = 0, pref_e = 0, gen_e = 0, ppc_e = 0, dd_e = 0;
-	CVIXMLElement npsrat_e = 0;
-	CVIXMLElement at_e = 0,  bf_e = 0, fpath_e = 0, ppath_e = 0, dlpath_e = 0;
-	CVIXMLElement dev_e, chans_e, chann_e, chanr_e, trig_e, bttls_e, curcc_e, countc_e;
+	CVIXMLElement npsrat_e = 0, tview_e = 0;
+	CVIXMLElement at_e,  bf_e, fpath_e, ppath_e, dlpath_e, lfinfo_e, ddesc_e;
+	CVIXMLElement dev_e, pbdev_e, chans_e, chann_e, chanr_e, trig_e, bttls_e, curcc_e, countc_e;
 	CVIXMLElement fid_e, spec_e, con_e, col_e, gain_e, off_e;
-	dev_e = chans_e = chann_e = chanr_e = trig_e = bttls_e = curcc_e = countc_e = 0;
+	at_e = bf_e = fpath_e = ppath_e = dlpath_e = lfinfo_e = ddesc_e = 0;
+	dev_e = pbdev_e = chans_e = chann_e = chanr_e = trig_e = bttls_e = curcc_e = countc_e = 0;
 	fid_e = spec_e = con_e = col_e = gain_e = off_e = 0;
 	
 	// Attributes
 	CVIXMLAttribute ind_a = 0, num_a = 0;
 	CVIXMLAttribute trttl_a = 0, edge_a = 0;
-	CVIXMLAttribute as_a = 0, bind_a = 0;
+	CVIXMLAttribute as_a = 0;
 	
 	// Unlike with the save_session function, we'll end with the pulse program, since we need
 	// to make sure broken ttls and trigger ttls and such are set up.
@@ -1298,20 +1447,11 @@ int load_session(char *filename) { // Primary session loading function
 		goto error;
 	
 	// Get the root element and the main elements.
-	if(rv = CVIXMLGetRootElement(xml_doc, &r_e))
-		goto error;
-	
-	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PREFS, &pref_e))
-		goto error;
-	
-	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_GEN, &gen_e))
-		goto error;
-	
-	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PPC, &ppc_e))
-		goto error;
-	
-	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_DDISP, &dd_e))
-		goto error;
+	if(rv = CVIXMLGetRootElement(xml_doc, &r_e)) { goto error; }
+	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PREFS, &pref_e)) { goto error; }
+	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_GEN, &gen_e)) { goto error; }
+	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PPC, &ppc_e)) { goto error; }
+	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_DDISP, &dd_e)) { goto error; }
 	
 	//////////////////////////////////////////////////
 	//												//
@@ -1319,10 +1459,10 @@ int load_session(char *filename) { // Primary session loading function
 	//												//
 	//////////////////////////////////////////////////
 	
-	// Get the NP, SR and AT prefs.
+	// Get the child elements
 	if(pref_e != 0) {
-		if(rv = CVIXMLGetChildElementByTag(pref_e, MCXML_NPSRAT, &npsrat_e))
-			goto error;
+		if(rv = CVIXMLGetChildElementByTag(pref_e, MCXML_NPSRAT, &npsrat_e)) { goto error; } 	// NP, SR, AT Prefs
+		if(rv = CVIXMLGetChildElementByTag(pref_e, MCXML_TVIEW, &tview_e)) { goto error; }		// Transient view pref
 		
 		CVIXMLDiscardElement(pref_e);
 		pref_e = 0;
@@ -1351,6 +1491,30 @@ int load_session(char *filename) { // Primary session loading function
 		npsrat_e = 0;
 	}
 	
+	
+	if(tview_e != 0) {
+		if(rv = CVIXMLGetElementValue(tview_e, buff)) { goto error; }
+		
+		int tview = -1;
+		sscanf(buff, "%d", &tview);
+		
+		if(tview < 0 || tview > 2)
+			tview = 0;
+		
+		CmtGetLock(lock_uidc);
+		uidc.disp_update = tview; // Update the uidc var.
+		CmtReleaseLock(lock_uidc);
+		
+		// Need to make sure that the menu bar checking reflects the uidc var. 
+
+		for(i = 0; i < 3; i++)
+			SetMenuBarAttribute(mc.mainmenu, mc.vtviewopts[i], ATTR_CHECKED, (i == tview)?1:0);
+		
+		// Free memory
+		CVIXMLDiscardElement(tview_e);
+		tview_e = 0;
+	}
+	
 	//////////////////////////////////////////////////
 	//												//
 	//					 General					//
@@ -1363,9 +1527,12 @@ int load_session(char *filename) { // Primary session loading function
 		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_DFBNAME, &bf_e)) { goto error; }
 		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_DFPATH, &fpath_e)) { goto error; }
 		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_DLPATH, &dlpath_e)) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_DDESC, &ddesc_e)) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_LFINFO, &lfinfo_e)) { goto error; }
 		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_PPATH, &ppath_e)) { goto error; }
 		
 		CVIXMLDiscardElement(gen_e);
+		
 		gen_e = 0;
 	}
 	
@@ -1424,13 +1591,33 @@ int load_session(char *filename) { // Primary session loading function
 		if(rv = CVIXMLGetElementValue(dlpath_e, buff)) { goto error; }
 		
 		// We don't want to set dlpath to anything but NULL unless we actually have something to put there.
+		CmtGetLock(lock_uidc);
 		if(len > 0) {
 			uidc.dlpath = malloc(len+1);
 			strcpy(uidc.dlpath, buff);
 		}
+		CmtReleaseLock(lock_uidc);
 		
 		CVIXMLDiscardElement(dlpath_e);
 		dlpath_e = 0;
+	}
+	
+	// Data description
+	if(ddesc_e != 0) {
+		if((rv = CVIXMLGetElementValueLength(ddesc_e, &len)) && rv != 1) { goto error; }
+		ddesc = malloc(len+1);
+		
+		if(len > 0) {
+			if(rv = CVIXMLGetElementValue(ddesc_e, ddesc)) { goto error; }
+		
+			SetCtrlVal(mc.datadesc[1], mc.datadesc[0], ddesc);
+		}
+		
+		free(ddesc);
+		ddesc = NULL;
+
+		CVIXMLDiscardElement(ddesc_e);
+		ddesc_e = 0;
 	}
 	
 	// Program load path
@@ -1443,12 +1630,27 @@ int load_session(char *filename) { // Primary session loading function
 		if(rv = CVIXMLGetElementValue(ppath_e, buff)) { goto error; }
 		
 		if(len > 0) {
+			CmtGetLock(lock_uipc);
 			uipc.ppath = malloc(len+1);
 			strcpy(uipc.ppath, buff);
+			CmtReleaseLock(lock_uipc);
 		}
 		
 		CVIXMLDiscardElement(ppath_e);
 		ppath_e = 0;
+	}
+	
+	// Load file info preference
+	if(lfinfo_e != 0) {								// Boolean, can't overrun buffer.
+		if(rv = CVIXMLGetElementValue(lfinfo_e, buff)) { goto error; }
+		
+		int lfinfo = 0;			// Default to no
+		sscanf(buff, "%d", &lfinfo);
+		
+		SetCtrlVal(mc.ldatamode[1], mc.ldatamode[0], lfinfo);
+		
+		CVIXMLDiscardElement(lfinfo_e);
+		lfinfo_e = 0;
 	}
 	
 	//////////////////////////////////////////////////
@@ -1461,6 +1663,7 @@ int load_session(char *filename) { // Primary session loading function
 	if(ppc_e != 0) {
 		if(rv = CVIXMLGetAttributeByName(ppc_e, MCXML_TRIGTTL, &trttl_a))  { goto error; }
 		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_DEV, &dev_e)) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_PBDEV, &pbdev_e)) { goto error; }
 		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_CHANSON, &chans_e)) { goto error; }
 		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_CHANNAMES, &chann_e)) { goto error; }
 		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_CHANRANGE, &chanr_e)) { goto error; }
@@ -1481,8 +1684,12 @@ int load_session(char *filename) { // Primary session loading function
 		int trig_ttl = -1;
 		sscanf(buff, "%d", &trig_ttl);
 		
-		if(trig_ttl >= 0 && trig_ttl < 24)
+		if(trig_ttl >= 0 && trig_ttl < 24) {
+			CmtGetLock(lock_uipc);
 			uipc.trigger_ttl = trig_ttl;
+			CmtReleaseLock(lock_uipc);
+			SetCtrlVal(pc.trig_ttl[1], pc.trig_ttl[0], trig_ttl);
+		}
 		
 		CVIXMLDiscardAttribute(trttl_a);
 		trttl_a = 0;
@@ -1535,6 +1742,22 @@ int load_session(char *filename) { // Primary session loading function
 		dev_e = 0;
 	}
 	
+	// PulseBlaster Device
+	if(pbdev_e != 0) { 
+		if(rv = CVIXMLGetElementValue(pbdev_e, buff)) { goto error; } 	// Can't cause buffer overruns
+		
+		int pbdev = 0, nl;
+		sscanf(buff, "%d", &pbdev);
+		
+		GetNumListItems(pc.pbdev[1], pc.pbdev[0], &nl);
+		
+		if(pbdev < nl)
+			SetCtrlVal(pc.pbdev[1], pc.pbdev[0], pbdev);
+		
+		CVIXMLDiscardElement(pbdev_e);
+		pbdev_e = 0;
+	}
+	
 	// Channels
 	if(chans_e != 0) {
 		// First get the number of channels attribute.
@@ -1552,6 +1775,7 @@ int load_session(char *filename) { // Primary session loading function
 		// Get which indexes they are.
 		if(num > 0) {
 			inds =  malloc(sizeof(int)*num);
+			CmtGetLock(lock_uidc);
 			uidc.onchans = num;
 			
 			if(rv = CVIXMLGetElementValue(chans_e, buff)) { goto error; }
@@ -1567,6 +1791,8 @@ int load_session(char *filename) { // Primary session loading function
 				}
 				p = strtok(NULL, ";");
 			}
+			
+			CmtReleaseLock(lock_uidc);
 		}
 		CVIXMLDiscardElement(chans_e);
 		chans_e = 0;
@@ -1631,6 +1857,8 @@ int load_session(char *filename) { // Primary session loading function
 		// the proper user interface.
 		int j = 0;
 		int vlen;
+		
+		CmtGetLock(lock_uidc);
 		uidc.onchans = 0;
 		for(i = 0; i < num; i++) {
 			if(inds[i] < 0)
@@ -1654,6 +1882,7 @@ int load_session(char *filename) { // Primary session loading function
 			
 			j++;	// Counter of how many things we've added.
 		}
+		CmtReleaseLock(lock_uidc);
 		
 		SetCtrlVal(pc.nc[1], pc.nc[0], uidc.onchans);
 		
@@ -1671,6 +1900,10 @@ int load_session(char *filename) { // Primary session loading function
 		if(rv = CVIXMLGetAttributeByName(curcc_e, MCXML_INDEX, &ind_a)) { goto error; }
 		
 		int o_ind = -1;
+
+		if((rv = CVIXMLGetElementValueLength(curcc_e, &len)) && rv != 1) { goto error; } 
+		GetNumListItems(pc.curchan[1], pc.curchan[0], &nl);
+
 		if(ind_a != 0) {
 			if(rv = CVIXMLGetAttributeValue(ind_a, buff)) { goto error; }
 			
@@ -1679,9 +1912,6 @@ int load_session(char *filename) { // Primary session loading function
 			CVIXMLDiscardAttribute(ind_a);
 			ind_a = 0;
 		}
-		
-		if(rv = CVIXMLGetElementValueLength(curcc_e, &len)) { goto error; } 
-		GetNumListItems(pc.curchan[1], pc.curchan[0], &nl);
 		
 		if(nl > 0 && len > 0) {
 			g = realloc_if_needed(buff, g, len+1, s);
@@ -1727,7 +1957,7 @@ int load_session(char *filename) { // Primary session loading function
 			ind_a = 0;
 		}
 		
-		if(rv = CVIXMLGetElementValueLength(countc_e, &len)) { goto error; }
+		if((rv = CVIXMLGetElementValueLength(countc_e, &len)) && rv != 1) { goto error; }
 		
 		GetNumListItems(pc.cc[1], pc.cc[0], &nl);
 		if(nl > 0 && len > 0) {
@@ -1762,7 +1992,7 @@ int load_session(char *filename) { // Primary session loading function
 
 	// Trigger channel
 	if(trig_e) {
-		if(rv = CVIXMLGetElementValueLength(trig_e, &len)) { goto error; }
+		if((rv = CVIXMLGetElementValueLength(trig_e, &len)) && rv != 1) { goto error; }
 		
 		GetNumListItems(pc.trigc[1], pc.trigc[0], &nl);
 		if(nl > 0 && len > 0) {
@@ -1810,7 +2040,10 @@ int load_session(char *filename) { // Primary session loading function
 	if(bttls_e != 0) {
 		if(rv = CVIXMLGetElementValue(bttls_e, buff)) { goto error; }
 		
+		CmtGetLock(lock_uipc);
 		sscanf(buff, "%d", &uipc.broken_ttls);
+		CmtReleaseLock(lock_uipc);
+		
 		CVIXMLDiscardElement(bttls_e);
 		bttls_e = 0;
 	}
@@ -1824,24 +2057,6 @@ int load_session(char *filename) { // Primary session loading function
 	if(dd_e != 0) {
 		if(rv = CVIXMLGetChildElementByTag(dd_e, MCXML_FID, &fid_e)) { goto error; }
 		if(rv = CVIXMLGetChildElementByTag(dd_e, MCXML_SPEC, &spec_e)) { goto error; }
-		
-		// Get the "bound" attribute
-		if(rv = CVIXMLGetAttributeByName(dd_e, MCXML_BOUND, &bind_a)) { goto error; }
-			
-		if(bind_a != 0) {
-			if(rv = CVIXMLGetAttributeValue(bind_a, buff)) { goto error; }
-			
-			int bind = -1;
-			sscanf(buff, "%d", &bind);
-			
-			if(bind != -1) {
-				for(int k = 0; k < 2; k++)
-					SetCtrlVal(dc.cloc[k], dc.bound, bind);
-			}
-			
-			CVIXMLDiscardAttribute(bind_a);
-			bind_a = 0;
-		}
 		
 		CVIXMLDiscardElement(dd_e);
 		dd_e = 0;
@@ -2000,7 +2215,7 @@ int load_session(char *filename) { // Primary session loading function
 				
 				CVIXMLDiscardElement(off_e);
 				off_e = 0;
-			}
+			}   
 			
 		}
 		
@@ -2010,7 +2225,7 @@ int load_session(char *filename) { // Primary session loading function
 	
 	
 	// Finally, we load the program
-	sprintf(fname, "%s.tdms", fbuff);
+	sprintf(fname, "%s.tdm", fbuff);
 	if(FileExists(fname, NULL)) {
 		PPROGRAM *p = LoadPulseProgram(fname, &rv);
 		
@@ -2037,19 +2252,32 @@ int load_session(char *filename) { // Primary session loading function
 	if(curcc != NULL) { free(curcc); }
 	if(inds != NULL) { free(inds); }
 	if(ranges != NULL) { free(ranges); }
+	if(ddesc != NULL) { free(ddesc); }
 	
 	// And discard the elements
+	if(dev_e != 0) { CVIXMLDiscardElement(dev_e); }
+	if(chans_e != 0) { CVIXMLDiscardElement(chans_e); }
+	if(pbdev_e != 0) { CVIXMLDiscardElement(pbdev_e); }
+	if(chann_e != 0) { CVIXMLDiscardElement(chann_e); }
+	if(chanr_e != 0) { CVIXMLDiscardElement(chanr_e); }
+	if(trig_e != 0) { CVIXMLDiscardElement(trig_e); }
+	if(bttls_e != 0) { CVIXMLDiscardElement(bttls_e); }
+	if(curcc_e != 0) { CVIXMLDiscardElement(curcc_e); }
+	if(countc_e != 0) { CVIXMLDiscardElement(countc_e); }
 	if(r_e != 0) { CVIXMLDiscardElement(r_e); }
 	if(pref_e != 0) { CVIXMLDiscardElement(pref_e); }
 	if(gen_e != 0) { CVIXMLDiscardElement(gen_e); }
 	if(ppc_e != 0) { CVIXMLDiscardElement(ppc_e); }
 	if(dd_e != 0) { CVIXMLDiscardElement(dd_e); }
 	if(npsrat_e != 0) { CVIXMLDiscardElement(npsrat_e); }
+	if(tview_e != 0) { CVIXMLDiscardElement(tview_e); }
 	if(at_e != 0) { CVIXMLDiscardElement(at_e); }
 	if(bf_e != 0) { CVIXMLDiscardElement(bf_e); }
 	if(fpath_e != 0) { CVIXMLDiscardElement(fpath_e); }
 	if(dlpath_e != 0) { CVIXMLDiscardElement(dlpath_e); }
 	if(ppath_e != 0) { CVIXMLDiscardElement(ppath_e); }
+	if(ddesc_e != 0) { CVIXMLDiscardElement(ddesc_e); }
+	if(lfinfo_e != 0) { CVIXMLDiscardElement(lfinfo_e); }
 	if(fid_e != 0) { CVIXMLDiscardElement(fid_e); }
 	if(spec_e != 0) { CVIXMLDiscardElement(spec_e); }
 	if(col_e != 0) { CVIXMLDiscardElement(col_e); }
@@ -2064,7 +2292,6 @@ int load_session(char *filename) { // Primary session loading function
 	if(trttl_a != 0) { CVIXMLDiscardAttribute(trttl_a); }
 	if(edge_a != 0) { CVIXMLDiscardAttribute(edge_a); }
 	if(as_a != 0) { CVIXMLDiscardAttribute(as_a); }
-	if(bind_a != 0) { CVIXMLDiscardAttribute(bind_a); }
 	
 	// Discard the document
 	if(xml_doc != -1)

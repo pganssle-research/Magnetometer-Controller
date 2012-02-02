@@ -41,7 +41,7 @@ struct {
 	int *cinst; 		// ND Instruction Subpanel
 	
 	// Controls on the inst panels
-	int ins_num;	// Instruction Number
+	int ins_num;		// Instruction Number
 	int instr; 			// Instruction (Continue, Stop, etc)
 	int instr_d;		// Instruction data
 	int delay;			// The instruction delay
@@ -103,6 +103,7 @@ struct {
 	int np[2];			// Number of points control
 	int at[2];			// Acquisition time control
 	int dev[2];			// Device control
+	int pbdev[2];		// Pulseblaster device ring.
 	int nc[2];			// Number of channels control
 	int ic[2];			// Input channels control
 	int cc[2];			// Counter channel control
@@ -170,7 +171,6 @@ struct {
 	int scloc;			// Current location panel for spec
 	
 	int	ctrans;			// Transient ring control
-	int bound;			// Binding LED to see if transient/etc. are bound.
 	int idrings[8];		// ID rings
 	int idlabs[8];		// ID labels
 
@@ -194,6 +194,7 @@ struct {
 	int cdfname[2];			// Current filename.
 	int datadesc[2];		// Data description text box.
 	int datafbox[2];		// Data file browser
+	int ldatamode[2];		// Load file info from browser LED.
 	
 	int cprog[2];			// Current program ring control
 	int cprogdesc[2];		// Current program description.
@@ -205,6 +206,40 @@ struct {
 	
 	int startbut[2];		// Start button
 	int stopbut[2];			// Stop button
+	
+	// Menu controls.
+	// Parent menus:
+	int file;				// File parent menu
+	int view;				// View parent menu
+	int setup;				// Setup parent menu
+	
+	// File controls
+	int fnew;				// File > New (Submenu)
+	int fnewacq;			// File > New > New Acquisition
+	int fnewprog;			// File > New > New Program
+	int fsave;				// File > Save (Submenu)
+	int fsavedata;			// File > Save > Save Data
+	int fsaveprog;			// File > Save > Save Program
+	int fload;				// File > Load
+	int floaddata;			// File > Load > Load Data
+	int floadrecdat;		// File > Load > Load Recent Data (Submenu)
+	int floadprog;			// File > Load > Load Program
+	int floadrecprog;		// File > Load > Load Recent Program (Submenu)
+	int fquit;				// File > Quit
+	
+	// View controls
+	int vpchart;			// File > View Program Chart
+	int vtview;				// File > Transient View (Submenu)
+	int vtviewopts[3];		// File > Transient View > Average / View Latest Transient / No Change (that order)
+	int vcstep;				// File > Change Dimension
+	
+	// Setup controls
+	int supdaq;				// Setup > Update DAQ
+	int ssaveconfig;		// Setup > Save Current Config
+	int ssaveconfig_file;	// Setup > Save Current Config to File
+	int sloadconfig;		// Setup > Load Config from File
+	int sbttls;				// Setup > Setup Broken TTLS
+
 } mc;
 
 // uipc -> contains data about the pulse program side of the current configuration of the UI
@@ -258,7 +293,8 @@ struct {
 								// Outermost size is ninst, it's easiest that way and
 								// the memory isn't much.
 
-	char *ppath;				// The default directory for the base program.				
+	char *ppath;				// The default directory for the base program.
+	
 } uipc;
 
 // uidc - > Not necessarily visible information about the ui.
@@ -280,6 +316,8 @@ struct {
 	int fcol[8];			// Colors for the FID
 	int scol[8];			// Colors for the spectrum
 	
+	int disp_update;		// Display update pref: 0 = Show avg, 1 = Latest Transient, 2 = No Change
+	
 	float fgain[8];			// Gains for the FID
 	float sgain[8];			// Gains for the spectrum
 	float foff[8];			// Offsets for the FID.
@@ -300,6 +338,8 @@ struct {
 struct {
 	TaskHandle aTask; 		// Signal acquisition task
 	TaskHandle cTask;		// Counter task.
+	
+	int update_thread;		// Update thread id.
 	
 	PPROGRAM *p;			// Current program
 	
@@ -332,16 +372,7 @@ struct {
 	CVIAbsoluteTime tdone; 	// Time that the most recent part was completed.
 	
 	// File saving info
-	TDMSFileHandle td_file;
-	TDMSChannelGroupHandle mcg;
-	TDMSChannelGroupHandle acg;
-	TDMSChannelHandle *chans;
-	TDMSChannelHandle *achans;
-	
-	char **cnames;
-	int nch;
-	
-	int cind;
+	int cind;					// Current index in acquisition
 	
 } ce;
 

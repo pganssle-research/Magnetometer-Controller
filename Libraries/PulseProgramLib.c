@@ -59,17 +59,18 @@ Desrip	: Need to add a few things to PPROGRAM that I did not consider at
 #include <userint.h>
 #include <ansi_c.h>
 #include <spinapi.h>					// SpinCore functions
-#include <netcdf.h>
 #include <NIDAQmx.h>
 
 #include <PulseProgramTypes.h>
 #include <cvitdms.h>
+#include <cviddc.h>
 #include <UIControls.h>					// For manipulating the UI controls
 #include <MathParserLib.h>				// For parsing math
 #include <MCUserDefinedFunctions.h>		// Main UI functions
 #include <PulseProgramLib.h>			// Prototypes and type definitions for this file
 #include <SaveSessionLib.h>
 #include <MC10.h>
+#include <General.h>
 
 //////////////////////////////////////////////////////////////
 // 															//
@@ -100,45 +101,59 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 	} else
 		p = ip;
 								
-	// Make sure that it has a .tdms ending.
+	// Make sure that it has a .tdm ending.
 	int i;
-	if(strcmp(".tdms", &filename[strlen(filename)-5]) != 0) {
-		fnbuff = malloc(strlen(filename)+strlen(".tdms")+1);
-		sprintf(fnbuff, "%s%s", filename, ".tdms");
+		
+	if(strcmp(".tdm", &filename[strlen(filename)-4]) != 0) { 
+				fnbuff = malloc(strlen(filename)+strlen(".tdm")+1);
+		sprintf(fnbuff, "%s%s", filename, ".tdm");
 		fname = fnbuff;
 	} else
 		fname = filename;
 	
+	int type = MCTD_TDM;
+	
 	char *title = NULL;
 	title = malloc(MAX_FILENAME_LEN);
-	get_name(filename, title, ".tdms");
+	get_name(filename, title, ".tdm");
 	
 	if(FileExists(filename, 0)) 	  // Create seems to freak out if the file already exists.
 		DeleteFile(filename);
 	
 	char *index = malloc(strlen(filename)+7);
-	sprintf(index, "%s%s", filename, "_index");
-	if(FileExists(index, NULL))
-		DeleteFile(index);
+	if(type == MCTD_TDMS) {
+		sprintf(index, "%s%s", filename, "_index");
+		if(FileExists(index, NULL))
+			DeleteFile(index);
+	} else if (type == MCTD_TDM) {
+		strcpy(index, filename);
+		index[strlen(index)-1] = 'x';
+		if(FileExists(index, NULL))
+			DeleteFile(index);
+	}
 	
 	free(index);
 
-	TDMSFileHandle p_file;
-	TDMSChannelGroupHandle pcg;
-	if(rv = TDMS_CreateFile(fname, TDMS_Streaming, title, "", title, "Magnetometer Controller v1.0", &p_file))
+	DDCFileHandle p_file;
+	DDCChannelGroupHandle pcg;
+	CmtGetLock(lock_tdm);
+	if(rv = DDC_CreateFile(fname, NULL, title, "", title, "Magnetometer Controller v1.0", &p_file))
 		return rv;
 	
-	if(rv = TDMS_AddChannelGroup(p_file, MCTD_PGNAME, "The group containing the program", &pcg))
+	if(rv = DDC_AddChannelGroup(p_file, MCTD_PGNAME, "The group containing the program", &pcg))
 		goto error;
 	
-	if(rv = tdms_save_program(pcg, p))
+	CmtGetLock(lock_pb);
+	if(rv = save_program(pcg, p))
 		goto error;
+	CmtReleaseLock(lock_pb);
 	
-	 if(rv = TDMS_SaveFile(p_file))
+	 if(rv = DDC_SaveFile(p_file))
 		 goto error;
 	
 	error:
-	TDMS_CloseFile(p_file);
+	DDC_CloseFile(p_file);
+	CmtReleaseLock(lock_tdm);
 	
 	if(ip == NULL && p != NULL) { free_pprog(p); }
 	if(title != NULL) { free(title); }
@@ -171,16 +186,27 @@ PPROGRAM *LoadPulseProgram(char *filename, int *err_val) {
 	// Returns 0 if successful, positive integers for errors.
 	
 	int ev = err_val[0] = 0, ng;
-	TDMSFileHandle p_file = NULL;
-	TDMSChannelGroupHandle pcg, *groups = NULL;
+	DDCFileHandle p_file = NULL;
+	DDCChannelGroupHandle pcg, *groups = NULL;
 	PPROGRAM *p = NULL;
 	char *name_buff = NULL;
+	int tdms = 0;
 	
-	if(ev = TDMS_OpenFile(filename, 1, &p_file))
+	if(strcmp(&filename[strlen(filename)-5], ".tdms") == 0)
+		tdms = 1;
+	else if (strcmp(&filename[strlen(filename)-4], ".tdm") == 0)
+		tdms = 0;
+	else {
+		ev = -250;
+		goto error;
+	}
+	
+	CmtGetLock(lock_tdm);
+	if(ev = DDC_OpenFileEx(filename, tdms?"TDMS":"TDM", 1, &p_file))
 		goto error;
 	
 	// Need to get a list of the groups available.
-	if(ev = TDMS_GetNumChannelGroups(p_file, &ng))
+	if(ev = DDC_GetNumChannelGroups(p_file, &ng))
 		goto error;
 	else if (ng < 1) {
 		ev = -249;
@@ -189,7 +215,7 @@ PPROGRAM *LoadPulseProgram(char *filename, int *err_val) {
 	
 	groups = malloc(sizeof(TDMSChannelGroupHandle)*ng);
 	
-	if(ev = TDMS_GetChannelGroups(p_file, groups, ng))
+	if(ev = DDC_GetChannelGroups(p_file, groups, ng))
 		goto error;
 	
 	// Search for the program group in the list of groups.
@@ -197,13 +223,13 @@ PPROGRAM *LoadPulseProgram(char *filename, int *err_val) {
 	int g = 40, s = 40;
 	name_buff = malloc(g);
 	for(i = 0; i < ng; i++) {
-		if(ev = TDMS_GetChannelGroupStringPropertyLength(groups[i], TDMS_CHANNELGROUP_NAME, &len))
+		if(ev = DDC_GetChannelGroupStringPropertyLength(groups[i], TDMS_CHANNELGROUP_NAME, &len))
 			goto error;
 		
 		if(g < ++len)
 			name_buff = realloc(name_buff, g+=((int)((len-g)/s)+1)*s);
 		
-		if(ev = TDMS_GetChannelGroupProperty(groups[i], TDMS_CHANNELGROUP_NAME, name_buff, len))
+		if(ev = DDC_GetChannelGroupProperty(groups[i], TDMS_CHANNELGROUP_NAME, name_buff, len))
 			goto error;
 		
 		if(strcmp(name_buff, MCTD_PGNAME) == 0) {
@@ -222,12 +248,13 @@ PPROGRAM *LoadPulseProgram(char *filename, int *err_val) {
 		goto error;
 	}
 	
-	p = tdms_load_program(pcg, &ev);
+	p = load_program(pcg, &ev);
 	
 	error:
 
 	if(p_file != NULL)
-		TDMS_CloseFile(p_file);
+		DDC_CloseFile(p_file);
+	CmtReleaseLock(lock_tdm);
 	
 	if(groups != NULL)
 		free(groups);
@@ -238,6 +265,137 @@ PPROGRAM *LoadPulseProgram(char *filename, int *err_val) {
 	err_val[0] = ev;
 	
 	return p;
+}
+
+int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p) {
+	// Save program as either a TDM or TDMS. 
+
+	int i;
+	int *idata = NULL;
+	double *ddata = NULL;
+	char *data_exprs = NULL, *delay_exprs = NULL;
+	
+	// We're going to start out with a bunch of properties										
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PNP, DDC_Int32, p->np);						// Number of points
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PSR, DDC_Double, p->sr);						// Sampling Rate
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PNT, DDC_Int32, p->nt);						// Number of transients
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PTMODE, DDC_Int32, (p->tmode>=0)?p->tmode:-1);	// Transient acquisition mode.
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PSCAN, DDC_Int32, p->scan);					// Whether or not there's a scan
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PTRIGTTL, DDC_Int32, p->trigger_ttl);    		// Trigger TTL
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PTOTTIME, DDC_Double, p->total_time);			// Total time
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PNINSTRS, DDC_Int32, p->n_inst);    			// Base number of instructions
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PNUINSTRS, DDC_Int32, p->nUniqueInstrs);  		// Total number of unique instructions
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PVAR, DDC_Int32, p->varied);					// Whether or not it's varied
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PNVAR, DDC_Int32, p->nVaried);					// Number of varied instructions
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PNDIMS, DDC_Int32, p->nDims);					// Number of dimensions
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PNCYCS, DDC_Int32, p->nCycles);				// Number of phase cycles
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PSKIP, DDC_Int32, p->skip);					// Whether or not there are skips
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PMAX_N_STEPS, DDC_Int32, p->max_n_steps);		// Total number of steps in the experiment
+	DDC_CreateChannelGroupProperty(pcg, MCTD_PREAL_N_STEPS, DDC_Int32, p->real_n_steps);	// Total number of steps - those skipped
+	DDC_CreateChannelGroupProperty(pcg, MCTD_NFUNCS, DDC_Int32, p->nFuncs);					// Number of functions actually used
+	DDC_CreateChannelGroupProperty(pcg, MCTD_TFUNCS, DDC_Int32, p->tFuncs);					// Total number of functions available
+	
+	// Now we'll save the main instructions
+	DDCChannelHandle flags_c, time_c, ins_c, insd_c, us_c ; // Instruction channels.
+
+	// Now create and populate the channels for the instructions.
+	int nui = p->nUniqueInstrs;
+	idata = malloc(sizeof(int)*nui);
+	ddata = malloc(sizeof(double)*nui);
+	
+	// Flags
+	DDC_AddChannel(pcg, DDC_Int32, MCTD_PROGFLAG, "Binary flags for each unique instruction", "", &flags_c);
+	for(i = 0 ; i < nui; i++)
+		idata[i] = p->instrs[i]->flags;	// Get the flags as an array of ints.
+	DDC_AppendDataValues(flags_c, idata, nui); // Save the flags
+
+	// Instruction delay
+	DDC_AddChannel(pcg, DDC_Double, MCTD_PROGTIME, "Instruction delay times for each instruction", "ns", &time_c);
+	for(i = 0 ; i < nui; i++)
+		ddata[i] = p->instrs[i]->instr_time;	
+	DDC_AppendDataValues(time_c, ddata, nui);
+	
+	// Instruction
+	DDC_AddChannel(pcg, DDC_Int32, MCTD_PROGINSTR, "The instruction value for each unique instruction", "", &ins_c);
+	for(i = 0; i < nui; i++)
+		idata[i] = p->instrs[i]->instr;
+	DDC_AppendDataValues(ins_c, idata, nui);
+	
+	// Instruction Data
+	DDC_AddChannel(pcg, DDC_Int32, MCTD_PROGID, "Instruction data for each unique instruction", "", &insd_c);
+	for(i = 0; i < nui; i++)
+		idata[i] = p->instrs[i]->instr_data;
+	DDC_AppendDataValues(insd_c, idata, nui);
+	
+	// Units and scan
+	DDC_AddChannel(pcg, DDC_Int32, MCTD_PROGUS, "Bit 0 is whether or not to scan, the remaining bits are units for each instr", "", &us_c);
+	for(i = 0; i < nui; i++)
+		idata[i] = p->instrs[i]->trigger_scan + 2*(p->instrs[i]->time_units);
+	DDC_AppendDataValues(us_c, idata, nui);
+	
+	free(idata);
+	free(ddata);
+	
+	// The next bit only has to happen if this is a varied experiment
+	if(p->varied) {
+		// All the channel handles
+		DDCChannelHandle msteps_c, v_ins_c, v_ins_dims_c, v_ins_mode_c; 
+		DDCChannelHandle v_ins_locs_c = NULL, delay_exprs_c, data_exprs_c;
+		
+		// Again, we create a bunch of channels here and populate them as necessary
+		// Maxsteps
+		DDC_AddChannel(pcg, DDC_Int32, MCTD_PMAXSTEPS, "Size of the acquisition space", "", &msteps_c);
+		DDC_AppendDataValues(msteps_c, p->maxsteps, (p->nDims+p->nCycles));
+		
+		// Varied instructions, dims and modes
+		DDC_AddChannel(pcg, DDC_Int32, MCTD_PVINS, "List of the varied instructions", "", &v_ins_c);
+		DDC_AddChannel(pcg, DDC_Int32, MCTD_PVINSDIM, "What dimension(s) the instrs vary along", "", &v_ins_dims_c);
+		DDC_AddChannel(pcg, DDC_Int32, MCTD_PVINSMODE, "Variation mode", "", &v_ins_mode_c);
+		
+		DDC_AppendDataValues(v_ins_c, p->v_ins, p->nVaried);
+		DDC_AppendDataValues(v_ins_dims_c, p->v_ins_dim, p->nVaried);
+		DDC_AppendDataValues(v_ins_mode_c, p->v_ins_mode, p->nVaried);
+		
+		// Save the delay and data expressions as a single string property on the v_ins channel.
+		delay_exprs = generate_nc_string(p->delay_exprs, p->nVaried, NULL);
+		data_exprs = generate_nc_string(p->data_exprs, p->nVaried, NULL);
+	  
+		DDC_CreateChannelProperty(v_ins_c, MCTD_PDELEXPRS, DDC_String, delay_exprs);
+		DDC_CreateChannelProperty(v_ins_c, MCTD_PDATEXPRS, DDC_String, data_exprs);
+		
+		free(delay_exprs);
+		free(data_exprs);
+		
+		// This is a bit trickier - TDMS doesn't seem to support multi-dimensional arrays, so we're going to
+		// do this in a linear-indexed fashion.
+		DDC_AddChannel(pcg, DDC_Int32, MCTD_PVINSLOCS, "Instruction indexes, multidimensional linear-indexed array", "", &v_ins_locs_c);
+	
+		for(i = 0; i < p->nVaried; i++) 
+			DDC_AppendDataValues(v_ins_locs_c, p->v_ins_locs[i], p->max_n_steps); 
+		
+		// Now we can save the skip stuff, if necessary.
+		if(p->skip & 2) {
+			// First we add the property, because at this point we just know that we saved a skip expression
+			DDC_CreateChannelGroupProperty(pcg, MCTD_PSKIPEXPR, DDC_String, p->skip_expr);
+			
+			// Now generate the skip locs array.
+			if(p->skip & 1 && (p->skip_locs != NULL)) {
+				DDCChannelHandle skip_locs_c;
+				DDC_AddChannel(pcg, DDC_UInt8, MCTD_PSKIPLOCS, "An array of where the skips occur", "", &skip_locs_c);
+				unsigned char *skip_locs = malloc(sizeof(unsigned char)*p->max_n_steps);
+				for(i = 0; i < p->max_n_steps; i++)
+					skip_locs[i] = (unsigned char)p->skip_locs[i];
+				
+				DDC_AppendDataValues(skip_locs_c, skip_locs, p->max_n_steps);
+				free(skip_locs);
+			} else 
+				p->skip -= p->skip & 1;
+		}
+	
+
+	}
+	
+	return 0;	
 }
 
 int tdms_save_program(TDMSChannelGroupHandle pcg, PPROGRAM *p) {
@@ -364,6 +522,360 @@ int tdms_save_program(TDMSChannelGroupHandle pcg, PPROGRAM *p) {
 	}
 	
 	return 0;	
+}
+
+PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
+	// Loads programs from the Channel Group "pcg" in a TDM streaming library
+	
+	// Variable declarations
+	PPROGRAM *p = malloc(sizeof(PPROGRAM));
+	int on = 0, *idata = NULL, ev = 0, nvi = 0, *vfound = NULL;
+	double *ddata = NULL;
+	DDCChannelHandle *handles = NULL;
+	char *name_buff = NULL, *delay_exprs = NULL, *data_exprs = NULL;
+	unsigned char *skip_locs = NULL;
+	err_val[0] = ev;
+	
+	// We're going to start out by getting a bunch of properties
+	int si = sizeof(int), sd = sizeof(double);
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNP, &p->np, si)) {					// Number of points
+		if(ev != DDC_PropertyDoesNotExist)
+			goto error;
+		else
+			GetCtrlVal(pc.np[1], pc.np[0], &p->np);
+	}
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSR, &p->sr, sd)) {					// Sampling Rate
+		if(ev != DDC_PropertyDoesNotExist)
+			goto error;
+		else
+			GetCtrlVal(pc.sr[1], pc.sr[0], &p->sr);
+	}
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNT, &p->nt, si)) {					// Number of transients
+		if(ev != DDC_PropertyDoesNotExist)
+			goto error;
+		else
+			GetCtrlVal(pc.nt[1], pc.nt[0], &p->nt);
+	}
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTMODE, &p->tmode, si)) {			// Transient acquisition mode
+		if(ev != DDC_PropertyDoesNotExist)
+			goto error;
+		else
+			GetCtrlVal(pc.tfirst[1], pc.tfirst[0], &p->tmode);
+	}
+		
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSCAN, &p->scan, si))				// Whether or not there's a scan
+		goto error;
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTRIGTTL, &p->trigger_ttl, si))    	// Trigger TTL
+		goto error;
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTOTTIME, &p->total_time, sd))		// Total time
+		goto error;
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNINSTRS, &p->n_inst, si))    		// Base number of instructions
+		goto error;
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNUINSTRS, &p->nUniqueInstrs, si))	// Total number of unique instructions
+		goto error;
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PVAR, &p->varied, si))				// Whether or not it's varied
+		goto error;
+
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNVAR, &p->nVaried, si))				// Number of varied instructions
+		goto error;
+
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNDIMS, &p->nDims, si))				// Number of dimensions
+		goto error;
+
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNCYCS, &p->nCycles, si))			// Number of phase cycles
+		goto error;
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSKIP, &p->skip, si))				// Whether or not there are skips
+		goto error;
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PMAX_N_STEPS, &p->max_n_steps, si))	// Total number of steps in the experiment
+		goto error;
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PREAL_N_STEPS, &p->real_n_steps, si))// Total number of steps - those skipped
+		goto error;
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_NFUNCS, &p->nFuncs, si))				// Number of functions actually used
+		goto error;
+	
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_TFUNCS, &p->tFuncs, si))				// Total number of functions available
+		goto error;
+	
+	// Now we need to go through one by one and get the channel handles.
+	int i, j, k = 0;
+	int nchans, nchan_names = 5, nvchan_names = 6;
+	DDCChannelHandle flags_c, time_c, ins_c, us_c, insd_c;
+	DDCChannelHandle msteps_c, vins_c, vi_dim_c, vi_mode_c, vi_locs_c, s_locs_c;
+	flags_c = time_c = ins_c = us_c = insd_c = msteps_c = vins_c = vi_dim_c = vi_mode_c = vi_locs_c = s_locs_c = NULL;
+	
+	char *chan_names[] = {MCTD_PROGFLAG, MCTD_PROGTIME, MCTD_PROGINSTR, MCTD_PROGUS, MCTD_PROGID};
+	DDCChannelHandle *chan_hs[] = {&flags_c, &time_c, &ins_c, &us_c, &insd_c};
+	
+	char *v_chan_names[] = {MCTD_PMAXSTEPS, MCTD_PVINS, MCTD_PVINSDIM, MCTD_PVINSMODE, MCTD_PVINSLOCS, MCTD_PSKIPLOCS};
+	DDCChannelHandle *v_chan_hs[] = {&msteps_c, &vins_c, &vi_dim_c, &vi_mode_c, &vi_locs_c, &s_locs_c};
+	
+	// Get the number of channels and a list of the channel handles.
+	if(ev = DDC_GetNumChannels(pcg, &nchans))
+		goto error;
+	
+	handles = malloc(sizeof(DDCChannelHandle)*nchans);
+	
+	if(ev = DDC_GetChannels(pcg, handles, nchans))
+		goto error;
+	
+	// Go through each channel and get its name, and if it matches something, set that value.
+	int len, g = 20, s = 20;
+	name_buff = malloc(g);
+	
+	// Search for all the 1D bits first.
+	int found = 0, *cfound = calloc(si*nchans, si);
+	for(i = 0; i < nchans; i++) {
+		if(ev = DDC_GetChannelStringPropertyLength(handles[i], DDC_CHANNEL_NAME, &len))
+			goto error;
+		
+		if(g < ++len)	// If there's not enough room, allocate more room 
+			name_buff = realloc(name_buff, g+=(((int)((len-g)/s)+1)*s));
+		
+		// Get the actual channel name
+		if(ev = DDC_GetChannelProperty(handles[i], DDC_CHANNEL_NAME, name_buff, len))
+			goto error;
+		
+		for(j = 0; j < nchan_names; j++) {
+			if(1<<j & found)	// Don't search if we've already found it.
+				continue;
+			
+			if(strcmp(chan_names[j], name_buff) == 0)
+				break;
+		}
+		
+		if(j < nchan_names) {		// In this case, we found it.
+			memcpy(chan_hs[j], &handles[i], sizeof(DDCChannelHandle));
+			k++;
+			found += 1<<j;
+			cfound[i] = 1;
+			continue;
+		} else if (k >= nchan_names)
+			break;	
+	}
+	
+	// Now if we need to, to through all the variation bits
+	if(!p->varied)
+		nvchan_names = 0;
+	
+	k = 0;
+	found = 0;
+	for(i = 0; i < nchans; i++) {
+		if(cfound[i])	// Skip this one if we found it the first time around.
+			continue;
+		
+		if(ev = DDC_GetChannelStringPropertyLength(handles[i], DDC_CHANNEL_NAME, &len))
+			goto error;
+		
+		if(g < ++len)
+			name_buff = realloc(name_buff, g+=(((int)((len-g)/s)+1)*2));
+		
+		if(ev = DDC_GetChannelProperty(handles[i], DDC_CHANNEL_NAME, name_buff, len))
+			goto error;
+		
+		for(j = 0; j < nvchan_names; j++) {
+			if(1<<j & found)
+				continue;
+			
+			if(strcmp(v_chan_names[j], name_buff) == 0)
+				break;
+		}
+		
+		if(j < nvchan_names) {
+			memcpy(v_chan_hs[j], &handles[i], sizeof(DDCChannelHandle));
+			k++;
+			found += 1<<j;
+			cfound[i] = 1;
+			continue;
+		} else if (k >= nvchan_names)
+			break;
+	}
+	
+	free(cfound);
+	free(handles);
+	free(name_buff);
+	handles = NULL;
+	name_buff = NULL;
+	
+	// At this point, we should have more than enough to complete the allocation of the p file.
+	create_pprogram(p);
+	on = 1;
+	
+	// First we'll read out the instructions
+	int nui = p->nUniqueInstrs;
+	idata = malloc(si*nui);
+	ddata = malloc(sd*nui);
+	
+	// Flags
+	if(ev = DDC_GetDataValues(flags_c, 0, nui, idata))
+		goto error;
+	for(i = 0; i < nui; i++)
+		p->instrs[i]->flags = idata[i];
+	
+	// Instruction Delay
+	if(ev = DDC_GetDataValues(time_c, 0, nui, ddata))
+		goto error;
+	for(i = 0; i < nui; i++)
+		p->instrs[i]->instr_time = ddata[i];
+	
+	// Instructions
+	if(ev = DDC_GetDataValues(ins_c, 0, nui, idata))
+		goto error;
+	for(i = 0; i < nui; i++)
+		p->instrs[i]->instr = idata[i];
+	
+	// Units and scan
+	if(ev = DDC_GetDataValues(us_c, 0, nui, idata))
+		goto error;
+	for(i = 0; i < nui; i++) {
+		p->instrs[i]->trigger_scan = 1 & idata[i];
+		p->instrs[i]->time_units = (int)(idata[i]>>1);
+	}
+	
+	// Instruction Data
+	if(ev = DDC_GetDataValues(insd_c, 0, nui, idata))
+		goto error;
+	for(i = 0; i < nui; i++)
+		p->instrs[i]->instr_data = idata[i];
+	
+	free(idata);
+	free(ddata);
+	idata = NULL;
+	ddata = NULL;
+	
+	// Now go through and get the varied instructions
+	nvi = p->nVaried;
+	if(p->varied) {
+		// MaxSteps
+		if(ev = DDC_GetDataValues(msteps_c, 0, p->nCycles+p->nDims, p->maxsteps))
+			goto error;
+		
+		// VIns, VInsDims, VInsMode
+		if(ev = DDC_GetDataValues(vins_c, 0, p->nVaried, p->v_ins))
+			goto error;
+		
+		if(ev = DDC_GetDataValues(vi_dim_c, 0, p->nVaried, p->v_ins_dim))
+			goto error;
+		
+		if(ev = DDC_GetDataValues(vi_mode_c, 0, p->nVaried, p->v_ins_mode))
+			goto error;
+		
+		// Delay and data instructions are stored as a property on VIns.
+		int ldel, ldat;
+		if(ev = DDC_GetChannelStringPropertyLength(vins_c, MCTD_PDELEXPRS, &ldel))
+			goto error;
+		
+		if(ev = DDC_GetChannelStringPropertyLength(vins_c, MCTD_PDATEXPRS, &ldat))
+			goto error;
+		
+		delay_exprs = malloc(++ldel);
+		data_exprs = malloc(++ldat);
+		
+		if(ev = DDC_GetChannelProperty(vins_c, MCTD_PDELEXPRS, delay_exprs, ldel))
+			goto error;
+		
+		if(ev = DDC_GetChannelProperty(vins_c, MCTD_PDATEXPRS, data_exprs, ldat))
+			goto error;
+		
+		// Now we need to get those data expressions as an array.
+		if(p->delay_exprs != NULL) {
+			for(i = 0; i < nvi; i++) {
+				if(p->delay_exprs[i] != NULL)
+					free(p->delay_exprs[i]);
+			}
+			free(p->delay_exprs);
+		}
+		
+		int ns = nvi;
+		p->delay_exprs = get_nc_strings(delay_exprs, &ns);
+		
+		if(ns != nvi) {
+			ev = -250;
+			goto error;
+		}
+		
+		if(p->data_exprs != NULL) {
+			for(i = 0; i < nvi; i++) {
+				if(p->data_exprs[i] != NULL)
+					free(p->data_exprs[i]);
+			}
+			free(p->data_exprs);
+		}
+		
+		p->data_exprs = get_nc_strings(data_exprs, &ns);
+		if(ns != nvi) {
+			ev = -250;
+			goto error;
+		}
+		
+		// Now we need to read the v_ins_locs, which has been stored as a single array, into a 2D array.
+		for(i = 0; i < nvi; i++) {
+			if(ev = DDC_GetDataValues(vi_locs_c, i*p->max_n_steps, p->max_n_steps, p->v_ins_locs[i]))
+				goto error;
+		}
+		
+		// Now we get the delay and data expressions
+	
+		if(p->skip & 2) {
+			// First we get the skip expression if it's been saved.
+			if(ev = DDC_GetChannelGroupStringPropertyLength(pcg, MCTD_PSKIPEXPR, &len))
+				goto error;
+			
+			if(p->skip_expr == NULL)
+				p->skip_expr = malloc(++len);
+			else
+				p->skip_expr = realloc(p->skip_expr, ++len);
+			
+			if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSKIPEXPR, p->skip_expr, len))
+				goto error;
+			
+			if(p->skip & 1 && s_locs_c != NULL) {
+				skip_locs = malloc(sizeof(unsigned char)*p->max_n_steps);
+				if(ev = DDC_GetDataValues(s_locs_c, 0, p->max_n_steps, skip_locs)) { goto error; }
+				
+				for(i = 0; i < p->max_n_steps; i++)
+					p->skip_locs[i] = skip_locs[i];
+				
+				free(skip_locs);
+				skip_locs = NULL;
+			}
+		}
+	}
+	
+	error:
+	
+	err_val[0] = ev;
+	
+	if(data_exprs != NULL) { free(data_exprs); }
+	if(delay_exprs != NULL) { free(delay_exprs); }
+	
+	if(idata != NULL) { free(idata); }
+	if(ddata != NULL) { free(ddata); }
+	
+	if(skip_locs != NULL) { free(skip_locs); }
+
+	if(ev) { 
+		if(!on)
+			free(p);
+		else
+			free_pprog(p);
+		p = NULL;
+	} 
+	
+	return p;
+	
 }
 
 PPROGRAM *tdms_load_program(TDMSChannelGroupHandle pcg, int *err_val) {
@@ -738,10 +1250,10 @@ int get_name(char *pathname, char *name, char *ending) {
 }
 
 char *generate_nc_string(char **strings, int numstrings, int *len) {
-	// There's some bug in the current build of netcdf that freaks the shit out when you
-	// store strings in it. As a result, we're going to store arrays of strings as a
-	// single newline-delimited char array. len returns the full length of the array with
-	// newlines and \0. The array is malloced, so you need to free it when you are done.
+	// We're going to store arrays of strings as a single newline-delimited char array. 
+	// len returns the full length of the array with newlines and \0. 
+	//
+	// The array is malloced, so you need to free it when you are done.
 	
 	int i, l=0;
 	for(i = 0; i < numstrings; i++)
@@ -764,6 +1276,9 @@ char *generate_nc_string(char **strings, int numstrings, int *len) {
 char **get_nc_strings(char *string, int *ns) {
 	// Performs the reverse operation of generate_nc_string ns should be your best guess as
 	// to how many strings there are. If you don't know, a value of 0 or less defaults to 10.
+	//
+	// TODO: Make it so you can pass -1 or something to ns and it counts the strings.
+	
 	
 	int n = 0, g = ((ns != NULL) && (*ns > 0))?*ns:10, s = g, i;
 	char **out = malloc(sizeof(char*)*s), *p = strtok(string, "\n");
@@ -792,6 +1307,23 @@ char **get_nc_strings(char *string, int *ns) {
 	return out;
 }
 
+void display_ddc_error(int err_val) {
+	switch(err_val) {	
+		case -247:
+			MessagePopup("TDM Error", "Invalid/NULL pulse program.");
+		case -248:
+			MessagePopup("TDM Error", "Program Channel Group Not Found");
+			break;
+		case -249:
+			MessagePopup("TDM Error", "No Channel groups found in this file");
+			break;
+		case -250:
+			MessagePopup("TDM Error", "File type not valid.");
+		default:
+			MessagePopup("TDM Error", DDC_GetLibraryErrorDescription(err_val));
+	}
+}
+
 void display_tdms_error(int err_val) {
 	switch(err_val) {
 		case -247:
@@ -807,6 +1339,154 @@ void display_tdms_error(int err_val) {
 	}
 }
 
+//////////////////////////////////////////////////////////////
+// 															//
+//				PulseBlaster Interactions					//
+// 															//
+//////////////////////////////////////////////////////////////
+
+int load_pb_info(int verbose) {
+	// Counts the number of pulseblasters in the system and populates the ring control.
+	int nd = pb_count_boards();	// Count them up bitches.
+
+	if(nd <= 0 && verbose) 
+		MessagePopup("Error Counting Spincore Boards:", pb_get_error());
+	
+	int nl, pan = pc.pbdev[1], ctrl = pc.pbdev[0];
+	int ind = 0;
+	
+	GetNumListItems(pan, ctrl, &nl);
+	if(nl) {
+		// Save the old index.
+		GetCtrlVal(pan, ctrl, &ind);
+		
+		DeleteListItem(pan, ctrl, 0, -1);
+	}
+	
+	if(nd < 1) {
+		SetCtrlAttribute(pan, ctrl, ATTR_DIMMED, 1);	
+		return -2;
+	} else
+		SetCtrlAttribute(pan, ctrl, ATTR_DIMMED, 0);
+	
+	int elems;
+	char **c = generate_char_num_array(0, nd-1, &elems);
+	if(c == NULL)
+		return -1;
+	
+	for(int i = 0; i < elems; i++) {  
+		InsertListItem(pan, ctrl, -1, c[i], i); 
+		free(c[i]);
+	}
+	free(c);
+
+	return 0;
+}
+
+
+int program_pulses(PINSTR *ilist, int n_inst, int verbose) {
+	// Send a list of instructions to the board for programming
+	// ilist is obviously the list
+	// n_inst is the number of instructions
+	// verbose is whether or not to display error messages
+
+	// Attempt to initialize if necessary
+	if(!GetInitialized()) {
+		pb_init_safe(verbose);
+		
+		if(!GetInitialized())
+			return -1;
+	}
+	
+	// Check for problems with END_LOOP
+	int i;
+	for(i = 0; i < n_inst; i++) {
+		if(ilist[i].instr == END_LOOP) {
+			int id = ilist[i].instr_data;
+			if(id >= i || ilist[id].instr != LOOP) {
+				if(verbose)
+					MessagePopup("Problem Programming Pulses", "END_LOOP instruction data does not refer to a Loop!");
+				return -2;
+			}
+		}
+	}
+	
+	int rv = pb_start_programming_safe(verbose, PULSE_PROGRAM);
+	if(rv < 0)  
+		return rv;
+	
+	int *fid = malloc(sizeof(int)*n_inst);
+	for(i = 0; i < n_inst; i++)
+		fid[i] = -1571573;		// Distinct number.
+	
+	int in, instr_data; 
+	
+	CmtGetLock(lock_pb);
+	for(i = 0; i < n_inst; i++) {
+		in = ilist[i].instr;
+		instr_data = ilist[i].instr_data;
+		
+		// If it's JSR, BRANCH or END_LOOP, you need to point them at the FID they refer to,
+		// which is the value returned by programming that instruction, so we'll convert this.
+		// (I think they usually end up being the same anyway.
+		if(in == JSR || in == BRANCH || in == END_LOOP) {
+			if(instr_data >= n_inst || fid[instr_data] == -1571573) {
+				if(verbose)
+					MessagePopup("Error Programming Board", "Instruction data points where it shouldn't.");
+				
+				return -2;
+			} else
+				instr_data = fid[instr_data];
+		}
+		
+		fid[i] = pb_inst_pbonly_safe(verbose, ilist[i].flags, in, instr_data, ilist[i].instr_time);
+		if(fid[i] < 0) {
+			rv = -3;
+			break;
+		}
+	}
+	CmtReleaseLock(lock_pb);
+	
+	pb_stop_programming_safe(verbose);
+	
+	// Error processing.
+	if(rv == -3) {
+		if(verbose) {
+			char *err = pb_get_error();
+			char *err_str = malloc(strlen(err)+strlen("Error in Instruction 0000: \n\n")+10);
+			sprintf(err_str, "Error in Instruction %d:\n\n %s", i, err);
+			MessagePopup("Error Programming Board", err_str);
+			free(err_str);
+		}
+		
+		return fid[i];
+	}
+
+	return 0;
+	
+}
+
+int update_status(int verbose) {
+	// Read the status from the board and update the status controls.
+	// Does this in a thread-safe manner. Returns the status value.
+	
+	int rv = 0;
+	
+	rv = pb_read_status_safe(verbose);
+	
+	if(rv < 0)
+		return rv;
+	
+	// Update the controls.
+	SetCtrlVal(mc.pbstop[1], mc.pbstop[0], rv & PB_STOPPED);
+	SetCtrlVal(mc.pbrun[1], mc.pbrun[0], rv & PB_RUNNING);
+	SetCtrlVal(mc.pbwait[1], mc.pbwait[0], rv & PB_WAITING);
+	
+	// Update the thread-safe variable
+	SetStatus(rv);
+
+	return rv;	// Return the value.
+}
 
 //////////////////////////////////////////////////////////////
 // 															//
@@ -824,12 +1504,13 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	p->nCycles = uipc.nc;								// Number of cycles
 	p->nDims = uipc.nd;									// Number of indirect dimensions
 	
-	if(p->nDims || p->nCycles)		   					// If either of these is true, it's a varied experiment
+	if(p->nDims || p->nCycles) {		   					// If either of these is true, it's a varied experiment
 		p->varied = 1;
-	else
+		p->nVaried = p->nDims?uipc.ndins:0 + uipc.ncins;	// Number of instructions that are varied.
+	} else {
 		p->varied = 0;
-	
-	p->nVaried = uipc.ndins + uipc.ncins;					// Number of instructions that are varied.
+		p->nVaried = 0;
+	}
 	
 	GetCtrlVal(pc.skip[1], pc.skip[0], &p->skip);			// Whether or not skip is on
 	GetCtrlVal(pc.nt[1], pc.nt[0], &p->nt);
@@ -838,7 +1519,6 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	GetNumListItems(pc.inst[0], pc.instr, &p->tFuncs);// Number of items in the instruction rings
 	p->tFuncs -= 9; // Subtract off atomic functions	// Eventually we'll get this from all_funcs
 
-	
 	// Convenience variables
 	int nFuncs = 0, tFuncs = p->tFuncs, nDims=p->nDims, nCycles=p->nCycles;
 	int nInst = p->n_inst, nVaried = p->nVaried, i, j;
@@ -868,9 +1548,10 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 		cyc_array[1] = uipc.ins_cycs;
 	
 		// We'll sort the arrays.
+		CmtGetLock(lock_uipc);
 		sort_linked(dim_array, 4, uipc.ndins);
 		sort_linked(cyc_array, 2, uipc.ncins);
-		
+
 		// We also need to sort the nd_delay and nd_data arrays, but since
 		// I haven't made a generalized sort_linked function, use the index function.
 		// There's probably a memory-cheaper algorithm that runs in the same time, but this
@@ -889,6 +1570,8 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 		
 		uipc.nd_delays = nd_delays;
 		uipc.nd_data = nd_data;
+		
+		CmtReleaseLock(lock_uipc);
 		
 		free(index);
 		free(dim_array);
@@ -1024,10 +1707,11 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 		int k, l, dind, cind, dim = -1, cyc = -1, dlev = -1, dstep, pcstep, num;	
 		
 		// Initialize some variables used in indexing.
-		int *places = malloc(sizeof(int)*(nDims+nCycles)), *cstep = malloc(sizeof(int)*(nDims+nCycles));
+		int *places = malloc(sizeof(int)*(nDims+nCycles)), *cstep = malloc(sizeof(int)*(nDims+nCycles)), *zero_cstep = malloc(sizeof(int)*(nDims+nCycles));
 		for(i=0; i<(nDims+nCycles); i++) {
 			places[i] = 1;
 			cstep[i] = 0;							// The first one we'll want is for linear index 0.
+			zero_cstep[i] = 0;
 			for(j=1; j<=i; j++)
 				places[i]*=maxsteps[j-1];
 		}
@@ -1041,7 +1725,7 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 			
 			// Start by updating the first instructions to what they should be.
 			// This will also get us the place in the index that we need.
-			get_updated_instr(p->instrs[num], num, cstep, &cind, &dind, p->v_ins_mode[i]);
+			get_updated_instr(p->instrs[num], num, zero_cstep, &cind, &dind, p->v_ins_mode[i]);
 			
 			if(cind >= 0)
 				cyc = uipc.ins_cycs[cind];
@@ -1142,7 +1826,8 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 		GetCtrlValStringLength(pc.skiptxt[1], pc.skiptxt[0], &len);
 		GetCtrlAttribute(pc.skiptxt[1], pc.skiptxt[0], ATTR_DFLT_VALUE_LENGTH, &d_len);
 		
-		char *skip_txt = malloc(len+1);
+		char *skip_txt = NULL;
+		skip_txt = malloc(len+1);
 		GetCtrlVal(pc.skiptxt[1], pc.skiptxt[0], skip_txt);
 		
 		// Check if it's the default value.
@@ -1159,16 +1844,25 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 
 		if(p->skip & 2) {
 			// Copy over the expression.
-			p->skip_expr = realloc(p->skip_expr, len+1);
+			if(p->skip_expr == NULL)
+				p->skip_expr = malloc(len+1);
+			else
+				p->skip_expr = realloc(p->skip_expr, len+1);
 			strcpy(p->skip_expr, skip_txt);
-			free(skip_txt);
-			
+
 			if(p->skip & 1 && uipc.skip_locs != NULL) {
 				// Copy over the skip_locs array.
 				for(i=0; i<p->max_n_steps; i++)
 					p->skip_locs[i] = uipc.skip_locs[i];
 			}
+			
+			if(skip_txt != NULL)
+				free(skip_txt);
 		}
+		
+		free(cstep);
+		free(places);
+		free(zero_cstep);
 	}
 	
 	return p;
@@ -1253,6 +1947,7 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 				change_cycle(num);
 			
 				// Now update the uipc file with the relevant instructions.
+				CmtGetLock(lock_uipc);
 				if(uipc.c_instrs[num] == NULL || uipc.max_cinstrs[num] < p->maxsteps[cyc]) {
 					if(uipc.c_instrs[num] == NULL)
 						uipc.c_instrs[num] = malloc(sizeof(PINSTR*)*p->maxsteps[cyc]);
@@ -1276,6 +1971,7 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 			
 				// Reset the cstep (probably unnecessary)
 				cstep[cyc] = 0;
+				CmtReleaseLock(lock_uipc);
 			}
 		
 			if(p->v_ins_mode[i] & PP_V_ID) {
@@ -1299,7 +1995,10 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 					cstep[dlev] = j;
 					instr = p->instrs[p->v_ins_locs[i][get_lindex(cstep, p->maxsteps, p->nCycles+p->nDims)]];
 				
-					nd_data[j] = instr->instr_data;
+					if(takes_instr_data(instr->instr)) 
+						nd_data[j] = instr->instr_data; 
+					else 
+						nd_data[j] = 0;
 					nd_delays[j] = instr->instr_time;
 					nd_units[j] = instr->time_units;
 				}
@@ -1359,7 +2058,8 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 					}
 				
 					int ind = j;
-				
+					
+					CmtGetLock(lock_uipc);
 					if(del) {
 						for(j = 0; j < steps; j++)
 							uipc.nd_delays[ind][j] = nd_delays[j];
@@ -1369,16 +2069,36 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 						for(j = 0; j < steps; j++)
 							uipc.nd_data[ind][j] = nd_data[j];
 					}
+					CmtReleaseLock(lock_uipc);
 				}
+				
+				free(nd_data);
+				free(nd_delays);
+				free(nd_units);
 			}
 		}
+		
+		// Load up the skip expression
+		if(p->skip && p->skip_expr != NULL) {
+			SetCtrlVal(pc.skiptxt[1], pc.skiptxt[0], p->skip_expr);
+			update_skip_condition();
+				
+			if(!uipc.skip_err && (p->skip & 1))
+				SetCtrlVal(pc.skip[1], pc.skip[0], 1);
+			else
+				SetCtrlVal(pc.skip[1], pc.skip[0], 0);
+			
+		}
 	}
+	
+	if(cstep != NULL)
+		free(cstep);
 }
 
 void load_prog_popup() {
 	// Function that generates a popup and allows the user to load a program from file.
 	char *path = malloc(MAX_FILENAME_LEN+MAX_PATHNAME_LEN);
-	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", "*.tdms", ".tdms", "Load Program From File", VAL_LOAD_BUTTON, 0, 0, 1, 1, path);
+	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", "*.tdm", ".tdm;.tdms", "Load Program From File", VAL_LOAD_BUTTON, 0, 0, 1, 1, path);
 
 	if(rv == VAL_NO_FILE_SELECTED) {
 		free(path);
@@ -1390,7 +2110,7 @@ void load_prog_popup() {
 	PPROGRAM *p = LoadPulseProgram(path, &err_val);
 
 	if(err_val != 0)
-		display_tdms_error(err_val);
+		display_ddc_error(err_val);
 
 	if(p != NULL) {
 		set_current_program(p);
@@ -1402,7 +2122,7 @@ void load_prog_popup() {
 
 void save_prog_popup() {
 	char *path = malloc(MAX_FILENAME_LEN+MAX_PATHNAME_LEN);
-	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", "*.tdms", ".tdms", "Save Program To File", VAL_SAVE_BUTTON, 0, 0, 1, 1, path);
+	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", "*.tdm", ".tdm", "Save Program To File", VAL_SAVE_BUTTON, 0, 0, 1, 1, path);
 
 	if(rv == VAL_NO_FILE_SELECTED) {
 		free(path);
@@ -1415,7 +2135,7 @@ void save_prog_popup() {
 	int err_val = SavePulseProgram(path, p);
 
 	if(err_val != 0) 
-		display_tdms_error(err_val);
+		display_ddc_error(err_val);
 	
 	if(p != NULL) { free_pprog(p); }
 	free(path);
@@ -1437,12 +2157,15 @@ void add_prog_path_to_recent(char *opath) {
 	c[1] = NULL;				   // Truncate after the last separator.
 
 	if(c != NULL && FileExists(path, NULL)) {
+		
+		CmtGetLock(lock_uipc);
 		if(uipc.ppath == NULL)
 			uipc.ppath = malloc(strlen(path)+1);
 		else
 			uipc.ppath = realloc(uipc.ppath, strlen(path)+1);
-
+		
 		strcpy(uipc.ppath, path);
+		CmtReleaseLock(lock_uipc);
 	}
 	
 	free(path);
@@ -1464,6 +2187,7 @@ void clear_program() {
 	change_num_cycles();
 	
 	// Free up the uipc stuff
+	CmtGetLock(lock_uipc);
 	if(uipc.c_instrs != NULL)
 		free(uipc.c_instrs);	// The values should have been freed by clear_instruction
 	if(uipc.max_cinstrs != NULL)
@@ -1476,7 +2200,8 @@ void clear_program() {
 	uipc.c_instrs = NULL;
 	uipc.max_cinstrs = NULL;
 	uipc.cyc_pans = NULL;
-
+	CmtReleaseLock(lock_uipc);
+	
 	// Turn off the skips if necessary.
 	SetCtrlVal(pc.skip[1], pc.skip[0], 0);
 	
@@ -1584,6 +2309,8 @@ int ui_cleanup(int verbose) {
 			
 			// If we're at this point, we need to remove this dimension from the experiment
 			change = 1;
+			
+			CmtGetLock(lock_uipc);
 			remove_array_item(uipc.dim_steps, i, uipc.nd); // Remove the steps.
 			for(j=0; j<uipc.ndins; j++) {
 				if(uipc.ins_dims[j] > i)
@@ -1591,6 +2318,7 @@ int ui_cleanup(int verbose) {
 			}
 			uipc.nd--;				// Update number of dimensions
 			i--;					// We removed one, so drop it back one.
+			CmtReleaseLock(lock_uipc);
 		}
 		if(uipc.nd)
 			populate_dim_points();		// Update the UI
@@ -1665,6 +2393,7 @@ int ui_cleanup(int verbose) {
 			
 			// If we're at this point, we need to remove the cycle from the expriment
 			change = 1;
+			CmtGetLock(lock_uipc);
 			remove_array_item(uipc.cyc_steps, i, uipc.nc);	// Remove the steps from the array
 			for(j=0; j<uipc.ncins; j++) {
 				if(uipc.ins_cycs[j] > i)
@@ -1672,6 +2401,7 @@ int ui_cleanup(int verbose) {
 			}
 			uipc.nc--;			// Update number of cycles
 			i--;				// We removed one, so decrement the counter.
+			CmtReleaseLock(lock_uipc);
 		}
 		
 		populate_cyc_points();	// Update the UI.
@@ -1863,7 +2593,7 @@ int set_instr(int num, PINSTR *instr) {
 	
 	int panel = pc.inst[num];					
 	set_instr_panel(panel, instr);
-	
+	change_instruction(num);
 	return 1;												// Success
 }
 
@@ -1885,11 +2615,6 @@ void set_instr_panel(int panel, PINSTR *instr) {
 	// Set the flags
 	set_flags_panel(panel, instr->flags);
 	
-	/* Not sure why I was doing this *
-	for(i = 0; i<24; i++)
-		SetCtrlAttribute(panel, pc.TTLs[i], ATTR_DIMMED, 0);	// Undim all the TTLs
-	*/
-		
 	SetCtrlIndex(panel, pc.instr, instr->instr);			// Set the instruction
 	if(instr->instr >= 9) { 								// This is a compound function, not an atomic function
 		int r_flags = get_reserved_flags(instr->instr); 	// Get the reserved flags
@@ -1906,9 +2631,11 @@ void set_instr_panel(int panel, PINSTR *instr) {
 	}
 	
 	// Undim the instruction data control if it needs it, otherwise, set to 0 and dim it.
-	if(takes_instr_data(instr->instr)) 
+	if(takes_instr_data(instr->instr)) { 
 		SetCtrlAttribute(panel, pc.instr_d, ATTR_DIMMED, 0);
-	else {
+		SetCtrlVal(panel, pc.instr_d, instr->instr_data);
+		change_instr_data(panel);
+	} else {
 		SetCtrlAttribute(panel, pc.instr_d, ATTR_DIMMED, 1);
 		SetCtrlVal(panel, pc.instr_d, 0);
 	}
@@ -1920,6 +2647,7 @@ void set_instr_panel(int panel, PINSTR *instr) {
 	
 	SetCtrlVal(panel, pc.delay, instr_time);
 	SetCtrlIndex(panel, pc.delayu, instr->time_units);
+	change_instr_delay(panel);
 	
 	// Deal with whether or not a scan is triggered now
 	int trig_ttl;
@@ -1952,22 +2680,48 @@ void change_instr_delay(int panel) {
 	// Gets the values we need
 	GetCtrlVal(panel, pc.delay, &val);
 	GetCtrlVal(panel, pc.delayu, &units);
+	SetCtrlAttribute(panel, pc.delay, ATTR_PRECISION, get_precision(val, MCUI_DEL_PREC));
 	
 	int num;
 	GetCtrlVal(panel, pc.ins_num, &num);
 
 	GetCtrlVal(pc.cinst[num], pc.delu_init, &ndunits);
-
+	
 	// Convert units if necessary.
-	if(ndunits != units)
-		val *= pow(1000, units-ndunits);
+	if(ndunits != units) {
+		val *= pow(1000, units);
+		int new_units = calculate_units(val);
+		val /= pow(1000, units);
+		SetCtrlVal(pc.cinst[num], pc.del_init, val);
+		
+		SetCtrlVal(pc.cinst[num], pc.delu_init, new_units);
+	}
 
 	SetCtrlVal(pc.cinst[num], pc.del_init, val);
+	SetCtrlAttribute(pc.cinst[num], pc.del_init, ATTR_PRECISION, get_precision(val, MCUI_DEL_PREC));
+	
+	
 	int state = get_nd_state(num);
-	if(state == 1)
+	if(state == 0 || state == 1)
 		update_nd_increment(num, MC_FINAL);
 }
 
+void change_instr_data(int panel) {
+	// Updates the ND controls in response to a change in the instruction data.
+	int num, val;
+	
+	GetCtrlVal(panel, pc.instr_d, &val);
+	GetCtrlVal(panel, pc.ins_num, &num);
+	
+	SetCtrlVal(pc.cinst[num], pc.dat_init, val);
+	int state = get_nd_state(num);
+	if(state == 0 || state == 1) {
+		int inc, steps;
+		GetCtrlVal(pc.cinst[num], pc.nsteps, &steps);
+		GetCtrlVal(pc.cinst[num], pc.dat_inc, &inc);
+		SetCtrlVal(pc.cinst[num], pc.dat_fin, val+inc*steps);
+	}
+}
 void change_instruction(int num) {
 	// Convenience function for change_instruction_panel
 	// Also syncs with the cinstr.
@@ -2167,10 +2921,12 @@ void change_trigger_ttl() {
 		set_ttl_trigger(cp, nt, 1);
 
 		// If there are instructions hidden, find them and move the TTLs around.
+		CmtGetLock(lock_uipc);
 		if(uipc.c_instrs != NULL && uipc.c_instrs[i] != NULL && uipc.max_cinstrs[i] > 0) {
 			for(int j = 1; j < uipc.max_cinstrs[i]; j++)
 				uipc.c_instrs[i][j]->flags = move_bit_skip(uipc.c_instrs[i][j]->flags, skip, nt, ot);
 		}
+		CmtReleaseLock(lock_uipc);
 
 		// Check if it's expanded.
 		GetCtrlAttribute(cp, pc.collapsepc, ATTR_VISIBLE, &expanded);
@@ -2188,7 +2944,9 @@ void change_trigger_ttl() {
 		move_ttl(i, nt, ot);
 	}
 	
+	CmtGetLock(lock_uipc);
 	uipc.trigger_ttl = nt;
+	CmtReleaseLock(lock_uipc);
 }
 
 void set_ttl_trigger(int panel, int ttl, int on) {
@@ -2368,15 +3126,19 @@ void set_ndon(int ndon) {		// Toggles whether or not multi-dimensional instructi
 		change_num_dims();
 	} else {
 		dimmed = 1;
+		CmtGetLock(lock_uipc);
 		uipc.nd = 0;
+		CmtReleaseLock(lock_uipc);
 	}
 	
 	// Set the controls appropriately.
 	SetCtrlVal(pc.ndon[1], pc.ndon[0], val);
 	SetPanelAttribute(pc.PPConfigCPan, ATTR_DIMMED, dimmed);
 	SetCtrlAttribute(pc.ndims[1], pc.ndims[0], ATTR_DIMMED, dimmed);
-	for(i = 0; i<uipc.max_ni; i++)
+	for(i = 0; i<uipc.max_ni; i++) {
 		SetPanelAttribute(pc.cinst[i], ATTR_DIMMED, dimmed);
+		set_instr_nd_mode(i, ndon?get_nd_state(i):0);
+	}
 	
 	if(!uipc.nc) {
 		SetCtrlAttribute(pc.skip[1], pc.skip[0], ATTR_DIMMED,dimmed);
@@ -2408,6 +3170,7 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 	if(!state) {
 		if(ind >=0) {
 			// Remove the index from the lists and decrement the number of instructions
+			CmtGetLock(lock_uipc);
 			remove_array_item(uipc.dim_ins, ind, uipc.ndins);
 			remove_array_item(uipc.ins_state, ind, uipc.ndins);
 			remove_array_item(uipc.ins_dims, ind, uipc.ndins);
@@ -2440,9 +3203,11 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 				uipc.nd_data = realloc(uipc.nd_data, sizeof(int*)*uipc.ndins);
 				uipc.nd_delays = realloc(uipc.nd_delays, sizeof(double*)*uipc.ndins);	
 			}
+			CmtReleaseLock(lock_uipc);
 		}
 	} else {
 		if(ind < 0) {				// only need to update if we're not already there.
+			CmtGetLock(lock_uipc);
 			uipc.ndins++;			// Increment the number of instructions varied 
 			
 			// Memory allocation is important.
@@ -2489,16 +3254,24 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 				
 			} else if(nl > uipc.nd) 
 				DeleteListItem(panel, pc.dim, uipc.nd, -1);
-				  
-			int dim;
+			
+			int dim, nstep;
 			GetCtrlVal(panel, pc.dim, &dim);
+			GetCtrlVal(panel, pc.nsteps, &nstep);
 			
 			// Now insert our instruction at the end.
 			uipc.ins_dims[uipc.ndins-1] = dim;
 			uipc.dim_ins[uipc.ndins-1] = num;
 			uipc.ins_state[uipc.ndins-1] = state;
 			uipc.nd_data[uipc.ndins-1] = NULL; 
-			uipc.nd_delays[uipc.ndins-1] = NULL; 
+			uipc.nd_delays[uipc.ndins-1] = NULL;
+			
+			SetCtrlVal(panel, pc.nsteps, uipc.dim_steps[dim]);
+			CmtReleaseLock(lock_uipc);
+			if(state == 1)
+				update_nd_increment(num, MC_INC);
+			else
+				update_nd_from_exprs(num);
 		}
 	}
 	
@@ -2510,44 +3283,63 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 	int all_ctrls[10] = {pc.del_init, pc.delu_init, pc.dat_init, 
 						 pc.disp_init, pc.disp_fin, pc.del_fin, 
 						 pc.delu_fin, pc.dat_fin, pc.nsteps, pc.dim};
-	int inc_num = 4, exprs_num = 2, all_num = 10, main_num = 3;
-	int main_ctrls[3] = {pc.delay, pc.instr_d, pc.delayu};
+	int inc_num = 4, exprs_num = 2, all_num = 10;
 	int exprs = MC_HIDDEN, inc = MC_HIDDEN, main = MC_DIMMED, all = 0;
 	int color = VAL_RED;	// This will change as necessary
 	
-	if(state > 0) {		// A varied state
-		// If it's on, we want to switch the border to blue.
+	if(state > 0)		// A varied state
 		SetCtrlVal(panel, pc.vary, 1);
-		SetCtrlAttribute(pc.inst[num], pc.ins_num, ATTR_DISABLE_PANEL_THEME, 1);
-	}
 	
 	// Dim/Hide the controls that need to be dimmed and/or hidden
  	if(state == 0) {
 		// In the 0 state, we're off, so that should be dimmed time increment stuff
-		SetCtrlAttribute(pc.inst[num], pc.ins_num, ATTR_FRAME_COLOR, 14737379);	// The default color, for whatever reason
-		SetCtrlAttribute(pc.inst[num], pc.ins_num, ATTR_DISABLE_PANEL_THEME, 0);
-		SetCtrlVal(panel, pc.vary, 1);
-		
-		main = 0;
 		all = MC_DIMMED;
 		inc = MC_DIMMED;
 	} else if(state == 1) {
 		inc = 0;		   // No color change needed
-		SetCtrlAttribute(pc.inst[num], pc.ins_num, ATTR_FRAME_COLOR, VAL_RED);
 	} else if(state == 2) {
 		exprs = 0;
 		color = VAL_BLUE;
-		SetCtrlAttribute(pc.inst[num], pc.ins_num, ATTR_FRAME_COLOR, VAL_BLUE);
 	}
 	
 	// Set up the visibility modes
-	change_visibility_mode(pc.inst[num], main_ctrls, main_num, main);
 	change_visibility_mode(panel, all_ctrls, all_num, all);
 	change_visibility_mode(panel, inc_ctrls, inc_num, inc);
 	change_visibility_mode(panel, exprs_ctrls, exprs_num, exprs);
 	
 	SetCtrlAttribute(panel, pc.vary, ATTR_ON_COLOR, color); // Change color to red.
 	SetCtrlVal(panel, pc.vary, state);
+	
+	set_instr_nd_mode(num, state);
+}
+
+void set_instr_nd_mode(int num, int nd) {
+	// Sets the mode for the 1D instruction based to "ND" if nd > 0
+	// otherwise to the normal 1D mode.
+	// Modes:
+	// 0 -> All instructions undimmed, border is normal.
+	// 1 -> Border red, instruction and instr_data are dimmed
+	// 2 -> Border blue, instruction and instr_data are dimmed.
+	
+	// First update the dim controls
+	int main_num = 3;
+	int main_ctrls[3] = {pc.delay, pc.instr_d, pc.delayu};
+	change_visibility_mode(pc.inst[num], main_ctrls, main_num, nd?MC_DIMMED:0);
+	
+	if(nd) {
+		SetCtrlAttribute(pc.inst[num], pc.ins_num, ATTR_DISABLE_PANEL_THEME, 1);
+		SetCtrlAttribute(pc.inst[num], pc.ins_num, ATTR_FRAME_COLOR, (nd == 2)?VAL_BLUE:VAL_RED);
+	} else { 
+		SetCtrlAttribute(pc.inst[num], pc.ins_num, ATTR_FRAME_COLOR, 14737379);	// The default color, for whatever reason it's 0xE0DFE3
+		SetCtrlAttribute(pc.inst[num], pc.ins_num, ATTR_DISABLE_PANEL_THEME, 0);
+		
+		int instr; 
+		GetCtrlVal(pc.inst[num], pc.instr, &instr);
+		if(!takes_instr_data(instr))
+			SetCtrlAttribute(pc.inst[num], pc.instr_d, ATTR_DIMMED, 1);	
+	}
+	
+	
 }
 
 void change_num_dims() { 	// Updates the number of dimensions in the experiment
@@ -2596,6 +3388,8 @@ void change_num_dims() { 	// Updates the number of dimensions in the experiment
 	}
 	
 	// Update the uipc variable
+	
+	CmtGetLock(lock_uipc);
 	uipc.nd = nd;
 	if(uipc.max_nd < nd) {
 		if(uipc.dim_steps == NULL)
@@ -2608,6 +3402,7 @@ void change_num_dims() { 	// Updates the number of dimensions in the experiment
 		
 		uipc.max_nd = nd;
 	}
+	CmtReleaseLock(lock_uipc);
 }
 
 void change_num_dim_steps(int dim, int steps) { // Updates number of steps in the given dimension
@@ -2623,7 +3418,9 @@ void change_num_dim_steps(int dim, int steps) { // Updates number of steps in th
 	}
 	
 	// Now update the uipc variable and we're done.
+	CmtGetLock(lock_uipc);
 	uipc.dim_steps[dim] = steps;
+	CmtReleaseLock(lock_uipc);
  
 }
 
@@ -2752,9 +3549,16 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 				init = 0;
 				fin = steps*inc;
 			}
+			
+			initu = calculate_units(init);
+			SetCtrlVal(pc.cinst[num], pc.delu_init, initu);
 			break;
 		case MC_INC:
 			inc = (fin-init)/steps;
+			
+			incu = calculate_units(inc);
+			SetCtrlVal(pc.cinst[num], pc.delu_inc, incu);
+			
 			break;
 		case MC_FINAL:
 			fin = init+(inc*steps);
@@ -2763,6 +3567,9 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 				fin = 0;
 				init = -inc*steps;
 			}
+			
+			finu = calculate_units(fin);
+			SetCtrlVal(pc.cinst[num], pc.delu_fin, finu);
 			break;
 	}
 	steps++;
@@ -2778,6 +3585,7 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 	else
 		ind = -1;
 	
+	CmtGetLock(lock_uipc);
 	if(ind >= 0) {
 		if(uipc.nd_delays[ind] == NULL) 
 			uipc.nd_delays[ind] = malloc(sizeof(double)*steps);
@@ -2787,6 +3595,7 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 		for(i=0; i<steps; i++) 
 			uipc.nd_delays[ind][i] = init+inc*i;
 	}
+	CmtReleaseLock(lock_uipc);
 	
 	// Convert back to the appropriate units
 	init /= pow(1000, initu);
@@ -2797,6 +3606,10 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 	SetCtrlVal(panel, pc.del_init, init);
 	SetCtrlVal(panel, pc.del_inc, inc);
 	SetCtrlVal(panel, pc.del_fin, fin);
+	
+	SetCtrlAttribute(panel, pc.del_init, ATTR_PRECISION, get_precision(init, MCUI_DEL_PREC));
+	SetCtrlAttribute(panel, pc.del_inc, ATTR_PRECISION, get_precision(inc, MCUI_DEL_PREC));
+	SetCtrlAttribute(panel, pc.del_fin, ATTR_PRECISION, get_precision(fin, MCUI_DEL_PREC));
 	
 	// Now if necessary, update the data increment controls
 	if(takes_instr_data(instr)) {
@@ -2833,6 +3646,7 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 		steps++;
 		
 		// Update the uipc variable
+		CmtGetLock(lock_uipc);
 		if(ind >= 0) {
 			if(uipc.nd_delays[ind] == NULL) 
 				uipc.nd_data[ind] = malloc(sizeof(int)*steps);
@@ -2842,19 +3656,33 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 			for(int i=0; i<steps; i++) 
 				uipc.nd_data[ind][i] = initd+incd*i;
 		}
+		CmtReleaseLock(lock_uipc);
 		
 		SetCtrlVal(panel, pc.dat_init, initd);
 		SetCtrlVal(panel, pc.dat_inc, incd);
 	 	SetCtrlVal(panel, pc.dat_fin, find);
-		
 	}
+	
+	// Update the 1D controls.
+	int dat, delu, delu1d;
+	double del;
+	GetCtrlVal(panel, pc.dat_init, &dat);
+	GetCtrlVal(panel, pc.del_init, &del);
+	GetCtrlVal(panel, pc.delu_init, &delu);
+	GetCtrlVal(pc.inst[num], pc.delayu, &delu1d);
+	
+	del /= pow(1000, delu)/pow(1000, delu1d);	// Get new value for old units.
+	
+	// Set the controls as appropriate.
+	SetCtrlVal(pc.inst[num], pc.delay, del);
+	SetCtrlVal(pc.inst[num], pc.instr_d, dat);
 }
 
 
 void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (state == 2)
 	// Return value is 0 or a positive error.
 	int state = get_nd_state(num);
-	int i, *cstep = malloc(sizeof(int)*(uipc.nc+uipc.nd));
+	int i, *cstep = NULL;
 	int panel = pc.cinst[num];
 	int dim, ind;
 	
@@ -2913,7 +3741,10 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 		return;	// Nothing to do.
 	
 	// Set up the uipc var if necessary.
-	int steps = uipc.dim_steps[dim];
+	int steps;
+	GetCtrlVal(panel, pc.nsteps, &steps);
+	
+	CmtGetLock(lock_uipc);
 	if(eval_delay) {
 		if(uipc.nd_delays[ind] == NULL)
 			uipc.nd_delays[ind] = malloc(sizeof(double)*steps);
@@ -2927,9 +3758,10 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 		else
 			uipc.nd_data[ind] = realloc(uipc.nd_data[ind], sizeof(int)*steps);
 	}
+	CmtReleaseLock(lock_uipc);
 	
-	
-	// Build the basic cstep.
+	// Build the basic cstep
+	cstep = malloc(sizeof(int)*(uipc.nc+uipc.nd));
 	for(i = 0; i<(uipc.nc+uipc.nd); i++)
 		cstep[i] = 0;	// Just set everything we don't care about to the first one, it's not important
 	
@@ -2951,6 +3783,7 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 	add_constant(c, "init", C_DOUBLE, &init);
 	add_constant(c, "fin", C_DOUBLE, &fin);
 	
+	CmtGetLock(lock_uipc);
 	for(i=0; i<steps; i++) {
 		cstep[dim]++;
 		update_constants(c, cstep);
@@ -2974,7 +3807,7 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 				
 				for(int j=0; j<uipc.err_del_size; j++)
 					uipc.err_del_pos[j] = cstep[j];
-
+				
 				if(!eval_data || err_dat)
 					break;
 			}
@@ -2995,12 +3828,16 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 				
 				for(int j=0; j<uipc.err_dat_size; j++)
 					uipc.err_dat_pos[j] = cstep[j];
-				
+
 				if(!eval_delay || err_del)
 					break;
 			}
 		}
 	}
+	
+	CmtReleaseLock(lock_uipc);
+	
+	free_constants(c);
 	
 	// If the evaluation was unsuccessful, the border should turn red.
 	// If it was successful, the border should turn green, otherwise it is
@@ -3028,11 +3865,13 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 		SetCtrlVal(pc.cinst[num], pc.del_init, (uipc.nd_delays[ind][0])/pow(1000, initu));
 		SetCtrlVal(pc.cinst[num], pc.del_fin, (uipc.nd_delays[ind][steps-1])/pow(1000, finu));
 		
+		CmtGetLock(lock_uipc);
 		if(uipc.err_del = err_del) {			// Not a typo, I'm actually setting the
 			del_bgcolor = VAL_RED;			    // value of the uipc error field here.
 			del_textcolor = VAL_OFFWHITE;
 		} else 
 			del_bgcolor = VAL_GREEN;
+		CmtReleaseLock(lock_uipc);
 	} 
 	
 	if(eval_data) {
@@ -3040,15 +3879,19 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 		
 		dat_bold = 1;
 		
-		SetCtrlVal(pc.cinst[num], pc.del_init, uipc.nd_data[ind][0]);
-		SetCtrlVal(pc.cinst[num], pc.del_fin, uipc.nd_data[ind][steps-1]);
+		SetCtrlVal(pc.cinst[num], pc.dat_init, uipc.nd_data[ind][0]);
+		SetCtrlVal(pc.cinst[num], pc.dat_fin, uipc.nd_data[ind][steps-1]);
 		
+		CmtGetLock(lock_uipc);
 		if(uipc.err_dat = err_dat) {			// Again, not a typo.
 			dat_bgcolor = VAL_RED;
 			dat_textcolor = VAL_OFFWHITE;
 		} else 
 			dat_bgcolor = VAL_GREEN;
-	} 
+		CmtReleaseLock(lock_uipc);
+	}
+	
+	free(cstep);
 	
 	// Update the UI Controls
 	SetCtrlAttribute(panel, pc.cexpr_delay, ATTR_TEXT_BGCOLOR, del_bgcolor);
@@ -3058,6 +3901,20 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 	SetCtrlAttribute(panel, pc.cexpr_data, ATTR_TEXT_BGCOLOR, dat_bgcolor);
 	SetCtrlAttribute(panel, pc.cexpr_data, ATTR_TEXT_BOLD, dat_bold);
 	SetCtrlAttribute(panel, pc.cexpr_data, ATTR_TEXT_COLOR, dat_textcolor);
+	
+	// Update the 1D controls.
+	int dat, delu, delu1d;
+	double del;
+	GetCtrlVal(panel, pc.dat_init, &dat);
+	GetCtrlVal(panel, pc.del_init, &del);
+	GetCtrlVal(panel, pc.delu_init, &delu);
+	GetCtrlVal(pc.inst[num], pc.delayu, &delu1d);
+	
+	del /= pow(1000, delu)/pow(1000, delu1d);	// Get new value for old units.
+	
+	// Set the controls as appropriate.
+	SetCtrlVal(pc.inst[num], pc.delay, del);
+	SetCtrlVal(pc.inst[num], pc.instr_d, dat);
 	
 	return;
 }
@@ -3084,6 +3941,8 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 	
 	// Get max_n_steps and maxsteps;
 	int *maxsteps = malloc(sizeof(int)*size);
+	
+	CmtGetLock(lock_uipc);
 	uipc.max_n_steps = 1;
 	for(i=0; i<uipc.nc; i++) {
 		uipc.max_n_steps*=uipc.cyc_steps[i];
@@ -3094,6 +3953,7 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 		uipc.max_n_steps*=uipc.dim_steps[i];
 		maxsteps[i+uipc.nc] = uipc.dim_steps[i];
 	}
+	CmtReleaseLock(lock_uipc);
 	
 	// Allocate space for skip_locs. One for each step. We'll use an
 	// unsigned char array since bools aren't a thing in C
@@ -3104,6 +3964,7 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 		return;
 	}
 	
+	CmtGetLock(lock_uipc);
 	if(uipc.skip_locs == NULL)
 		uipc.skip_locs = malloc(sizeof(unsigned char)*max_n_steps);
 	else
@@ -3116,6 +3977,7 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 	int err;
 	uipc.real_n_steps = max_n_steps;				// Assume we didn't skip anything at first.
 	int *cstep = malloc(sizeof(int)*size);
+	
 	for(i=0; i<max_n_steps; i++) {
 		get_cstep(i, cstep, maxsteps, size); 	// Convert from linear index to cstep.
 		
@@ -3132,6 +3994,8 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 		if(err)
 			break;
 	}
+	
+	free_constants(c);
 	
 	// The new values for the UI controls.
 	int bg = VAL_GREEN, txt = VAL_BLACK;
@@ -3153,6 +4017,8 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 		uipc.real_n_steps = max_n_steps; 	// If we fucked it up, there will be no skipping.
 	}
 	
+	CmtReleaseLock(lock_uipc);
+	
 	SetCtrlAttribute(pan, ctrl, ATTR_TEXT_BOLD, 1);
 	SetCtrlAttribute(pan, ctrl, ATTR_TEXT_BGCOLOR, bg);
 	SetCtrlAttribute(pan, ctrl, ATTR_TEXT_COLOR, txt);
@@ -3168,6 +4034,49 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 	
 }
 
+char *get_tooltip(int skip) {
+	// Generates the text of a tooltip explaining the variables available
+	// for the skip expressions. Does not currently need to be freed at the
+	// moment.
+	//
+	// Pass TRUE to skip for vars for the skip expression
+	// Pass FALSE to skip for the nd expressions.
+	
+	if(skip) {
+		return 	"Variables\n"
+				"------------------\n"
+				"nd: Number of dimensions\n"
+				"nc: Number of cycles\n"
+				"\n"
+				"cds#: Current dimension step (cds0, cds1,...)\n"
+				"mds#: Max dimension step in dimension \"#\"\n"
+				"ccs#: Current cycle step (ccs0, ccs1, ...)\n"
+				"mcs#: Maximum cycle step in cycle \"#\"\n"
+				"\n"
+				"us: Microseconds\n"
+				"ms: Milliseconds\n"
+				"s: Seconds\n"
+				"------------------\n";
+	} else {
+		return 	"Variables\n"
+				"------------------\n"
+				"nd: Number of dimensions\n"
+				"nc: Number of cycles\n"
+				"\n"
+				"x or step: The current step in this dimension."
+				"\n"
+				"cds#: Current dimension step (cds0, cds1,...)\n"
+				"mds#: Max dimension step in dimension \"#\"\n"
+				"ccs#: Current cycle step (ccs0, ccs1, ...)\n"
+				"mcs#: Maximum cycle step in cycle \"#\"\n"
+				"\n"
+				"us: Microseconds\n"
+				"ms: Milliseconds\n"
+				"s: Seconds\n"
+				"------------------\n";
+	}
+}
+
 /**************** Set Phase Cycling Parameters *****************/ 
 
 void update_pc_state(int num, int state) {
@@ -3178,7 +4087,6 @@ void update_pc_state(int num, int state) {
 	int i, ind = -1;
 	int left = 1106;	// This is the "PC off" state.
 	
-	
 	// Find out if it's already in the list.
 	if(uipc.cyc_ins != NULL) {
 		for(i = 0; i<uipc.ncins; i++) {
@@ -3188,7 +4096,7 @@ void update_pc_state(int num, int state) {
 			}
 		}
 	}
-	
+								
 	if(!state) {
 		all = MC_DIMMED;
 		int up_visible;
@@ -3199,7 +4107,8 @@ void update_pc_state(int num, int state) {
 			set_phase_cycle_expanded(num, 0);
 		
 		if(ind>=0) {
-			// Remove the index from the lists.
+			// Remove the index from the lists
+			CmtGetLock(lock_uipc);
 			remove_array_item(uipc.cyc_ins, ind, uipc.ncins);
 			remove_array_item(uipc.ins_cycs, ind, uipc.ncins);
 			
@@ -3214,6 +4123,7 @@ void update_pc_state(int num, int state) {
 				uipc.cyc_ins = realloc(uipc.cyc_ins, sizeof(int)*uipc.ncins);
 				uipc.ins_cycs = realloc(uipc.ins_cycs, sizeof(int)*uipc.ncins);
 			}
+			CmtReleaseLock(lock_uipc);
 			
 			// Update the controls
 			SetCtrlAttribute(pc.cinst[num], pc.cins_num, ATTR_FRAME_COLOR, 14737379);	// The default color, for whatever reason
@@ -3272,6 +4182,7 @@ void update_pc_state(int num, int state) {
 			}
 			
 			// Now we need to update the uipc var.
+			CmtGetLock(lock_uipc);
 			uipc.ncins++;
 			if(uipc.cyc_ins == NULL)
 				uipc.cyc_ins = malloc(uipc.ncins*sizeof(int));
@@ -3285,6 +4196,7 @@ void update_pc_state(int num, int state) {
 			
 			uipc.ins_cycs[uipc.ncins-1] = cyc;
 			uipc.cyc_ins[uipc.ncins-1] = num;
+			CmtReleaseLock(lock_uipc);
 		} else {
 			all = MC_DIMMED;
 		}
@@ -3296,6 +4208,30 @@ void update_pc_state(int num, int state) {
 		SetCtrlAttribute(panel, pc.expandpc, ATTR_VISIBLE, 1);
 		SetCtrlAttribute(panel, pc.xbutton, ATTR_LEFT, left + 10);
 	}
+	
+	// Update transient mode.
+	// If not, uppdate the transient acquisition value.
+	int niv = 1, oiv;
+	
+	if(uipc.cyc_steps != NULL && uipc.ins_cycs != NULL) {
+		int cycs_found = 0;
+		int cyc, cbit;
+		for(i = 0; i < uipc.ncins; i++) {
+			cyc = uipc.ins_cycs[i];
+			cbit = 1<<cyc;
+			if(!(cbit&cycs_found)) {
+				niv *= uipc.cyc_steps[cyc];
+				cycs_found = cbit|cycs_found;
+			}
+		}
+	}
+	
+	GetCtrlAttribute(pc.nt[1], pc.nt[0], ATTR_INCR_VALUE, &oiv);
+	SetCtrlAttribute(pc.nt[1], pc.nt[0], ATTR_INCR_VALUE, niv);
+	
+	int nt;
+	GetCtrlVal(pc.nt[1], pc.nt[0], &nt);
+	SetCtrlVal(pc.nt[1], pc.nt[0], (int)((nt/oiv)*niv));
 	
 	change_visibility_mode(panel, all_ctrls, all_num, all);
 	SetCtrlVal(panel, pc.pcon, state);
@@ -3311,7 +4247,7 @@ void change_num_cycles() {
 	
 	// Update the UI elements
 	if(uipc.ncins) {
-		char **c = NULL;
+		char **c = NULL;	   
 		int elements = 0;
 		if(nc > uipc.nc)
 		c = generate_char_num_array(1, nc, &elements);
@@ -3351,6 +4287,7 @@ void change_num_cycles() {
 	
 	// Only if this has never been allocated - change_num_instructions will
 	// take care of reallocation otherwise.
+	CmtGetLock(lock_uipc);
 	if(uipc.c_instrs == NULL) {
 		uipc.c_instrs = malloc(sizeof(PINSTR**)*uipc.max_ni);
 		uipc.max_cinstrs = malloc(sizeof(int)*uipc.max_ni);
@@ -3359,7 +4296,7 @@ void change_num_cycles() {
 			uipc.max_cinstrs[i] = 0;	// -1 initialization
 		}
 	}
-
+	
 	// Update the uipc variable
 	uipc.nc = nc;
 	if(uipc.max_nc < nc) {								// We keep everything allocated as a form
@@ -3373,6 +4310,7 @@ void change_num_cycles() {
 
 		uipc.max_nc = nc;
 	}
+	CmtReleaseLock(lock_uipc);
 	
 	int dimmed = 0;
 	if(!uipc.nc && !uipc.nd) 
@@ -3395,12 +4333,14 @@ void change_cycle(int num) {
 	// First we'll update the uipc.
 	GetCtrlVal(panel, pc.pclevel, &cyc);		// Should be 0-based index
 	int i;
+	CmtGetLock(lock_uipc);
 	for(i = 0; i<uipc.ncins; i++) {
 		if(uipc.cyc_ins[i] == num) {			// Find the place in the cyc_ins array
 			uipc.ins_cycs[i] = cyc;
 			break;
 		}
 	}
+	CmtReleaseLock(lock_uipc);
 	
 	// Update the number of steps control.
 	SetCtrlVal(panel, pc.pcsteps, uipc.cyc_steps[cyc]);
@@ -3490,8 +4430,10 @@ void change_cycle_num_steps(int cyc, int steps) {
 	if(steps == uipc.cyc_steps[cyc])
 		return;	// No change.
 	
+	CmtGetLock(lock_uipc);
 	int oldsteps = uipc.cyc_steps[cyc];
 	uipc.cyc_steps[cyc] = steps;
+	CmtReleaseLock(lock_uipc);
 	
 	int elements;
 	char **c = NULL;
@@ -3516,6 +4458,7 @@ void change_cycle_num_steps(int cyc, int steps) {
 		
 		// Now if something's expanded, we need to deal with that
 		if(uipc.n_cyc_pans > i) {
+			CmtGetLock(lock_uipc);
 			int num = uipc.cyc_ins[i];
 			if(uipc.cyc_pans[num] != NULL) {
 				if(steps > oldsteps) { 	// Adding steps
@@ -3530,7 +4473,7 @@ void change_cycle_num_steps(int cyc, int steps) {
 				
 				resize_expanded(num, steps);
 			}
-			
+			CmtReleaseLock(lock_uipc);
 		}
 		
 		SetCtrlVal(cp, pc.pcsteps, steps);
@@ -3565,6 +4508,7 @@ void update_cyc_instr(int num, PINSTR *instr, int step) {
 	int i;
    											  
 	// Make this array the right size.
+	CmtGetLock(lock_uipc);
 	if(uipc.c_instrs[num] == NULL)
 		uipc.c_instrs[num] = malloc(sizeof(PINSTR*)*(step+1));
 	else if (uipc.max_cinstrs[num] <= step) 
@@ -3583,7 +4527,7 @@ void update_cyc_instr(int num, PINSTR *instr, int step) {
 	
 	// Finally just copy the instr into the uipc array.
 	copy_pinstr(instr, uipc.c_instrs[num][step]);
-	
+	CmtReleaseLock(lock_uipc);
 }
 
 void populate_cyc_points()
@@ -3647,6 +4591,7 @@ void set_phase_cycle_expanded(int num, int state) {
 	
 	if(state) {
 		// Now we want to create the panels.
+		CmtGetLock(lock_uipc);
 		if(uipc.cyc_pans == NULL) {
 			uipc.cyc_pans = malloc(sizeof(int*)*(num+1));
 		} else if(uipc.n_cyc_pans <= num) {
@@ -3663,6 +4608,7 @@ void set_phase_cycle_expanded(int num, int state) {
 		uipc.cyc_pans[num][0] = pc.inst[num];
 		for(i = 1; i < uipc.cyc_steps[cyc]; i++)
 			uipc.cyc_pans[num][i] = setup_expanded_instr(num, i);
+		CmtReleaseLock(lock_uipc);
 		
 		// Do the actual expansion.
 		SetPanelAttribute(panel, ATTR_FRAME_STYLE, VAL_OUTLINED_FRAME);
@@ -3687,9 +4633,11 @@ void set_phase_cycle_expanded(int num, int state) {
 		
 		for(i = uipc.cyc_steps[cyc]-1; i > 0; i--)
 			DiscardPanel(uipc.cyc_pans[num][i]);
-			
+		
+		CmtGetLock(lock_uipc);
 		free(uipc.cyc_pans[num]); 
 		uipc.cyc_pans[num] = NULL;
+		CmtReleaseLock(lock_uipc);
 		
 		// Change back the callback function for the step-changer
 		InstallCtrlCallback(panel, pc.pcstep, ChangePhaseCycleStep, NULL);
@@ -3813,6 +4761,7 @@ void save_expanded_instruction(int num, int step) {
 	// Saves an expanded information to the uipc.c_instrs field.
 
 	// Array allocation stuff
+	CmtGetLock(lock_uipc);
 	if(uipc.c_instrs[num] == NULL) {
 		uipc.c_instrs[num] = malloc(sizeof(PINSTR*)*(step+1));
 		uipc.max_cinstrs[num] = 0;
@@ -3832,6 +4781,7 @@ void save_expanded_instruction(int num, int step) {
 		uipc.c_instrs[num][step] = malloc(sizeof(PINSTR));
 	
 	get_instr_panel(uipc.c_instrs[num][step], uipc.cyc_pans[num][step]);
+	CmtReleaseLock(lock_uipc);
 }
 
 void move_expanded_instruction(int num, int to, int from) {
@@ -3888,6 +4838,7 @@ void delete_expanded_instruction(int num, int step) {
 			move_expanded_instruction(num, uipc.cyc_steps[cyc]-1, step);	// Move it to the end.
 		else if(uipc.max_cinstrs[num] > step) {
 			// Move our instruction to the end and move everything over.
+			CmtGetLock(lock_uipc);
 			if(uipc.max_cinstrs[num] < uipc.cyc_steps[cyc]) {
 				uipc.c_instrs[num] = realloc(uipc.c_instrs[num], sizeof(PINSTR*)*uipc.cyc_steps[cyc]);
 				uipc.max_cinstrs[num] = uipc.cyc_steps[cyc];
@@ -3898,6 +4849,7 @@ void delete_expanded_instruction(int num, int step) {
 				uipc.c_instrs[num][j] = uipc.c_instrs[num][j+1];	
 			}
 			uipc.c_instrs[num][j] = in_buff;
+			CmtReleaseLock(lock_uipc);
 		}
 	}
 	
@@ -3977,7 +4929,9 @@ int move_instruction(int to, int from)
 	
 	// Update the uipc var.
 	int end = start+diff;
+
 	// ND Instructions
+	CmtGetLock(lock_uipc);
 	for(i = 0; i<uipc.ndins; i++) {
 		ins = uipc.dim_ins[i];
 		if(ins < start || ins > end)
@@ -4004,6 +4958,7 @@ int move_instruction(int to, int from)
 		else if (to < from)
 			uipc.cyc_ins[i]++;
 	}
+	CmtReleaseLock(lock_uipc);
 
 	// Now the actual moving and updating of things.
 	GetPanelAttribute(pc.inst[start], ATTR_TOP, &inst_top);
@@ -4056,6 +5011,7 @@ void clear_instruction(int num) {
 	if(get_pc_state(num))
 		update_pc_state(num, 0);
 	
+	CmtGetLock(lock_uipc);
 	if(uipc.max_cinstrs != NULL)
 	{
 		if(uipc.c_instrs[num] != NULL) {
@@ -4069,6 +5025,7 @@ void clear_instruction(int num) {
 		}
 		uipc.max_cinstrs[num] = 0;
 	}
+	CmtReleaseLock(lock_uipc);
 	
 	SetCtrlVal(pc.inst[num], pc.pcsteps, 2);
 	
@@ -4137,13 +5094,15 @@ void change_number_of_instructions() {
 			HidePanel(pc.inst[i]);
 			HidePanel(pc.cinst[i]);
 		}
+		CmtGetLock(lock_uipc);
 		uipc.ni = num;
+		CmtReleaseLock(lock_uipc);
 		return;
 	}
 	
 	if(num>uipc.max_ni) {		// The only really important part is to make new panels if there aren't any left		
 		int top, left, height, ctop, cleft, cheight; 	// Getting the GUI values if we need them. 
-		GetPanelAttribute(pc.inst[uipc.max_ni-1], ATTR_TOP, &top);	     	// Need these vals for both the
+		GetPanelAttribute(pc.inst[uipc.max_ni-1], ATTR_TOP, &top);	     		// Need these vals for both the
 		GetPanelAttribute(pc.cinst[uipc.max_ni-1], ATTR_TOP, &ctop); 		 	// ND instrs and the pulse ones
 		GetPanelAttribute(pc.inst[uipc.max_ni-1], ATTR_LEFT, &left);		 
 		GetPanelAttribute(pc.cinst[uipc.max_ni-1], ATTR_LEFT, &cleft);
@@ -4157,9 +5116,23 @@ void change_number_of_instructions() {
 			SetPanelPos(pc.inst[i], top+=height+5, left);		// Place it and increment "top"
 			SetCtrlAttribute(pc.inst[i], pc.xbutton, ATTR_DISABLE_PANEL_THEME, 1);
 			
+			// Set the precision initially.
+			double del;
+			GetCtrlVal(pc.inst[i], pc.delay, &del);
+			SetCtrlAttribute(pc.inst[i], pc.delay, ATTR_PRECISION, get_precision(del, MCUI_DEL_PREC));
+			
 			pc.cinst[i] = LoadPanel(pc.PPConfigCPan, pc.uifname, pc.md_inst);	// Make a new ND instr
 			SetPanelPos(pc.cinst[i], ctop+=cheight+5, cleft);
 		
+			GetCtrlVal(pc.cinst[i], pc.del_init, &del);
+			SetCtrlAttribute(pc.cinst[i], pc.del_init, ATTR_PRECISION, get_precision(del, MCUI_DEL_PREC));
+			
+			GetCtrlVal(pc.cinst[i], pc.del_inc, &del);
+			SetCtrlAttribute(pc.cinst[i], pc.del_inc, ATTR_PRECISION, get_precision(del, MCUI_DEL_PREC));
+	
+			GetCtrlVal(pc.cinst[i], pc.del_fin, &del);
+			SetCtrlAttribute(pc.cinst[i], pc.del_fin, ATTR_PRECISION, get_precision(del, MCUI_DEL_PREC));
+			
 			// Update the instruction numbers
 			SetCtrlVal(pc.inst[i], pc.ins_num, i);
 			SetCtrlVal(pc.cinst[i], pc.cins_num, i);
@@ -4168,6 +5141,7 @@ void change_number_of_instructions() {
 			set_ttl_trigger(pc.inst[i], -1, 1);
 		}
 
+		CmtGetLock(lock_uipc);
 		if(uipc.c_instrs != NULL) {
 			uipc.c_instrs = realloc(uipc.c_instrs, sizeof(PINSTR**)*num);
 			uipc.max_cinstrs = realloc(uipc.max_cinstrs, sizeof(int)*num);
@@ -4178,6 +5152,7 @@ void change_number_of_instructions() {
 		}
 
 		uipc.max_ni = num;		// We've increased the max number of instructions, so increment it.
+		CmtReleaseLock(lock_uipc);
 		setup_broken_ttls();
 	}
 	
@@ -4190,7 +5165,9 @@ void change_number_of_instructions() {
 		SetPanelAttribute(pc.cinst[i], ATTR_DIMMED, !ndon);
 	}
 	
+	CmtGetLock(lock_uipc);
 	uipc.ni = num;	// And update the uipc value.
+	CmtReleaseLock(lock_uipc);
 }
 
 void delete_instruction(int num) {
@@ -4245,8 +5222,9 @@ int takes_instr_data(int func_index) {
 int instr_data_min(int func_index) {
 	switch(func_index) {
 		case LOOP:
-		case LONG_DELAY:
 			return 1;
+		case LONG_DELAY:
+			return 2;
 			break;
 	}
 	
@@ -4326,9 +5304,9 @@ void update_constants(constants *c, int *cstep) { // Updates the constants for a
 	
 	// change_constant redirects to add_constant if the constant is not found.
 	for(i=0;i<uipc.nc; i++) {
-			sprintf(current_var, "ccs%d", i);					// Current cycle step for cycle i
-			change_constant(c, current_var, C_INT, &cstep[i]);
-		}
+		sprintf(current_var, "ccs%d", i);					// Current cycle step for cycle i
+		change_constant(c, current_var, C_INT, &cstep[i]);
+	}
 	
 	for(i=0;i<uipc.nd; i++) {
 		sprintf(current_var, "cds%d", i);					// Current dim step for dimension i
@@ -4374,7 +5352,18 @@ void create_pprogram(PPROGRAM *p) { // Initially allocates the PPROGRAM space
 			p->skip_locs = malloc(sizeof(int)*p->max_n_steps);
 			p->skip_expr = malloc(1);						// Allocate the expression
 			p->skip_expr[0] = '\0';							// Make it a null-terminated string
+		} else {
+			p->skip_locs = NULL;
+			p->skip_expr = NULL;
 		}
+	} else {
+		p->maxsteps = NULL;
+		p->v_ins = NULL;
+		p->v_ins_dim = NULL;
+		p->v_ins_mode = NULL;
+		
+		p->delay_exprs = NULL;
+		p->data_exprs = NULL;
 	}
 	
 	if(p->nFuncs)
@@ -4544,13 +5533,13 @@ PINSTR *generate_instructions(PPROGRAM *p, int *cstep, int *n_inst) {
 			
 			// Moves everything over one.
 			for(j = num+1; j < ni; j++) {
-				copy_pinstr(&ilist[i+j-num-1], &ilist[j]);
+				copy_pinstr(&ilist[j], &ilist[i+j-num-1]);
 				
 				// Fix instructions which point to other places in the program.
 				if((ilist[j].instr == END_LOOP 
 					|| ilist[j].instr == BRANCH
 					|| ilist[j].instr == JSR) 
-					&& ilist[j].instr_data >= i) { ilist[j].instr_data -= removed; }
+					&& ilist[j].instr_data >= i) { ilist[i+j-num-1].instr_data -= removed; }
 			}
 		
 			ni -= removed;

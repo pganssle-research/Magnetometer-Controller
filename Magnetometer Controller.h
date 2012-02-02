@@ -60,7 +60,6 @@
 #define  CurrentLoc_IDVal3                16      /* callback function: DatChangeIDPos */
 #define  CurrentLoc_IDVal2                17      /* callback function: DatChangeIDPos */
 #define  CurrentLoc_IDVal1                18      /* callback function: DatChangeIDPos */
-#define  CurrentLoc_Bound                 19      /* callback function: ChangeBinding */
 
 #define  EditFunc                         3
 #define  EditFunc_QUITBUTTON              2       /* callback function: FuncEditQuit */
@@ -95,7 +94,7 @@
 #define  HiddenVals_TTLBroken             19
 
 #define  MainPanel                        5
-#define  MainPanel_MainTabs               2
+#define  MainPanel_MainTabs               2       /* callback function: PopoutTab */
 #define  MainPanel_Start                  3       /* callback function: StartProgram */
 #define  MainPanel_Stop                   4       /* callback function: StopProgram */
 #define  MainPanel_QUITBUTTON             5       /* callback function: QuitCallback */
@@ -110,11 +109,12 @@
 #define  MainPanel_PBStatus               14
 #define  MainPanel_ProgDesc               15
 #define  MainPanel_DataDescription        16
-#define  MainPanel_DataDirectory          17
-#define  MainPanel_SPLITTER_2             18
-#define  MainPanel_SPLITTER               19
-#define  MainPanel_CurrentProgRing        20
-#define  MainPanel_COMMANDBUTTON          21
+#define  MainPanel_SPLITTER_2             17
+#define  MainPanel_SPLITTER               18
+#define  MainPanel_CurrentProgRing        19
+#define  MainPanel_COMMANDBUTTON          20
+#define  MainPanel_DataDirectory          21      /* callback function: ChangeDataBox */
+#define  MainPanel_LoadInfoMode           22      /* callback function: ChangeLoadInfoMode */
 
 #define  MDInstr                          6
 #define  MDInstr_InstrNum                 2
@@ -238,6 +238,7 @@
 #define  PPConfig_SkipConditionExpr       19      /* callback function: EditSkipCondition */
 #define  PPConfig_ChannelRange            20      /* callback function: ChangeChannelRange */
 #define  PPConfig_TransAcqMode            21
+#define  PPConfig_PBDeviceSelect          22      /* callback function: ChangePBDevice */
 
      /* tab page panel controls */
 #define  PulseProg_TransientNum           2       /* callback function: ProgChangeIDPos */
@@ -301,10 +302,10 @@
 #define  MainMenu_File_New_SUBMENU        4
 #define  MainMenu_File_New_NewAcquisition 5       /* callback function: NewAcquisitionMenu */
 #define  MainMenu_File_New_NewProgram     6       /* callback function: NewProgramMenu */
-#define  MainMenu_File_FIle               7
-#define  MainMenu_File_FIle_SUBMENU       8
-#define  MainMenu_File_FIle_SaveData      9
-#define  MainMenu_File_FIle_SaveProgram   10      /* callback function: SaveProgramMenu */
+#define  MainMenu_File_Save               7
+#define  MainMenu_File_Save_SUBMENU       8
+#define  MainMenu_File_Save_SaveData      9
+#define  MainMenu_File_Save_SaveProgram   10      /* callback function: SaveProgramMenu */
 #define  MainMenu_File_Load               11
 #define  MainMenu_File_Load_SUBMENU       12
 #define  MainMenu_File_Load_LoadData      13      /* callback function: LoadDataMenu */
@@ -335,22 +336,30 @@
 #define  RCMenus_AcquisitionTime          2
 #define  RCMenus_AcquisitionTime_SampleRate 3
 #define  RCMenus_AcquisitionTime_NumPoints 4
-#define  RCMenus_GraphMenu                5
-#define  RCMenus_GraphMenu_AutoScaling    6       /* callback function: AutoscalingOnOff */
-#define  RCMenus_GraphMenu_ZoomGraphIn    7       /* callback function: ZoomGraph */
-#define  RCMenus_GraphMenu_ZoomGraphOut   8       /* callback function: ZoomGraph */
-#define  RCMenus_GraphMenu_PanRight       9       /* callback function: PanGraph */
-#define  RCMenus_GraphMenu_PanLeft        10      /* callback function: PanGraph */
-#define  RCMenus_GraphMenu_PanUp          11      /* callback function: PanGraph */
-#define  RCMenus_GraphMenu_PanDown        12      /* callback function: PanGraph */
-#define  RCMenus_GraphMenu_FitHorizontally 13     /* callback function: AutoscalingOnOff */
-#define  RCMenus_GraphMenu_FitGraphVertically 14  /* callback function: AutoscalingOnOff */
-#define  RCMenus_SampleRate               15
-#define  RCMenus_SampleRate_NumPoints     16
-#define  RCMenus_SampleRate_AcquisitionTime 17
-#define  RCMenus_NumPoints                18
-#define  RCMenus_NumPoints_AcquisitionTime 19
-#define  RCMenus_NumPoints_SampleRate     20
+#define  RCMenus_PopoutMenu               5
+#define  RCMenus_PopoutMenu_ReleaseTab    6
+#define  RCMenus_PopoutMenu_ReleaseWindowSubMenu 7
+#define  RCMenus_PopoutMenu_ReleaseWindowSubMenu_SUBMENU 8
+#define  RCMenus_PopoutMenu_ReleaseWindowSubMenu_ReleaseConfineFID 9
+#define  RCMenus_PopoutMenu_ReleaseWindowSubMenu_ReleaseConfineSpec 10
+#define  RCMenus_PopoutMenu_ReleaseWindowSubMenu_ReleaseConfinePProg 11
+#define  RCMenus_PopoutMenu_ReleaseWindowSubMenu_ReleaseConfinePPConf 12
+#define  RCMenus_GraphMenu                13
+#define  RCMenus_GraphMenu_AutoScaling    14      /* callback function: AutoscalingOnOff */
+#define  RCMenus_GraphMenu_ZoomGraphIn    15      /* callback function: ZoomGraph */
+#define  RCMenus_GraphMenu_ZoomGraphOut   16      /* callback function: ZoomGraph */
+#define  RCMenus_GraphMenu_PanRight       17      /* callback function: PanGraph */
+#define  RCMenus_GraphMenu_PanLeft        18      /* callback function: PanGraph */
+#define  RCMenus_GraphMenu_PanUp          19      /* callback function: PanGraph */
+#define  RCMenus_GraphMenu_PanDown        20      /* callback function: PanGraph */
+#define  RCMenus_GraphMenu_FitHorizontally 21     /* callback function: AutoscalingOnOff */
+#define  RCMenus_GraphMenu_FitGraphVertically 22  /* callback function: AutoscalingOnOff */
+#define  RCMenus_SampleRate               23
+#define  RCMenus_SampleRate_NumPoints     24
+#define  RCMenus_SampleRate_AcquisitionTime 25
+#define  RCMenus_NumPoints                26
+#define  RCMenus_NumPoints_AcquisitionTime 27
+#define  RCMenus_NumPoints_SampleRate     28
 
 
      /* Callback Prototypes: */
@@ -362,9 +371,9 @@ void CVICALLBACK BrokenTTLsMenu(int menubar, int menuItem, void *callbackData, i
 int  CVICALLBACK Change_Scan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK Change_Trigger(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeAcquisitionChannel(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
-int  CVICALLBACK ChangeBinding(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeChannelRange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeCurrentChan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeDataBox(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeDevice(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeDimension(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeFIDChanColor(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
@@ -375,11 +384,13 @@ int  CVICALLBACK ChangeInc(int panel, int control, int event, void *callbackData
 int  CVICALLBACK ChangeInitOrFinal(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeInstDelay(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeInstrVary(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeLoadInfoMode(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK ChangeNDPointMenu(int menubar, int menuItem, void *callbackData, int panel);
 int  CVICALLBACK ChangeNDTimeUnits(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeNP_AT_SR(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeNumCycles(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeNumSteps(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangePBDevice(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangePhaseCorrectionOrder(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangePhaseCycleLevel(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangePhaseCycleStep(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
@@ -430,6 +441,7 @@ void CVICALLBACK NewProgramMenu(int menubar, int menuItem, void *callbackData, i
 int  CVICALLBACK NumDimensionCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK PanGraph(int menubar, int menuItem, void *callbackData, int panel);
 int  CVICALLBACK PhaseCycleInstr(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK PopoutTab(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ProgChangeIDPos(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK QuitCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK QuitCallbackMenu(int menubar, int menuItem, void *callbackData, int panel);

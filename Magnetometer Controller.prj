@@ -1,7 +1,6 @@
 [Project Header]
 Version = 900
-Pathname Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
-Pathname Line0002 = " Controller.prj"
+Pathname = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.prj"
 Project Label = "Magnetometer Controller"
 CVI Dir = "/c/program files (x86)/national instruments/cvi90"
 CVI Shared Dir = "/C/Program Files (x86)/National Instruments/Shared/CVI"
@@ -9,7 +8,7 @@ CVI Pub Local Dir = "/C/ProgramData/National Instruments/CVI90"
 CVI Pub Global Dir = "/C/ProgramData/National Instruments/CVI"
 IVI Standard Root Dir = "/C/Program Files (x86)/IVI"
 VXIplug&play Framework Dir = "/c/vxipnp/winnt"
-Number of Files = 25
+Number of Files = 28
 Target Type = "Executable"
 Flags = 16
 Copied From Locked InstrDrv Directory = False
@@ -35,8 +34,7 @@ Res Id = 2
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/DataLib.c"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Da"
-Path Line0002 = "taLib.c"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/DataLib.c"
 Exclude = False
 Compile Into Object File = False
 Project Flags = 0
@@ -48,8 +46,7 @@ Res Id = 3
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/DataLib.h"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Da"
-Path Line0002 = "taLib.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/DataLib.h"
 Exclude = False
 Project Flags = 0
 Folder = "Include Files"
@@ -60,32 +57,32 @@ Res Id = 4
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Defaults.txt"
-Path = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Defaults.txt"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Defaults.txt"
 Exclude = False
 Project Flags = 0
 Folder = "Not In A Folder"
 
 [File 0005]
-File Type = "Unknown"
+File Type = "Function Panel"
 Res Id = 5
 Path Is Rel = True
-Path Rel To = "Project"
-Path Rel Path = "LastProgramBuffer.txt"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/LastProgramB"
-Path Line0002 = "uffer.txt"
+Path Rel To = "CVI"
+Path Rel To Override = "CVI"
+Path Rel Path = "toolslib/custctrl/FileBrowser.fp"
+Path Line0001 = "/c/program files (x86)/national instruments/cvi90/toolslib/custctrl/FileBrowser."
+Path Line0002 = "fp"
 Exclude = False
 Project Flags = 0
-Folder = "Not In A Folder"
+Folder = "Instrument Files"
 
 [File 0006]
 File Type = "CSource"
 Res Id = 6
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "Magnetometer Controller.c"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
-Path Line0002 = " Controller.c"
-Exclude = True
+Path Rel Path = "Libraries/General.c"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/General.c"
+Exclude = False
 Compile Into Object File = False
 Project Flags = 0
 Folder = "Source Files"
@@ -95,34 +92,31 @@ File Type = "Include"
 Res Id = 7
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "Magnetometer Controller.h"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
-Path Line0002 = " Controller.h"
+Path Rel Path = "Libraries/General.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/General.h"
 Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
 [File 0008]
-File Type = "User Interface Resource"
+File Type = "Unknown"
 Res Id = 8
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "Magnetometer Controller.uir"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
-Path Line0002 = " Controller.uir"
+Path Rel Path = "LastProgramBuffer.txt"
+Path = "/c/Users/Omega/Documents/Programming/MC20/LastProgramBuffer.txt"
 Exclude = False
 Project Flags = 0
-Folder = "User Interface Files"
+Folder = "Not In A Folder"
 
 [File 0009]
 File Type = "CSource"
 Res Id = 9
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "Libraries/MathParserLib.c"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Ma"
-Path Line0002 = "thParserLib.c"
-Exclude = False
+Path Rel Path = "Magnetometer Controller.c"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.c"
+Exclude = True
 Compile Into Object File = False
 Project Flags = 0
 Folder = "Source Files"
@@ -132,31 +126,30 @@ File Type = "Include"
 Res Id = 10
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "Libraries/MathParserLib.h"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Ma"
-Path Line0002 = "thParserLib.h"
+Path Rel Path = "Magnetometer Controller.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.h"
 Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
 [File 0011]
-File Type = "Include"
+File Type = "User Interface Resource"
 Res Id = 11
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "MC.h"
-Path = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/MC.h"
+Path Rel Path = "Magnetometer Controller.uir"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.uir"
 Exclude = False
 Project Flags = 0
-Folder = "Include Files"
+Folder = "User Interface Files"
 
 [File 0012]
 File Type = "CSource"
 Res Id = 12
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "MC10.c"
-Path = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/MC10.c"
+Path Rel Path = "Libraries/MathParserLib.c"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/MathParserLib.c"
 Exclude = False
 Compile Into Object File = False
 Project Flags = 0
@@ -167,8 +160,8 @@ File Type = "Include"
 Res Id = 13
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "MC10.h"
-Path = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/MC10.h"
+Path Rel Path = "Libraries/MathParserLib.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/MathParserLib.h"
 Exclude = False
 Project Flags = 0
 Folder = "Include Files"
@@ -178,16 +171,49 @@ File Type = "Include"
 Res Id = 14
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "Libraries/MCUserDefinedFunctions.h"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/MC"
-Path Line0002 = "UserDefinedFunctions.h"
+Path Rel Path = "MC.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/MC.h"
 Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
 [File 0015]
-File Type = "Function Panel"
+File Type = "CSource"
 Res Id = 15
+Path Is Rel = True
+Path Rel To = "Project"
+Path Rel Path = "MC10.c"
+Path = "/c/Users/Omega/Documents/Programming/MC20/MC10.c"
+Exclude = False
+Compile Into Object File = False
+Project Flags = 0
+Folder = "Source Files"
+
+[File 0016]
+File Type = "Include"
+Res Id = 16
+Path Is Rel = True
+Path Rel To = "Project"
+Path Rel Path = "MC10.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/MC10.h"
+Exclude = False
+Project Flags = 0
+Folder = "Include Files"
+
+[File 0017]
+File Type = "Include"
+Res Id = 17
+Path Is Rel = True
+Path Rel To = "Project"
+Path Rel Path = "Libraries/MCUserDefinedFunctions.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/MCUserDefinedFunctions.h"
+Exclude = False
+Project Flags = 0
+Folder = "Include Files"
+
+[File 0018]
+File Type = "Function Panel"
+Res Id = 18
 Path Is Rel = True
 Path Rel To = "CVI"
 Path Rel To Override = "CVI"
@@ -197,121 +223,114 @@ Exclude = False
 Project Flags = 0
 Folder = "Instrument Files"
 
-[File 0016]
+[File 0019]
 File Type = "CSource"
-Res Id = 16
+Res Id = 19
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/PulseProgramLib.c"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Pu"
-Path Line0002 = "lseProgramLib.c"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/PulseProgramLib.c"
 Exclude = False
 Compile Into Object File = False
 Project Flags = 0
 Folder = "Source Files"
-
-[File 0017]
-File Type = "Include"
-Res Id = 17
-Path Is Rel = True
-Path Rel To = "Project"
-Path Rel Path = "Libraries/PulseProgramLib.h"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Pu"
-Path Line0002 = "lseProgramLib.h"
-Exclude = False
-Project Flags = 0
-Folder = "Include Files"
-
-[File 0018]
-File Type = "Include"
-Res Id = 18
-Path Is Rel = True
-Path Rel To = "Project"
-Path Rel Path = "Libraries/PulseProgramTypes.h"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Pu"
-Path Line0002 = "lseProgramTypes.h"
-Exclude = False
-Project Flags = 0
-Folder = "Include Files"
-
-[File 0019]
-File Type = "Unknown"
-Res Id = 19
-Path Is Rel = True
-Path Rel To = "Project"
-Path Rel Path = "SavedSessionBuffer.txt"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/SavedSession"
-Path Line0002 = "Buffer.txt"
-Exclude = False
-Project Flags = 0
-Folder = "Not In A Folder"
 
 [File 0020]
 File Type = "Include"
 Res Id = 20
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "Libraries/SaveSessionLib.h"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Sa"
-Path Line0002 = "veSessionLib.h"
+Path Rel Path = "Libraries/PulseProgramLib.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/PulseProgramLib.h"
 Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
 [File 0021]
-File Type = "CSource"
+File Type = "Include"
 Res Id = 21
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "Libraries/SessionSavingLib.c"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Se"
-Path Line0002 = "ssionSavingLib.c"
-Exclude = False
-Compile Into Object File = False
-Project Flags = 0
-Folder = "Source Files"
-
-[File 0022]
-File Type = "Include"
-Res Id = 22
-Path Is Rel = True
-Path Rel To = "Project"
-Path Rel Path = "../../../../../../SpinCore/SpinAPI64/spinapi_source/spinapi.h"
-Path = "/c/SpinCore/SpinAPI64/spinapi_source/spinapi.h"
+Path Rel Path = "Libraries/PulseProgramTypes.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/PulseProgramTypes.h"
 Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0023]
-File Type = "DLL"
-Res Id = 23
+[File 0022]
+File Type = "Unknown"
+Res Id = 22
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "../../../../../../SpinCore/SpinAPI64/dll/spinapi64.dll"
-Path = "/c/SpinCore/SpinAPI64/dll/spinapi64.dll"
+Path Rel Path = "SavedSessionBuffer.txt"
+Path = "/c/Users/Omega/Documents/Programming/MC20/SavedSessionBuffer.txt"
 Exclude = False
 Project Flags = 0
 Folder = "Not In A Folder"
 
+[File 0023]
+File Type = "Include"
+Res Id = 23
+Path Is Rel = True
+Path Rel To = "Project"
+Path Rel Path = "Libraries/SaveSessionLib.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/SaveSessionLib.h"
+Exclude = False
+Project Flags = 0
+Folder = "Include Files"
+
 [File 0024]
-File Type = "Library"
+File Type = "CSource"
 Res Id = 24
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "../../../../../../SpinCore/SpinAPI64/dll/spinapi64.lib"
-Path = "/c/SpinCore/SpinAPI64/dll/spinapi64.lib"
+Path Rel Path = "Libraries/SessionSavingLib.c"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/SessionSavingLib.c"
 Exclude = False
+Compile Into Object File = False
 Project Flags = 0
-Folder = "Not In A Folder"
+Folder = "Source Files"
 
 [File 0025]
 File Type = "Include"
 Res Id = 25
 Path Is Rel = True
 Path Rel To = "Project"
+Path Rel Path = "../../../../../SpinCore/SpinAPI64/spinapi_source/spinapi.h"
+Path = "/c/SpinCore/SpinAPI64/spinapi_source/spinapi.h"
+Exclude = False
+Project Flags = 0
+Folder = "Include Files"
+
+[File 0026]
+File Type = "DLL"
+Res Id = 26
+Path Is Rel = True
+Path Rel To = "Project"
+Path Rel Path = "../../../../../SpinCore/SpinAPI64/dll/spinapi64.dll"
+Path = "/c/SpinCore/SpinAPI64/dll/spinapi64.dll"
+Exclude = False
+Project Flags = 0
+Folder = "Not In A Folder"
+
+[File 0027]
+File Type = "Library"
+Res Id = 27
+Path Is Rel = True
+Path Rel To = "Project"
+Path Rel Path = "../../../../../SpinCore/SpinAPI64/dll/spinapi64.lib"
+Path = "/c/SpinCore/SpinAPI64/dll/spinapi64.lib"
+Exclude = False
+Project Flags = 0
+Folder = "Not In A Folder"
+
+[File 0028]
+File Type = "Include"
+Res Id = 28
+Path Is Rel = True
+Path Rel To = "Project"
 Path Rel Path = "Libraries/UIControls.h"
-Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/UI"
-Path Line0002 = "Controls.h"
+Path = "/c/Users/Omega/Documents/Programming/MC20/Libraries/UIControls.h"
 Exclude = False
 Project Flags = 0
 Folder = "Include Files"
@@ -353,46 +372,40 @@ Include Path 3 = "/c/SpinCore/SpinAPI/spinapi_source"
 Include Path 4 Is Rel = True
 Include Path 4 Rel To = "Project"
 Include Path 4 Rel Path = "Libraries"
-Include Path 4 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries"
+Include Path 4 = "/c/Users/Omega/Documents/Programming/MC20/Libraries"
 Include Path 5 Is Rel = False
 Include Path 5 Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Pulse Creator and Data "
 Include Path 5 Line0002 = "Explorer/netcdf/include"
 Include Path 6 Is Rel = True
 Include Path 6 Rel To = "Project"
 Include Path 6 Rel Path = "Libraries/netcdf-4.1.3/include"
-Include Path 6 Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/ne"
-Include Path 6 Line0002 = "tcdf-4.1.3/include"
+Include Path 6 = "/c/Users/Omega/Documents/Programming/MC20/Libraries/netcdf-4.1.3/include"
 Include Path 7 Is Rel = True
 Include Path 7 Rel To = "Project"
 Include Path 7 Rel Path = "Libraries/netcdf"
-Include Path 7 Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/ne"
-Include Path 7 Line0002 = "tcdf"
+Include Path 7 = "/c/Users/Omega/Documents/Programming/MC20/Libraries/netcdf"
 
 [Create Executable]
 Executable File_Debug Is Rel = True
 Executable File_Debug Rel To = "Project"
 Executable File_Debug Rel Path = "Magnetometer Controller_dbg.exe"
-Executable File_Debug Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
-Executable File_Debug Line0002 = " Controller_dbg.exe"
+Executable File_Debug = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller_dbg.exe"
 Executable File_Release Is Rel = True
 Executable File_Release Rel To = "Project"
 Executable File_Release Rel Path = "Magnetometer Controller.exe"
-Executable File_Release Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
-Executable File_Release Line0002 = " Controller.exe"
+Executable File_Release = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.exe"
 Executable File_Debug64 Is Rel = True
 Executable File_Debug64 Rel To = "Project"
 Executable File_Debug64 Rel Path = "Magnetometer Controller.exe"
-Executable File_Debug64 Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
-Executable File_Debug64 Line0002 = " Controller.exe"
+Executable File_Debug64 = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.exe"
 Executable File_Release64 Is Rel = True
 Executable File_Release64 Rel To = "Project"
 Executable File_Release64 Rel Path = "Magnetometer Controller.exe"
-Executable File_Release64 Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Magnetometer"
-Executable File_Release64 Line0002 = " Controller.exe"
+Executable File_Release64 = "/c/Users/Omega/Documents/Programming/MC20/Magnetometer Controller.exe"
 Icon File Is Rel = True
 Icon File Rel To = "Project"
 Icon File Rel Path = "vault.ico"
-Icon File = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/vault.ico"
+Icon File = "/c/Users/Omega/Documents/Programming/MC20/vault.ico"
 Application Title = "Magnetometer Controller"
 Numeric File Version = "0,1,0,0"
 Numeric Prod Version = "0,1,0,0"

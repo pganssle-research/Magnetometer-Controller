@@ -1,5 +1,6 @@
 /******************************** Includes *******************************/
 #include <cvitdms.h>
+#include <cviddc.h>
 
 #define PP_V_ID 1 		// Varies in an indirect dimension linearly.
 #define PP_V_PC 2		// Varies in a phase cycle
@@ -12,6 +13,11 @@
 
 #define MC_DEF_MODE 0	// File is in define mode
 #define MC_DAT_MODE 1	// File is in data mode.
+
+// File type
+#define MCTD_TDMS 0		// TDMS
+#define MCTD_TDM 1		// TDM
+
 
 // Properties of the Programs group
 #define MCTD_PGNAME	"ProgramGroup"			// Name of the group
@@ -69,6 +75,15 @@
 #define MCTD_PFID "FuncID"					// pfunc.instrs[i].instr_data;
 #define MCTD_PFUS "FuncUS"					// pfunc.instrs[i].time_units and scan
 
+// Some defines that are useful for read_status
+#define PB_STOPPED 1		// Bit 0 = Stopped
+#define PB_RESET 2			// Bit 1 = Reset
+#define PB_RUNNING 4		// Bit 2 = Running
+#define PB_WAITING 8		// Bit 3 = Waiting
+
+
+// Some UI parameters.
+#define MCUI_DEL_PREC 5		// Precision for delay controls.
 
 /************************* Function Declarations *************************/
 
@@ -77,16 +92,20 @@ extern int SavePulseProgram(char *filename, PPROGRAM *p);
 extern PPROGRAM *LoadPulseProgram(char *filename, int *err_val);
 
 extern int get_name(char *pathname, char *name, char *ending);
-extern int tdms_save_program(TDMSChannelGroupHandle pcg, PPROGRAM *p);
+extern int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p);
+PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val);
 PPROGRAM *tdms_load_program(TDMSChannelGroupHandle pcg, int *err_val);
-
-extern int nc_save_program(int ncid, int gid, PPROGRAM *p);
-extern PPROGRAM *nc_load_program(int ncid, int gid, int *err_val);
 
 extern char *generate_nc_string(char **strings, int numstrings, int *len);
 extern char **get_nc_strings(char *string, int *nss);
 
+extern void display_ddc_error(int err_val);
 extern void display_tdms_error(int err_val);
+
+/******** Pulseblaster Functions ********/
+extern int load_pb_info(int verbose);
+extern int program_pulses(PINSTR *ilist, int n_inst, int verbose);
+extern int update_status(int verbose);
 
 /************ UI Interfaces *************/
 extern PPROGRAM *get_current_program(void); 
@@ -99,6 +118,7 @@ extern void add_prog_path_to_recent(char *path);
 extern void get_pinstr_array(PINSTR **ins_ar, PPROGRAM *p, int *cstep);
 
 extern int ui_cleanup(int verbose);
+extern void change_instr_units(int panel);
 extern void clear_program(void);
 
 // Basic Program Setup
@@ -118,7 +138,8 @@ extern void set_instr_panel(int panel, PINSTR *instr);
 extern void set_scan(int num, int state);
 extern void set_scan_panel(int panel, int state);
 extern void change_units(int panel);
-extern void change_instr_delay(int num);
+extern void change_instr_delay(int panel);
+extern void change_instr_data(int panel);
 extern void change_instruction(int num);
 extern void change_instruction_panel(int panel);
 extern void swap_ttl(int to, int from);
@@ -139,6 +160,7 @@ extern void get_updated_instr(PINSTR *instr, int num, int *cstep, int *cind, int
 // Set ND Instruction Parameters
 extern void set_ndon(int ndon);
 extern void update_nd_state(int num, int state);
+extern void set_instr_nd_mode(int num, int nd);
 extern void change_num_dims(void);
 extern void change_num_dim_steps(int dim, int steps);
 extern void change_nd_steps_instr(int num, int steps);
@@ -147,6 +169,7 @@ extern void populate_dim_points(void);
 extern void update_nd_increment(int num, int mode);
 extern void update_nd_from_exprs(int num);
 extern void update_skip_condition(void);
+extern char *get_tooltip(int skip);
 
 // Set Phase Cycling Parameters
 extern void update_pc_state(int num, int state);
