@@ -14,7 +14,31 @@
 
      /* Panels and Controls: */
 
-#define  BrokenTTLs                       1
+#define  AOConP                           1
+#define  AOConP_NumAOuts                  2       /* callback function: ChangeNumAOuts */
+#define  AOConP_InitV                     3
+#define  AOConP_IncLab                    4
+#define  AOConP_FinalLab                  5
+#define  AOConP_StepsLab                  6
+#define  AOConP_DimLab                    7
+#define  AOConP_NDOnLab                   8
+#define  AOConP_DeviceLab                 9
+#define  AOConP_OutputLab                 10
+#define  AOConP_AOTitle                   11
+
+#define  AOInstPan                        2
+#define  AOInstPan_AOutChan               2       /* callback function: ChangeAOutChan */
+#define  AOInstPan_DimRing                3       /* callback function: ChangeAOChanDim */
+#define  AOInstPan_ChanDev                4       /* callback function: ChangeAODev */
+#define  AOInstPan_ChanValFin             5
+#define  AOInstPan_ChanIncVal             6
+#define  AOInstPan_InitChanVal            7
+#define  AOInstPan_NDToggle               8
+#define  AOInstPan_ExpressionCtrl         9       /* callback function: ModifyAOChanInstr */
+#define  AOInstPan_ChanNumSteps           10      /* callback function: ChangeChanNumSteps */
+#define  AOInstPan_xButton                11      /* callback function: DeleteAOInstr */
+
+#define  BrokenTTLs                       3
 #define  BrokenTTLs_TTL23                 2       /* callback function: ToggleBrokenTTL */
 #define  BrokenTTLs_TTL22                 3       /* callback function: ToggleBrokenTTL */
 #define  BrokenTTLs_TTL21                 4       /* callback function: ToggleBrokenTTL */
@@ -42,7 +66,7 @@
 #define  BrokenTTLs_Exit                  26      /* callback function: BrokenTTLsExit */
 #define  BrokenTTLs_ClearAll              27      /* callback function: BrokenTTLsClearAll */
 
-#define  CurrentLoc                       2
+#define  CurrentLoc                       4
 #define  CurrentLoc_TransientNum          2       /* callback function: ChangeViewingTransient */
 #define  CurrentLoc_ID8                   3
 #define  CurrentLoc_ID7                   4
@@ -61,7 +85,7 @@
 #define  CurrentLoc_IDVal2                17      /* callback function: DatChangeIDPos */
 #define  CurrentLoc_IDVal1                18      /* callback function: DatChangeIDPos */
 
-#define  EditFunc                         3
+#define  EditFunc                         5
 #define  EditFunc_QUITBUTTON              2       /* callback function: FuncEditQuit */
 #define  EditFunc_NewFunc                 3       /* callback function: FENewFunc */
 #define  EditFunc_Save                    4       /* callback function: FuncEditSave */
@@ -73,7 +97,7 @@
 #define  EditFunc_EnableDelay             10      /* callback function: FEEnableDelay */
 #define  EditFunc_EnableInstrData         11      /* callback function: FEEnableInstrData */
 
-#define  HiddenVals                       4
+#define  HiddenVals                       6
 #define  HiddenVals_PolySubtractOnOffRing 2
 #define  HiddenVals_PolyOrderValues       3
 #define  HiddenVals_PhaseCorrectionValues 4
@@ -93,7 +117,7 @@
 #define  HiddenVals_FIDChanColor          18      /* callback function: ColorVal */
 #define  HiddenVals_TTLBroken             19
 
-#define  MainPanel                        5
+#define  MainPanel                        7
 #define  MainPanel_MainTabs               2       /* callback function: PopoutTab */
 #define  MainPanel_Start                  3       /* callback function: StartProgram */
 #define  MainPanel_Stop                   4       /* callback function: StopProgram */
@@ -116,7 +140,7 @@
 #define  MainPanel_DataDirectory          21      /* callback function: ChangeDataBox */
 #define  MainPanel_LoadInfoMode           22      /* callback function: ChangeLoadInfoMode */
 
-#define  MDInstr                          6
+#define  MDInstr                          8
 #define  MDInstr_InstrNum                 2
 #define  MDInstr_Instructions             3
 #define  MDInstr_VaryInstr                4       /* callback function: ChangeInstrVary */
@@ -137,7 +161,7 @@
 #define  MDInstr_IncDataExpression        19      /* callback function: EditExpression */
 #define  MDInstr_IncDelayExpression       20      /* callback function: EditExpression */
 
-#define  PPConfigP                        7
+#define  PPConfigP                        9
 #define  PPConfigP_VaryingLabel           2
 #define  PPConfigP_NumStepsLabel          3
 #define  PPConfigP_FinalLabel             4
@@ -145,7 +169,7 @@
 #define  PPConfigP_InitialLabel           6
 #define  PPConfigP_InstrLabel             7
 
-#define  PPPanel                          8
+#define  PPPanel                          10
 #define  PPPanel_PhaseCycleLabel          2
 #define  PPPanel_ScanLabel                3
 #define  PPPanel_InstrLabel               4
@@ -153,7 +177,7 @@
 #define  PPPanel_InstrNumLabel            6
 #define  PPPanel_TTLsLabel                7
 
-#define  PulseInstP                       9
+#define  PulseInstP                       11
 #define  PulseInstP_InstNum               2       /* callback function: MoveInst */
 #define  PulseInstP_Instructions          3       /* callback function: InstrCallback */
 #define  PulseInstP_Instr_Data            4       /* callback function: InstrDataCallback */
@@ -371,7 +395,11 @@ void CVICALLBACK BrokenTTLsMenu(int menubar, int menuItem, void *callbackData, i
 int  CVICALLBACK Change_Scan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK Change_Trigger(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeAcquisitionChannel(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeAOChanDim(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeAODev(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeAOutChan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeChannelRange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeChanNumSteps(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeCurrentChan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeDataBox(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeDevice(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
@@ -388,6 +416,7 @@ int  CVICALLBACK ChangeLoadInfoMode(int panel, int control, int event, void *cal
 void CVICALLBACK ChangeNDPointMenu(int menubar, int menuItem, void *callbackData, int panel);
 int  CVICALLBACK ChangeNDTimeUnits(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeNP_AT_SR(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeNumAOuts(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeNumCycles(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeNumSteps(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangePBDevice(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
@@ -411,6 +440,7 @@ int  CVICALLBACK ColorVal(int panel, int control, int event, void *callbackData,
 int  CVICALLBACK ContinuousRunCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ControlHidden(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK DatChangeIDPos(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK DeleteAOInstr(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK DeleteInstructionCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK DirectorySelect(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK EditExpression(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
@@ -433,6 +463,7 @@ void CVICALLBACK LoadConfigurationFromFile(int menubar, int menuItem, void *call
 void CVICALLBACK LoadDataMenu(int menubar, int menuItem, void *callbackData, int panel);
 int  CVICALLBACK LoadProgram(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK LoadProgramMenu(int menubar, int menuItem, void *callbackData, int panel);
+int  CVICALLBACK ModifyAOChanInstr(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK MoveInst(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK MoveInstButton(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK NewAcquisitionMenu(int menubar, int menuItem, void *callbackData, int panel);

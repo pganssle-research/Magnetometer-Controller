@@ -196,6 +196,11 @@ extern void clear_instruction(int num);
 extern void change_number_of_instructions(void);
 extern void delete_instruction(int num);
 
+// Analog Output Manipulation
+extern void change_num_aouts(void);
+extern void delete_aout(int num);
+extern void clear_aout(int num);
+
 // User-Defined Function Interfaces
 extern pfunc *get_pfunc(int func_index);
 extern int get_reserved_flags(int func_index);

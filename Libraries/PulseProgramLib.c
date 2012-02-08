@@ -4856,6 +4856,7 @@ void delete_expanded_instruction(int num, int step) {
 	// Now we just change the number of instructions in the cycle.
 	change_cycle_num_steps(cyc, uipc.cyc_steps[cyc]-1);
 }
+
 /****************** Instruction Manipulation *******************/ 
 int move_instruction(int to, int from)
 {
@@ -5182,6 +5183,113 @@ void delete_instruction(int num) {
 	move_instruction(uipc.max_ni-1, num);
 	SetCtrlVal(pc.ninst[1], pc.ninst[0], uipc.ni-1);
 	change_number_of_instructions();
+}
+
+/****************** Analog Output Manipulation *******************/ 
+void change_num_aouts() {
+	// Gets "num" from pc.anum and changes the number of analog output channels.
+	// Same behavior as change_number_of_instructions.
+	unsigned short int num, i;
+	GetCtrlVal(pc.anum[1], pc.anum[0], &num);
+	
+	if(num == uipc.anum)
+		return;		// We're done.
+	
+	SetPanelAttribute(pc.ainst[0], ATTR_DIMMED, (num == 0)?1:0); 
+	
+	if(num < uipc.anum) {
+		//Hide the panels.
+		for(i = num+((num==0)?1:0); i<uipc.max_anum; i++) {
+			HidePanel(pc.ainst[i]);
+		}
+		
+		CmtGetLock(lock_uipc);
+		uipc.anum = num;
+		CmtReleaseLock(lock_uipc);
+		return;
+	}
+	
+	// Make some more panels if necessary.
+	if(num > uipc.max_anum) {
+		int top, left, height, mi = uipc.max_anum-1;
+		GetPanelAttribute(pc.ainst[mi], ATTR_TOP, &top);
+		GetPanelAttribute(pc.ainst[mi], ATTR_LEFT, &left);
+		GetPanelAttribute(pc.ainst[mi], ATTR_HEIGHT, &height);
+		
+		pc.ainst = realloc(pc.ainst, sizeof(int)*num);
+		
+		for(i=uipc.max_anum; i<num; i++) {
+			pc.ainst[i] = LoadPanel(pc.AOutCPan, pc.uifname, pc.a_inst);
+			SetPanelPos(pc.ainst[i], top+=height+5, left);
+		}
+		
+		CmtGetLock(lock_uipc);
+		uipc.max_anum = num;
+		CmtReleaseLock(lock_uipc);
+	}
+	
+	
+	for(i = uipc.anum; i<num; i++) {
+		DisplayPanel(pc.ainst[i]);	
+	}
+
+	// Finally update uipc for later.
+	CmtGetLock(lock_uipc);
+	uipc.anum = num;
+	CmtReleaseLock(lock_uipc);
+	
+}
+
+void delete_aout(int num) {
+	clear_aout(num);		// Clear the values.
+	
+	// Move it to the end.
+	int instr = pc.ainst[num];
+	int top, btop;
+	GetPanelAttribute(pc.ainst[num], ATTR_TOP, &top);
+	for(int i = num; i < uipc.max_anum-1; i++) {
+		GetPanelAttribute(pc.ainst[i+1], ATTR_TOP, &btop);	// Move it.
+		SetPanelAttribute(pc.ainst[i+1], ATTR_TOP, top);
+		top = btop;
+		
+		pc.ainst[i] = pc.ainst[i+1];
+	}
+	
+	SetPanelAttribute(instr, ATTR_TOP, top);
+	pc.ainst[uipc.max_anum-1]= instr;
+	
+	SetCtrlVal(pc.anum[1], pc.anum[0], uipc.anum-1);
+	change_num_aouts();
+}
+
+void clear_aout(int num) {
+																		   
+	// Set values to 0.
+	SetCtrlVal(pc.ainst[num], pc.ainitval, 0.0);
+	SetCtrlVal(pc.ainst[num], pc.aincval, 0.0);
+	SetCtrlVal(pc.ainst[num], pc.afinval, 0.0);
+	SetCtrlVal(pc.ainst[num], pc.andon, 0);	// Don't forget to actually toggle this later.
+	
+	// Clear the expression control
+	SetCtrlVal(pc.ainst[num], pc.aincexpr, "");
+	SetCtrlAttribute(pc.ainst[num], pc.aincexpr, ATTR_VISIBLE, 0);
+	SetCtrlAttribute(pc.ainst[num], pc.aincexpr, ATTR_TEXT_BGCOLOR, VAL_WHITE);
+	
+	// Set channel, dev to default value.
+	int	ind, nchans;
+	
+	GetNumListItems(pc.ainst[num], pc.aodev, &nchans);
+	if(nchans > 0) {
+		GetCtrlAttribute(pc.ainst[num], pc.aodev, ATTR_DFLT_INDEX, &ind);
+		SetCtrlVal(pc.ainst[num], pc.aodev, ind);
+	}
+	
+	GetNumListItems(pc.ainst[num], pc.aochan, &nchans);
+	if(nchans) {
+		GetCtrlAttribute(pc.ainst[num], pc.aochan, ATTR_DFLT_INDEX, &ind);  
+		SetCtrlVal(pc.ainst[num], pc.aochan, ind);
+	}
+	
 }
 
 

@@ -54,6 +54,7 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	
 	pc.pulse_inst = PulseInstP;
 	pc.md_inst = MDInstr;
+	pc.a_inst = AOInstPan;
 	
 	
 	// Start building the tabs now.
@@ -75,7 +76,7 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	// Then the container panels								 
 	pc.PProgCPan = LoadPanel(pc.PProgPan, uifname, PPPanel); // Pulse program instr container
 	pc.PPConfigCPan = LoadPanel(pc.PPConfigPan, uifname, PPConfigP); // ND instr container
-	
+	pc.AOutCPan = LoadPanel(pc.AOutPan, uifname, AOConP);
 	
 	// Create two panels for containing the current location in acquisition space.
 	dc.fcloc = dc.cloc[0] = LoadPanel(dc.fid, uifname, CurrentLoc);
@@ -94,6 +95,11 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 		SetPanelPos(dc.cloc[i], 250, 1200);
 		DisplayPanel(dc.cloc[i]);
 	}
+	
+	// Display analog output container panel.
+	SetPanelPos(pc.AOutCPan, 10, 10);
+	SetPanelAttribute(pc.AOutCPan, ATTR_TITLEBAR_VISIBLE, 0);
+	DisplayPanel(pc.AOutCPan);
 	
 	// Now all the constant stuff
 	initialize_uicontrols();
@@ -215,6 +221,8 @@ void initialize_program() {
 	
 	uipc.ni = 1;
 	uipc.max_ni = 1;
+	uipc.anum = 0;
+	uipc.max_anum=1;
 	uipc.broken_ttls = 0;
 	uipc.total_time = 0.0;
 	uipc.trigger_ttl = 0;
@@ -260,9 +268,11 @@ void initialize_program() {
 	//	Now allocate memory for the instruction arrays, then create one of each
 	pc.inst = malloc(sizeof(int));
 	pc.cinst = malloc(sizeof(int));
+	pc.ainst = malloc(sizeof(int));
 	
 	pc.inst[0] = LoadPanel(pc.PProgCPan, pc.uifname, PulseInstP);
 	pc.cinst[0] = LoadPanel(pc.PPConfigCPan, pc.uifname, MDInstr);
+	pc.ainst[0] = LoadPanel(pc.AOutCPan, pc.uifname, AOInstPan);
 
 	SetPanelPos(pc.inst[0], 25, 7);	// Move the first instruction to where it belongs
 	DisplayPanel(pc.inst[0]);			// Display the first instruction
@@ -271,6 +281,10 @@ void initialize_program() {
 	SetPanelPos(pc.cinst[0], 25, 7); 	// Move the first MD instruction to where it belongs
 	DisplayPanel(pc.cinst[0]);			// Display the first MD instruction
 	SetPanelAttribute(pc.cinst[0], ATTR_DIMMED, 1);
+	
+	SetPanelPos(pc.ainst[0], 60, 5);
+	DisplayPanel(pc.ainst[0]);
+	SetPanelAttribute(pc.ainst[0], ATTR_DIMMED, 1);
 	
 	// Set up the initial callback data for np, sr and at callbacks.
 	InstallCtrlCallback(pc.sr[1], pc.sr[0], ChangeNP_AT_SR, (void *)0);
@@ -611,6 +625,18 @@ void initialize_uicontrols() {
 	pc.dim = MDInstr_Dimension;
 	pc.vary = MDInstr_VaryInstr;
 
+	pc.anum[1] = pc.AOutCPan;
+	
+	pc.anum[0] = AOConP_NumAOuts; 		// Now the analog output controls.
+	pc.ainitval = AOInstPan_InitChanVal;
+	pc.aincval = AOInstPan_ChanIncVal;
+	pc.aincexpr = AOInstPan_ExpressionCtrl;
+	pc.afinval = AOInstPan_ChanValFin;
+	pc.asteps = AOInstPan_ChanNumSteps;
+	pc.adim = AOInstPan_DimRing;
+	pc.andon = AOInstPan_NDToggle;
+	pc.aodev = AOInstPan_ChanDev;
+	pc.aochan = AOInstPan_AOutChan;
 }
 
 void initialize_ce() {
@@ -2308,5 +2334,3 @@ void display_xml_error(int err) {
 	MessagePopup("XML Error", message);
 	free(message);
 }
-
-

@@ -2186,3 +2186,126 @@ int CVICALLBACK ColorVal (int panel, int control, int event,
 	}
 	return 0;
 }
+
+
+//////////////////////////////////////////////////////
+//                                      	        //
+//            Analog Outputs Channels	 	  		//
+//                                                  //
+//////////////////////////////////////////////////////
+
+
+int CVICALLBACK ChangeNumAOuts (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+				change_num_aouts();
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ModifyAOChanInstr (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeAODev (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeAOInstrChan (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeAOTrigChan (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeChanNumSteps (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeAOChanDim (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeAOutChan (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK DeleteAOInstr (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+				int i;
+				for(i = 0; i < uipc.max_anum; i++) {
+					if(panel == pc.ainst[i])
+						break;
+				}
+				
+				if(i < uipc.max_anum)
+					delete_aout(i);
+			break;
+	}
+	return 0;
+}

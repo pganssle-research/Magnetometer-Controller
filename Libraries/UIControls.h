@@ -37,6 +37,7 @@ struct {
 	int PPConfigPan; 	// ND Controls Panel
 	int PPConfigCPan; 	// ND Instruction Container
 	int AOutPan;		// Analog output panel
+	int AOutCPan;		// Analog output container panel (not in tab)
 
 	int *inst; 			// Instruction Subpanel
 	int *cinst; 		// ND Instruction Subpanel
@@ -118,10 +119,24 @@ struct {
 	
 	int timeest[2];		// Estimated time control
 	
+	// Analog output window controls
+	int anum[2];		// Number of analog output channels.
+	
+	int ainitval;		// Initial value for the output channel.
+	int aincval;		// Increment value for the output channel.
+	int aincexpr;		// Increment expression
+	int afinval;		// Final value
+	int asteps;			// Number of steps in the given dimension
+	int adim;			// Dimension it varies along
+	int andon;			// Whether or not it varies.
+	int aodev;			// Analog output device.
+	int aochan;			// Analog output channel.
+	
 	// What we need to load new panels.
 	char *uifname;
 	int pulse_inst;
 	int md_inst;
+	int a_inst;
 } pc;
 
 // dc -> Structure for indexing the UI controls/panels related to data acquisition
@@ -294,6 +309,10 @@ struct {
 	PINSTR ***c_instrs;			// The instructions for each phase cycle.
 								// Outermost size is ninst, it's easiest that way and
 								// the memory isn't much.
+	
+	// Analog Output info
+	int anum;					// Number of analog output instructions.
+	int max_anum;				// Maximum number of analog outputs.
 
 	char *ppath;				// The default directory for the base program.
 	
