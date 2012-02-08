@@ -36,9 +36,11 @@ struct {
 	int PProgCPan; 		// Pulse Program Container Panel
 	int PPConfigPan; 	// ND Controls Panel
 	int PPConfigCPan; 	// ND Instruction Container
+	int AOutPan;		// Analog output panel
 
 	int *inst; 			// Instruction Subpanel
 	int *cinst; 		// ND Instruction Subpanel
+	int *ainst;			// Analog output instruction.
 	
 	// Controls on the inst panels
 	int ins_num;		// Instruction Number

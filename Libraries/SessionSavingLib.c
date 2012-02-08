@@ -65,6 +65,7 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	GetPanelHandleFromTabPage(mc.mp, MainPanel_MainTabs, 1, &dc.spec);
 	GetPanelHandleFromTabPage(mc.mp, MainPanel_MainTabs, 2, &pc.PProgPan);
 	GetPanelHandleFromTabPage(mc.mp, MainPanel_MainTabs, 3, &pc.PPConfigPan);
+	GetPanelHandleFromTabPage(mc.mp, MainPanel_MainTabs, 4, &pc.AOutPan);
 
 	// Then the menu bars
 	mc.mainmenu = GetPanelMenuBar(mc.mp); 	// Main menu

@@ -237,7 +237,7 @@ int run_experiment(PPROGRAM *p) {
 			
 			if(scan) {
 				// Get the data.
-				while(!GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
+				while( !GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
 					Delay(0.01);
 				}
 				
@@ -349,7 +349,7 @@ double *get_data(PPROGRAM *p, int *error) {
 		if(bc >= np) 	// It's ready to be read out
 			break;
 		
-		// Timeout condition.
+		// Timeout condition -> May want to add a setting for this
 		/*
 		if(i == 20) {
 			sprintf(errmess, "The readout task is about to time out. It has been occuring for %lf seconds and has read %d samples. Allow it to wait another 2 seconds?", Timer() - time, bc);
