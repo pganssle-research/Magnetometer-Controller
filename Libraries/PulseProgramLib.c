@@ -5186,6 +5186,119 @@ void delete_instruction(int num) {
 }
 
 /****************** Analog Output Manipulation *******************/ 
+void change_ao_device(int num) {
+	// Change which device a given instruction uses.
+	int pan = pc.ainst[num], ctrl = pc.aodev, nl, dev;
+	
+	GetNumListItems(pan, ctrl, &nl);
+	if(nl <= 0)
+		return;
+	
+	GetCtrlVal(pan, ctrl, &dev);
+	
+	uipc.ao_devs[num] = dev;
+	populate_ao_chan(num);
+}
+
+void change_ao_chan(int num) { 
+	// Change the channel a given instruction uses.
+	int pan = pc.ainst[num], ctrl = pc.aochan, dev = uipc.ao_devs[num];
+	int nl, ind = -1;
+	
+	if(dev < 0)
+		return;
+	
+	// If it's another available channel, remove it from the list.
+	GetNumListItems(pan, ctrl, &nl);
+	if(nl >= 2) {
+		GetCtrlVal(pan, ctrl, &ind);
+		
+		if(ind == uipc.ao_chans[num])
+			return; 	// No change.
+		
+		int spot = ind;
+		if(ind >= 0) { 
+			spot = int_in_array(uipc.ao_avail_chans[dev], ind, uipc.anum_avail_chans[dev]);
+		}
+	
+		if(spot >= 0) {
+			CmtGetLock(lock_uipc);
+			ind = uipc.ao_avail_chans[dev][spot];
+			remove_array_item(uipc.ao_avail_chans[dev], spot, uipc.anum_avail_chans[dev]--);
+			uipc.ao_avail_chans[dev] = realloc(uipc.ao_avail_chans[dev], sizeof(int)*uipc.anum_avail_chans[dev]);
+			CmtReleaseLock(lock_uipc);
+		}
+	}
+	
+	// If it was unavailable before, we need to add it back in.
+	CmtGetLock(lock_uipc);
+	if(uipc.ao_chans[num] >= 0) {
+		uipc.ao_avail_chans[dev] = add_item_to_sorted_array(uipc.ao_avail_chans[dev], uipc.ao_chans[num], uipc.anum_avail_chans[dev]++);
+	}
+	
+	uipc.ao_chans[num] = ind;
+	CmtReleaseLock(lock_uipc);
+	
+	//  Go through and re-populate the controls
+	for(int i = 0; i < uipc.max_anum; i++) {
+		populate_ao_chan(i);
+	}
+	
+}
+
+void populate_ao_dev(int num) {
+	int pan = pc.ainst[num], ctrl = pc.aodev, dev = uipc.ao_devs[num], nl;
+	
+	GetNumListItems(pan, ctrl, &nl);
+	if(nl > 0) { DeleteListItem(pan, ctrl, 0, -1); }
+	
+	InsertListItem(pan, ctrl, -1, "None", -1);
+	for(int i = 0; i < uipc.anum_devs; i++) {
+		InsertListItem(pan, ctrl, -1, uipc.adev_display[i], i);	
+	}
+	
+	SetCtrlVal(pan, ctrl, dev);
+	SetCtrlAttribute(pan, ctrl, ATTR_DFLT_VALUE, uipc.default_adev);
+}
+
+void populate_ao_chan(int num) {
+	// Populate the selected channel ring control as appropriate.
+	int dev, ind, pan = pc.ainst[num], ctrl = pc.aochan, cind, nl, i;
+	
+	dev = uipc.ao_devs[num];
+	ind = uipc.ao_chans[num];
+	
+	// Clear the old list
+	GetNumListItems(pan, ctrl, &nl);
+	if(nl > 0) { DeleteListItem(pan, ctrl, 0, -1); }
+	
+	// Populate it again.
+	InsertListItem(pan, ctrl, -1, "Disable", -1);
+	if(dev < 0)
+		return;
+	
+	if(uipc.anum_avail_chans[dev] > 0) {
+		for(i = 0; i < uipc.anum_avail_chans[dev]; i++) {
+			cind = uipc.ao_avail_chans[dev][i];
+			if(ind >= 0 && ind < cind) {  // Insertion sort, essentially.
+				InsertListItem(pan, ctrl, -1, uipc.ao_all_chans[dev][ind], ind);
+				break;
+			}
+	
+			InsertListItem(pan, ctrl, -1, uipc.ao_all_chans[dev][cind], cind);
+		}
+
+		for(i = i; i < uipc.anum_avail_chans[dev]; i++) {
+			cind = uipc.ao_avail_chans[dev][i];
+			InsertListItem(pan, ctrl, -1, uipc.ao_all_chans[dev][cind], cind);		
+		}
+	} else if(ind >= 0) {
+		InsertListItem(pan, ctrl, -1, uipc.ao_all_chans[dev][ind], ind); 		
+	}
+	
+	SetCtrlVal(pan, ctrl, ind);
+}
+
 void change_num_aouts() {
 	// Gets "num" from pc.anum and changes the number of analog output channels.
 	// Same behavior as change_number_of_instructions.
@@ -5198,9 +5311,28 @@ void change_num_aouts() {
 	SetPanelAttribute(pc.ainst[0], ATTR_DIMMED, (num == 0)?1:0); 
 	
 	if(num < uipc.anum) {
+		int dev, ind, s;
+		
 		//Hide the panels.
+		CmtGetLock(lock_uipc);
 		for(i = num+((num==0)?1:0); i<uipc.max_anum; i++) {
 			HidePanel(pc.ainst[i]);
+			
+			dev = uipc.ao_devs[i];
+			ind = uipc.ao_chans[i];
+			
+			// Release the channel for use by something else.
+			if(dev >= 0 && ind >= 0) {
+				s = uipc.anum_avail_chans[dev];
+				uipc.ao_avail_chans[dev] = realloc(uipc.ao_avail_chans[dev], s+1);
+				uipc.ao_avail_chans[dev][s] = ind;
+			}
+		}
+		CmtReleaseLock(lock_uipc);  
+		
+		// Refresh the views.
+		for(i = 0; i < uipc.max_anum; i++) {
+			populate_ao_chan(i);	
 		}
 		
 		CmtGetLock(lock_uipc);
@@ -5217,13 +5349,43 @@ void change_num_aouts() {
 		GetPanelAttribute(pc.ainst[mi], ATTR_HEIGHT, &height);
 		
 		pc.ainst = realloc(pc.ainst, sizeof(int)*num);
+	
+		// Make some entries in the uipc var for the new instructions.
+		CmtGetLock(lock_uipc);
+		
+		uipc.ac_varied = malloc_or_realloc(uipc.ac_varied, sizeof(int)*num);
+		uipc.ao_devs = malloc_or_realloc(uipc.ao_devs, sizeof(int)*num);
+		uipc.ao_chans = malloc_or_realloc(uipc.ao_chans, sizeof(int)*num);
+		uipc.ao_vals = malloc_or_realloc(uipc.ao_vals, sizeof(double*)*num);
+		uipc.ao_exprs = malloc_or_realloc(uipc.ao_exprs, sizeof(char*)*num);
+	
+		// Null or -1 initialize these. Keep in mind that memset is really for
+		// byte arrays (unsigned short ints). 0 always null-initializes, but
+		// -1 just happens to work for ints in this bit-ordering. If you tried to
+		// do something like memset(int_array, 5, num_bytes), you'd have a weird
+		// result. This is probably NOT good coding practice when your bit order
+		// isn't constrained.
+		int diff = num-uipc.max_anum;
+		memset(uipc.ac_varied+uipc.max_anum, 0, sizeof(int)*diff);
+		memset(uipc.ao_chans+uipc.max_anum, -1, sizeof(int)*diff);
+		memset(uipc.ao_exprs+uipc.max_anum, 0, sizeof(char*)*diff);
+		
 		
 		for(i=uipc.max_anum; i<num; i++) {
 			pc.ainst[i] = LoadPanel(pc.AOutCPan, pc.uifname, pc.a_inst);
 			SetPanelPos(pc.ainst[i], top+=height+5, left);
+			
+			uipc.ao_vals[i] = malloc(sizeof(double));
+			GetCtrlAttribute(pc.ainst[i], pc.ainitval, ATTR_DFLT_VALUE, uipc.ao_vals[i]);
+			
+			uipc.ao_devs[i] = uipc.default_adev;
+			
+			populate_ao_dev(i);
+			populate_ao_chan(i);
+
 		}
+
 		
-		CmtGetLock(lock_uipc);
 		uipc.max_anum = num;
 		CmtReleaseLock(lock_uipc);
 	}

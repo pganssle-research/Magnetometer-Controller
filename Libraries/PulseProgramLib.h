@@ -201,6 +201,11 @@ extern void change_num_aouts(void);
 extern void delete_aout(int num);
 extern void clear_aout(int num);
 
+extern void change_ao_device(int num);
+extern void change_ao_chan(int num);
+extern void populate_ao_dev(int num);
+extern void populate_ao_chan(int num);
+
 // User-Defined Function Interfaces
 extern pfunc *get_pfunc(int func_index);
 extern int get_reserved_flags(int func_index);

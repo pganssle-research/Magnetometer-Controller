@@ -2225,7 +2225,9 @@ int CVICALLBACK ChangeAODev (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+				int num = int_in_array(pc.ainst, panel, uipc.max_anum);
+				if(num >= 0)
+					change_ao_device(num);
 			break;
 	}
 	return 0;
@@ -2285,7 +2287,10 @@ int CVICALLBACK ChangeAOutChan (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+				int spot = int_in_array(pc.ainst, panel, uipc.max_anum);
+				
+				if(spot >= 0)
+					change_ao_chan(spot);
 			break;
 	}
 	return 0;
