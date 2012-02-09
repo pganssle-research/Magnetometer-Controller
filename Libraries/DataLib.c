@@ -2764,37 +2764,25 @@ int load_AO_info() {
 		}
 	}
 	
+	// Reallocate the space for ao_avail_chans. This can only ever go down in size.
+	for(i = 0; i < uipc.anum_devs; i++) {
+		if(uipc.ao_avail_chans[i] != NULL) { 
+			if(aac[i] < 1) {
+				free(uipc.ao_avail_chans[i]);
+				uipc.ao_avail_chans[i] = NULL;
+			} else {
+				uipc.ao_avail_chans[i] = realloc(uipc.ao_avail_chans[i], aac[i]*sizeof(int));
+			}
+		}
+	}
+	
 	CmtReleaseLock(lock_uipc);
 	
 	// Finally, let's refresh the analog outputs.
 	int ind, dev, cind;
 	for(i = 0; i < anc; i++) {
-		DeleteListItem(pc.ainst[i], pc.aodev, 0, -1);
-		DeleteListItem(pc.ainst[i], pc.aochan, 0, -1);
-		
-		dev = uipc.ao_devs[i];
-		ind = uipc.ao_chans[i];
-		
-		InsertListItem(pc.ainst[i], pc.aodev, -1, "None", -1);
-		for(j = 0; j < uipc.anum_devs; j++) {
-			InsertListItem(pc.ainst[i], pc.aodev, -1, uipc.adev_display[j], j);
-		}
-		
-		SetCtrlVal(pc.ainst[i], pc.aodev, dev);
-		SetCtrlAttribute(pc.ainst[i], pc.aodev, ATTR_DFLT_VALUE, uipc.default_adev);
-		
-		InsertListItem(pc.ainst[i], pc.aochan, -1, "Disable", -1);
-		if(dev < 0)
-			continue;
-		
-		for(j = 0; j < uipc.anum_avail_chans[dev]; j++) {
-			cind = uipc.ao_avail_chans[dev][j];
-			if(ind >= 0 && ind < cind) {  // Insertion sort, essentially.
-				InsertListItem(pc.ainst[i], pc.aochan, -1, uipc.ao_all_chans[dev][ind], ind);
-			}
-			
-			InsertListItem(pc.ainst[i], pc.aochan, -1, uipc.ao_all_chans[dev][cind], cind);
-		}
+		populate_ao_dev(i);
+		populate_ao_chan(i);
 	}
 	
 	error:
