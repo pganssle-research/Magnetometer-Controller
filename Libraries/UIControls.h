@@ -314,6 +314,23 @@ struct {
 	int anum;					// Number of analog output instructions.
 	int max_anum;				// Maximum number of analog outputs.
 
+	int anum_devs;				// Size of adev_display
+	int default_adev;			// Default index of device.
+	
+	int *anum_all_chans;		// Sizes of ao_all_chans		Size = anum_devs.
+	int *anum_avail_chans;		// Sizes of ao_avail_chans		Size = anum_devs
+	char **adev_display;		// Display names for devices. 	Size = anum_devs
+	char **adev_true;			// True name for the device		Size = anum_devs	
+	int**ao_avail_chans;		// Unused output chans.			Size = [anum_devs][anum_avail_chans[i]]
+	char ***ao_all_chans;		// List of all channels.		Size = [anum_devs][anum_all_chans[i]]
+	
+	int *ac_varied;				// Is the channel varied		Suze = [max_anum]
+	int *ao_devs;				// The device for each chan.	Size = [max_anum]
+	int *ao_chans;				// Physical channel on dev.		Size = [max_anum]
+	double **ao_vals;			// Array of vals per channel	Size = [max_anum][varied?max_n_steps:1]
+	char **ao_exprs;			// Variable expressions.		Size = [max_anum]
+
+	// Other
 	char *ppath;				// The default directory for the base program.
 	
 } uipc;

@@ -208,7 +208,7 @@ int main (int argc, char *argv[])
 	
 	if(load_ui(uifname)) // This function loads the UI and creates the structs.
 		return -1;
- RunUserInterface ();
+ 	RunUserInterface ();
 	DiscardPanel (mc.mp);
 	
 	//Discard Locks

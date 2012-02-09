@@ -221,8 +221,6 @@ void initialize_program() {
 	
 	uipc.ni = 1;
 	uipc.max_ni = 1;
-	uipc.anum = 0;
-	uipc.max_anum=1;
 	uipc.broken_ttls = 0;
 	uipc.total_time = 0.0;
 	uipc.trigger_ttl = 0;
@@ -260,6 +258,23 @@ void initialize_program() {
 	uipc.cyc_pans = NULL;
 	uipc.c_instrs = NULL;
 	uipc.max_cinstrs = NULL;
+	
+	uipc.anum = 0;
+	uipc.max_anum=1;
+	uipc.anum_devs = 0;
+	uipc.anum_all_chans = 0;
+	uipc.anum_avail_chans = 0;
+	
+	uipc.adev_display = NULL;
+	uipc.adev_true = NULL;
+	uipc.ao_avail_chans = NULL;
+	uipc.ao_all_chans = NULL;
+	
+	uipc.ac_varied = NULL;
+	uipc.ao_devs = NULL;
+	uipc.ao_chans = NULL;
+	uipc.ao_vals = NULL;
+	uipc.ao_exprs = NULL;
 	
 	uipc.ppath = NULL;
 	CmtReleaseLock(lock_uipc);

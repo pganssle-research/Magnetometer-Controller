@@ -5276,18 +5276,18 @@ void clear_aout(int num) {
 	SetCtrlAttribute(pc.ainst[num], pc.aincexpr, ATTR_TEXT_BGCOLOR, VAL_WHITE);
 	
 	// Set channel, dev to default value.
-	int	ind, nchans;
+	int	val, nchans;
 	
 	GetNumListItems(pc.ainst[num], pc.aodev, &nchans);
 	if(nchans > 0) {
-		GetCtrlAttribute(pc.ainst[num], pc.aodev, ATTR_DFLT_INDEX, &ind);
-		SetCtrlVal(pc.ainst[num], pc.aodev, ind);
+		GetCtrlAttribute(pc.ainst[num], pc.aodev, ATTR_DFLT_VALUE, &val);
+		SetCtrlVal(pc.ainst[num], pc.aodev, val);
 	}
 	
 	GetNumListItems(pc.ainst[num], pc.aochan, &nchans);
 	if(nchans) {
-		GetCtrlAttribute(pc.ainst[num], pc.aochan, ATTR_DFLT_INDEX, &ind);  
-		SetCtrlVal(pc.ainst[num], pc.aochan, ind);
+		GetCtrlAttribute(pc.ainst[num], pc.aochan, ATTR_DFLT_VALUE, &val);  
+		SetCtrlVal(pc.ainst[num], pc.aochan, val);
 	}
 	
 }

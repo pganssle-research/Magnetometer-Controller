@@ -2387,16 +2387,18 @@ int get_current_fname (char *path, char *fname, int next) {
 	return 1; 
 }
 
-int get_devices () {		// Updates the device ring control.
-	int nd = 0, bs, i, len;
+int get_devices () {		
+	// Updates the device ring control.
+	int nd = 0, bs, i, len, anc = uipc.max_anum;
 	int rv = 0;
-	char *devices = NULL, *device_name = NULL, *old_dev = NULL;
+	char *devices = NULL, *device_name = NULL, *old_dev = NULL, **old_aodevs = NULL;
 	
 	CmtGetLock(lock_DAQ);	// For multithreading reasons, we need to lock all DAQ functions
 	bs = DAQmxGetSystemInfoAttribute(DAQmx_Sys_DevNames, "", NULL); // Returns max char size.
 	CmtReleaseLock(lock_DAQ);
 	
 	// Store the old device name and index
+	// First do the input devices
 	int nl;
 	GetNumListItems(pc.dev[1], pc.dev[0], &nl);
 	if(nl > 0) {
@@ -2411,6 +2413,28 @@ int get_devices () {		// Updates the device ring control.
 	
 	DeleteListItem(pc.dev[1], pc.dev[0], 0, -1);	// Delete devices if they exist.
 	
+	
+	// Now the output devices.
+	if(anc && uipc.ao_devs != NULL && uipc.adev_true != NULL) {
+		int ind;
+		old_aodevs = malloc(anc*sizeof(char*));
+		
+		for(i = 0; i < anc; i++) {
+			ind = uipc.ao_devs[i];
+			if(ind >= 0 && ind < uipc.anum_devs) {
+				old_aodevs[i] = malloc(strlen(uipc.adev_true[ind])+1);
+				strcpy(old_aodevs[i], uipc.adev_true[ind]);
+			} else {
+				old_aodevs[i] = NULL;
+			}
+		}
+	}
+	
+	uipc.adev_display = free_string_array(uipc.adev_display, uipc.anum_devs);
+	uipc.adev_true = free_string_array(uipc.adev_true, uipc.anum_devs);
+	
+	uipc.anum_devs = 0;
+	
 	if(bs <= 0) {
 		rv = -1; // No devices found.
 		goto error;
@@ -2418,13 +2442,17 @@ int get_devices () {		// Updates the device ring control.
 	
 	// Get the actual device names
 	devices = malloc(bs);
+	int *output = calloc(3, sizeof(int)), aoind;
+	
+
 	CmtGetLock(lock_DAQ);
 	DAQmxGetSystemInfoAttribute(DAQmx_Sys_DevNames, devices, bs);
-	CmtReleaseLock(lock_DAQ);
-	
+
 	// Figure out how many devices are available while populating the ring
 	char *p = devices, *p2 = p;	// Pointer for searching.
 	device_name = malloc(bs);
+	
+	CmtGetLock(lock_uipc);
 	while(p != NULL) { 
 		nd++;			// There's 1 more than there are commas.
 		p2 = strchr(p, ',');
@@ -2438,12 +2466,36 @@ int get_devices () {		// Updates the device ring control.
 		
 		InsertListItem(pc.dev[1], pc.dev[0], -1, device_name, device_name); // Add it to the ring
 		
+		DAQmxGetDeviceAttribute(device_name, DAQmx_Dev_AO_SupportedOutputTypes, output, 3);
+		
+		// If it supports voltage output, add it to the list of devices.
+		for(i = 0; i < 3; i++) {
+			if(output[i] == DAQmx_Val_Voltage) {
+				aoind = uipc.anum_devs++;
+				uipc.adev_true = realloc(uipc.adev_true, uipc.anum_devs*sizeof(char*));
+				uipc.adev_true[aoind] = malloc(len);
+				strcpy(uipc.adev_true[aoind], device_name);
+				output[i] = 0;
+				break;
+			} else if(output[i] == 0) {
+				break;
+			} else {
+				output[i] = 0;
+			}
+		}
+
+		
 		p = (p2 == NULL)?NULL:p2+2; // Increment, making sure we don't go past the end.
 	}
+	
+	CmtReleaseLock(lock_uipc);  	
+	CmtReleaseLock(lock_DAQ);
 	
 	free(device_name);
 	
 	// Get the index as close to what it used to be as we can.
+	int default_adev = (uipc.anum_devs >0)?0:-1;
+	
 	if(nd >= 1) {
 		CmtGetLock(lock_uidc);
 		if(old_dev != NULL) {
@@ -2457,11 +2509,78 @@ int get_devices () {		// Updates the device ring control.
 			uidc.devindex = nd-1;
 		
 		SetCtrlIndex(pc.dev[1], pc.dev[0], uidc.devindex);
-		CmtReleaseLock(lock_uidc);
+		
+		// Make the selected device default.
+		if(uipc.anum_devs > 0) { 
+			GetValueLengthFromIndex(pc.dev[1], pc.dev[0], uidc.devindex, &len);
+			char *cdev = malloc(len+1);
+			GetValueFromIndex(pc.dev[1], pc.dev[0], uidc.devindex, cdev);
+			
+			int ind = string_in_array(uipc.adev_true, cdev, uipc.anum_devs);
+			if(ind >= 0) { default_adev = ind; }
+		}
+		
+		CmtReleaseLock(lock_uidc);    
 	} else {
 		MessagePopup("Error", "No devices available!\n");
 		rv = -1;
 	}
+	
+	// At the moment, true and display are the same, so we'll just copy it over.
+	CmtGetLock(lock_uipc);
+	if(uipc.anum_devs > 0) {
+		uipc.adev_display = malloc(sizeof(char*)*uipc.anum_devs);
+		for(i = 0; i < uipc.anum_devs; i++) {
+			uipc.adev_display[i] = malloc(strlen(uipc.adev_true[i])+1);
+			strcpy(uipc.adev_display[i], uipc.adev_true[i]);
+		}
+	}
+
+	// Try and get the channels where they should be.
+	uipc.default_adev = default_adev;
+	int *old_aoinds = NULL;
+	
+	if(uipc.ao_devs != NULL) { 
+		old_aoinds = malloc(sizeof(int)*anc);
+		memcpy(old_aoinds, uipc.ao_devs, sizeof(int)*anc);
+	}
+	
+	if(old_aodevs != NULL) {
+		if(uipc.anum_devs > 0) {
+			int *spots = strings_in_array(uipc.adev_true, old_aodevs, uipc.anum_devs, anc);
+			
+			for(i = 0; i < anc; i++) {
+				if(spots != NULL && spots[i] >= 0) {
+					uipc.ao_devs[i] = spots[i];
+				} else {
+					// We can't reliably use the channel in this case.
+					if(uipc.ao_chans != NULL) {
+						uipc.ao_chans[i] = -1;
+					}
+					
+					if (old_aoinds != NULL) {
+						if(old_aoinds[i] < anc) {
+							uipc.ao_devs[i] = old_aoinds[i];
+						} else {
+							uipc.ao_devs[i] = anc-1;	
+						}
+					}
+				}
+			}
+			
+			free(spots);
+		}   
+	} else if(anc > 0) {
+		if(uipc.ao_devs == NULL) { uipc.ao_devs = malloc(sizeof(int)*anc); }
+		
+		for(i = 0; i < anc; i++) {
+			uipc.ao_devs[i] = default_adev;	
+		}
+	}
+	
+	if(old_aoinds != NULL) { free(old_aoinds); }
+	
+	CmtReleaseLock(lock_uipc);
 	
 	error:
 	if(devices != NULL)
@@ -2470,6 +2589,218 @@ int get_devices () {		// Updates the device ring control.
 	if(old_dev != NULL)
 		free(old_dev);
 	
+	if(old_aodevs != NULL) { free_string_array(old_aodevs, anc); }
+	
+	load_AO_info();
+	
+	return rv;
+}
+
+int load_AO_info() {
+	// Populates the uipc with information from the DAQs and such.
+	// This should probably be called in load_DAQ_info().
+	
+	int rv = 0, nl, len, i, j, anc = uipc.max_anum;
+	char **old_ao_chans = NULL;
+	
+	// Store old string values from analog outputs
+	if(anc > 0 && uipc.ao_chans != NULL && uipc.ao_all_chans != NULL) {
+		int ind, dev;
+		
+		old_ao_chans = malloc(sizeof(char*)*anc);
+		for(i = 0; i < anc; i++) {
+			dev = uipc.ao_devs[i];
+			ind = uipc.ao_chans[i];
+			old_ao_chans[i] = NULL;
+			
+			if(dev < 0) { 
+				continue;
+			}
+			
+			if(ind >= 0 && ind < uipc.anum_all_chans[dev]) {
+				old_ao_chans[i] = malloc(strlen(uipc.ao_all_chans[dev][ind])+1);
+				strcpy(old_ao_chans[i], uipc.ao_all_chans[dev][ind]);
+			}
+		}
+	}
+	
+	// Clear old values (will refresh later)
+	CmtGetLock(lock_uipc);
+	
+	uipc.ao_avail_chans = free_ints_array(uipc.ao_avail_chans, uipc.anum_devs);
+	
+	if(uipc.ao_all_chans != NULL) {
+		for(i = 0; i < uipc.anum_devs; i++) {
+			uipc.ao_all_chans[i] = free_string_array(uipc.ao_all_chans[i], uipc.anum_all_chans[i]);
+		}
+		
+		free(uipc.ao_all_chans);
+		uipc.ao_all_chans = NULL;
+	}
+	
+	if(uipc.anum_all_chans != NULL) { 
+		free(uipc.anum_all_chans);
+		uipc.anum_all_chans = NULL;
+	}
+	
+	if(uipc.anum_avail_chans != NULL) { 
+		free(uipc.anum_avail_chans);
+		uipc.anum_avail_chans = NULL;
+	}
+	CmtReleaseLock(lock_uipc);
+	
+	if(uipc.anum_devs < 1)
+		goto error;
+	
+
+	
+	// Build the arrays uipc.ao_all_chans and uipc.ao_avail_chans. 
+	CmtGetLock(lock_DAQ);
+	CmtGetLock(lock_uipc);
+
+	// Null initialize some new arrays.
+	uipc.ao_all_chans = calloc(uipc.anum_devs, sizeof(char*));
+	uipc.ao_avail_chans = calloc(uipc.anum_devs, sizeof(int*));
+	uipc.anum_all_chans = calloc(uipc.anum_devs, sizeof(int));
+	uipc.anum_avail_chans = calloc(uipc.anum_devs, sizeof(int));
+
+	int buff_size, c_size = 0, nc, devlen;
+	char *chans = NULL, *chan_name = NULL;
+	char *p = NULL, *p2 = NULL;
+	
+
+	// This is the bit that gets the channels.
+	for(i = 0; i < uipc.anum_devs; i++) {
+		if(uipc.adev_true[i] == NULL)
+			continue;
+
+		// This figures out how much to allocate from the list.
+		buff_size = DAQmxGetDeviceAttribute(uipc.adev_true[i], DAQmx_Dev_AO_PhysicalChans, "", NULL);
+		
+		if(buff_size++ < 1)
+			continue;
+		
+		if(chans == NULL) {
+			chans = malloc(buff_size);
+		} else if (c_size < buff_size) {
+			chans = realloc(chans, buff_size);
+			c_size = buff_size;
+		}
+		
+		// Now parse the string. It should be a comma-delimited list.
+		DAQmxGetDeviceAttribute(uipc.adev_true[i], DAQmx_Dev_AO_PhysicalChans, chans, buff_size);
+		devlen = strlen(uipc.adev_true[i])+1; // Offset to strip out the device name.
+		
+		p = strtok(chans, ", ");
+		nc = 0;
+		while(p != NULL) {
+			if(uipc.ao_all_chans[i] == NULL) {
+				uipc.ao_all_chans[i] = malloc((nc+1)*sizeof(char*));
+			} else { 
+				uipc.ao_all_chans[i] = realloc(uipc.ao_all_chans[i], (nc+1)*sizeof(char*));
+			}
+			
+			chan_name = p+devlen;
+			
+			uipc.ao_all_chans[i][nc] = malloc(strlen(chan_name)+1);
+			strcpy(uipc.ao_all_chans[i][nc], chan_name);
+			
+			nc++;
+			p = strtok(NULL, ", ");
+		}
+		
+		uipc.anum_all_chans[i] = nc;
+	}
+	
+	CmtReleaseLock(lock_DAQ);
+	
+	// Now we want to start allocating channels to the existing channels.
+	uipc.anum_avail_chans = memcpy(uipc.anum_avail_chans, uipc.anum_all_chans, sizeof(int)*uipc.anum_devs);
+	int *aac = uipc.anum_avail_chans;
+	int **oac = uipc.ao_avail_chans;
+	
+	// Initialize the available chans to show all chans available.
+	for(i = 0; i < uipc.anum_devs; i++) {
+		oac[i] = malloc(aac[i]*sizeof(int*));
+		for(j = 0; j < aac[i]; j++) {
+			oac[i][j] = j;
+		}
+	}
+	
+	if(anc >= 1) {
+		if(uipc.ao_chans == NULL)
+			uipc.ao_chans = malloc(anc*sizeof(int));
+		
+		uipc.ao_chans = memset(uipc.ao_chans, -1, sizeof(int)*anc);
+		
+		if(old_ao_chans != NULL) {
+			int spot, dev, avail, nac = 0;
+			for(i = 0; i < anc; i++) {
+				if(old_ao_chans[i] == NULL)
+					continue;
+			
+				dev = uipc.ao_devs[i];
+				spot = string_in_array(uipc.ao_all_chans[dev], old_ao_chans[i], uipc.anum_all_chans[i]);
+			
+				if(spot >= 0) {
+					avail = int_in_array(oac[dev], spot, aac[dev]);
+				
+					if(avail >= 0) {
+						uipc.ao_chans[i] = spot;
+					
+						if(i < uipc.anum) { 
+							remove_array_item(uipc.ao_avail_chans[dev], avail, aac[dev]--);
+						}
+					} else if(aac[dev] > 0) {
+						uipc.ao_chans[i] = oac[dev][aac[dev]-1];
+					
+						if(i < uipc.anum) {
+							remove_array_item(uipc.ao_avail_chans[dev], aac[dev]-1, aac[dev]--); 
+						}
+					
+					}
+				}
+			}
+		}
+	}
+	
+	CmtReleaseLock(lock_uipc);
+	
+	// Finally, let's refresh the analog outputs.
+	int ind, dev, cind;
+	for(i = 0; i < anc; i++) {
+		DeleteListItem(pc.ainst[i], pc.aodev, 0, -1);
+		DeleteListItem(pc.ainst[i], pc.aochan, 0, -1);
+		
+		dev = uipc.ao_devs[i];
+		ind = uipc.ao_chans[i];
+		
+		InsertListItem(pc.ainst[i], pc.aodev, -1, "None", -1);
+		for(j = 0; j < uipc.anum_devs; j++) {
+			InsertListItem(pc.ainst[i], pc.aodev, -1, uipc.adev_display[j], j);
+		}
+		
+		SetCtrlVal(pc.ainst[i], pc.aodev, dev);
+		SetCtrlAttribute(pc.ainst[i], pc.aodev, ATTR_DFLT_VALUE, uipc.default_adev);
+		
+		InsertListItem(pc.ainst[i], pc.aochan, -1, "Disable", -1);
+		if(dev < 0)
+			continue;
+		
+		for(j = 0; j < uipc.anum_avail_chans[dev]; j++) {
+			cind = uipc.ao_avail_chans[dev][j];
+			if(ind >= 0 && ind < cind) {  // Insertion sort, essentially.
+				InsertListItem(pc.ainst[i], pc.aochan, -1, uipc.ao_all_chans[dev][ind], ind);
+			}
+			
+			InsertListItem(pc.ainst[i], pc.aochan, -1, uipc.ao_all_chans[dev][cind], cind);
+		}
+	}
+	
+	error:
+	if(old_ao_chans != NULL) { free_string_array(old_ao_chans, anc); }
+	if(chans != NULL) { free(chans); }
+	
 	return rv;
 }
 
@@ -2477,7 +2808,7 @@ int load_DAQ_info() {
 	// Loads information about the DAQ to the UI controls.
 	
 	// Variable declarations
-	int rv = 0, nl, len, old_ti = 0, old_ci = 0, curr_chan;
+	int rv = 0, nl, len, old_ti = 0, old_ci = 0, curr_chan, i;
 	char *old_trig = NULL, *old_count = NULL;
 
 	// Get the previous values of what we need if it's not stored in uidc.
@@ -2508,6 +2839,8 @@ int load_DAQ_info() {
 	DeleteListItem(pc.cc[1], pc.cc[0], 0, -1);
 	DeleteListItem(pc.curchan[1], pc.curchan[0], 0, -1);
 
+	
+	// Load devices.
 	if(get_devices() < 0) {
 		rv = -1;
 		goto err1;
@@ -2534,7 +2867,7 @@ int load_DAQ_info() {
 	CmtGetLock(lock_DAQ);
 	
 	// Get the current device name
-	int i, nc = 0, devlen;
+	int nc = 0, devlen;
 	GetCtrlValStringLength(pc.dev[1], pc.dev[0], &devlen);
 	char *device = malloc(++devlen);
 	GetCtrlVal(pc.dev[1], pc.dev[0], device);
@@ -2712,6 +3045,7 @@ int load_DAQ_info() {
 	if(old_count != NULL)
 		free(old_count);
 	free(counter_chans);
+	
 	free(channel_name);
 	free(buff_string);
 	
@@ -2723,6 +3057,7 @@ int load_DAQ_info() {
 	CmtReleaseLock(lock_DAQ);
 	return 0;
 }
+
 
 void toggle_ic() {
 	// Toggles a given input channel. If you are turning it off, this
