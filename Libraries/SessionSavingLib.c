@@ -640,16 +640,22 @@ void initialize_uicontrols() {
 	pc.dim = MDInstr_Dimension;
 	pc.vary = MDInstr_VaryInstr;
 
+	// Now the analog output controls.
 	pc.anum[1] = pc.AOutCPan;
+	pc.andon[1] = pc.AOutPan;
+	pc.andims[1] = pc.AOutPan;
 	
-	pc.anum[0] = AOConP_NumAOuts; 		// Now the analog output controls.
+	pc.anum[0] = AOConP_NumAOuts;
+	pc.andon[0] = AOutTab_NDimensionalOn;
+	pc.andims[0] = AOutTab_NumDimensions;
+	
 	pc.ainitval = AOInstPan_InitChanVal;
 	pc.aincval = AOInstPan_ChanIncVal;
 	pc.aincexpr = AOInstPan_ExpressionCtrl;
 	pc.afinval = AOInstPan_ChanValFin;
 	pc.asteps = AOInstPan_ChanNumSteps;
 	pc.adim = AOInstPan_DimRing;
-	pc.andon = AOInstPan_NDToggle;
+	pc.aindon = AOInstPan_NDToggle;
 	pc.aodev = AOInstPan_ChanDev;
 	pc.aochan = AOInstPan_AOutChan;
 }

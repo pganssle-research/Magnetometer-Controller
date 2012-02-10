@@ -1297,8 +1297,7 @@ int CVICALLBACK NumDimensionCallback (int panel, int control, int event,
 	return 0;
 }
 
-int CVICALLBACK ToggleND (int panel, int control, int event,
-		void *callbackData, int eventData1, int eventData2)
+int CVICALLBACK ToggleND (int panel, int control, int event, void *callbackData, int eventData1, int eventData2)
 {
 	switch (event)
 	{
@@ -2302,14 +2301,32 @@ int CVICALLBACK DeleteAOInstr (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-				int i;
-				for(i = 0; i < uipc.max_anum; i++) {
-					if(panel == pc.ainst[i])
-						break;
+			int ind = int_in_array(pc.ainst, panel, uipc.max_anum);
+			
+			if(ind >= 0)
+				delete_aout(ind);
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeAOVal (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			int ind = int_in_array(pc.ainst, panel, uipc.max_anum);
+			
+			if(ind >= 0) {
+				if(!uipc.ac_varied[ind]) {
+					change_ao_val(ind);
+				} else if(uipc.ac_varied[ind] == 1) {
+					update_ao_increment(ind, MC_FINAL);
+				} else if(uipc.ac_varied[ind] == 2) {
+					// update_ao_from_exprs(ind);	
 				}
-				
-				if(i < uipc.max_anum)
-					delete_aout(i);
+			}
 			break;
 	}
 	return 0;

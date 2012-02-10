@@ -86,7 +86,7 @@ void CVICALLBACK discardIdleAndGetData (int poolHandle, int functionID, unsigned
 	CmtReleaseLock(lock_DAQ);
 	CmtReleaseLock(lock_ce);
 	
-	if(GetInitialized)
+	if(GetInitialized())
 		pb_close_safe(0);
 	
 	SetMenuBarAttribute(mc.mainmenu, mc.fload, ATTR_DIMMED, 0); // People can load data again.

@@ -3116,9 +3116,8 @@ void get_updated_instr(PINSTR *instr, int num, int *cstep, int *cind, int *dind,
 }
 
 /**************** Set ND Instruction Parameters ****************/  
-void set_ndon(int ndon) {		// Toggles whether or not multi-dimensional instructions are on.
+void set_ndon(int ndon) {
 	// Sets whether it's a multidimensional experiment
-
 	int dimmed, val = ndon, nd, i;
 
 	if(val) {
@@ -3133,6 +3132,7 @@ void set_ndon(int ndon) {		// Toggles whether or not multi-dimensional instructi
 	
 	// Set the controls appropriately.
 	SetCtrlVal(pc.ndon[1], pc.ndon[0], val);
+	//SetCtrlVal(pc.andon[1], pc.andon[0], val);
 	SetPanelAttribute(pc.PPConfigCPan, ATTR_DIMMED, dimmed);
 	SetCtrlAttribute(pc.ndims[1], pc.ndims[0], ATTR_DIMMED, dimmed);
 	for(i = 0; i<uipc.max_ni; i++) {
@@ -5490,7 +5490,7 @@ void clear_aout(int num) {
 	SetCtrlVal(pc.ainst[num], pc.ainitval, 0.0);
 	SetCtrlVal(pc.ainst[num], pc.aincval, 0.0);
 	SetCtrlVal(pc.ainst[num], pc.afinval, 0.0);
-	SetCtrlVal(pc.ainst[num], pc.andon, 0);	// Don't forget to actually toggle this later.
+	SetCtrlVal(pc.ainst[num], pc.aindon, 0);	// Don't forget to actually toggle this later.
 	
 	// Clear the expression control
 	SetCtrlVal(pc.ainst[num], pc.aincexpr, "");
@@ -5511,6 +5511,95 @@ void clear_aout(int num) {
 		GetCtrlAttribute(pc.ainst[num], pc.aochan, ATTR_DFLT_VALUE, &val);  
 		SetCtrlVal(pc.ainst[num], pc.aochan, val);
 	}
+}
+
+void change_ao_val(int num) {
+	// Function called to change the analog output value on channel "num"
+	// Only call this for non-varying channels.
+	int val, pan = pc.ainst[num];
+	
+	GetCtrlVal(pan, pc.ainitval, &val);
+	
+	uipc.ao_vals[num][0] = val;		
+}
+
+void update_ao_increment(int num, int mode) {
+	// Modes:	
+	// MC_INIT = Change initial, leave the other two
+	// MC_INC = Change increment, leave the other two
+	// MC_FINAL = Change final
+	
+	double init, inc, fin;
+	double min, max;
+	int steps;				// Number of steps
+	int panel = pc.ainst[num];
+	
+	// Get the values that are there now.
+	GetCtrlVal(panel, pc.ainitval, &init);
+	GetCtrlVal(panel, pc.aincval, &inc);
+	GetCtrlVal(panel, pc.afinval, &fin);
+	
+	// Get the number of steps
+	GetCtrlVal(panel, pc.asteps, &steps);
+	
+	// Minimum and maximum values should be stored in the init.
+	GetCtrlAttribute(panel, pc.ainitval, ATTR_MIN_VALUE, &min);
+	GetCtrlAttribute(panel, pc.ainitval, ATTR_MAX_VALUE, &max);
+	
+	// Perform the calculations.
+	switch(mode) {
+		case MC_INIT:
+			init = fin-(inc*steps); // Simple enough
+		
+			// Check the min/max.
+			if(init < min) {
+				init = min;
+				fin = min+steps*inc;
+			} else if(init > max) {
+				init = max;
+				fin = max+steps*inc;
+			}
+			
+			// If our changes pushed fin to min/max, change inc
+			if(fin > max) {
+				fin = max;
+			} else if(fin < min) {
+				fin = min;
+			}
+			
+			break;
+		case MC_FINAL:
+			fin = init+(inc*steps);
+			
+			// Enforce min/max values.
+			if(fin < min) {
+				fin = min;
+				init = fin-(inc*steps);
+			} else if(fin > max) {
+				fin = max;
+				init = fin-(inc*steps);
+			}
+			
+			if(init < min) {
+				init = min;
+			} else if(init > max) {
+				init = max;
+			}
+			break;
+	}
+	
+	inc = (fin-init)/steps;	// This must always be true anyway.
+	
+	// Update the uipc variable
+	CmtGetLock(lock_uipc);
+	for(int i = 0; i < steps; i++) {
+		uipc.ao_vals[num][i] = init + inc*i;
+	}
+	CmtReleaseLock(lock_uipc);
+	
+	SetCtrlVal(panel, pc.ainitval, init);
+	SetCtrlVal(panel, pc.aincval, inc);
+	SetCtrlVal(panel, pc.afinval, fin);
 	
 }
 

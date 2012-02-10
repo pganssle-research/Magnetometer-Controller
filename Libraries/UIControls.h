@@ -121,6 +121,8 @@ struct {
 	
 	// Analog output window controls
 	int anum[2];		// Number of analog output channels.
+	int andon[2];		// Same as ndon, but in another container
+	int andims[2];		// Clone of ndims.
 	
 	int ainitval;		// Initial value for the output channel.
 	int aincval;		// Increment value for the output channel.
@@ -128,7 +130,7 @@ struct {
 	int afinval;		// Final value
 	int asteps;			// Number of steps in the given dimension
 	int adim;			// Dimension it varies along
-	int andon;			// Whether or not it varies.
+	int aindon;			// Whether or not it varies.
 	int aodev;			// Analog output device.
 	int aochan;			// Analog output channel.
 	
