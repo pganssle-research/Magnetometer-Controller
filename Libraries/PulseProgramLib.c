@@ -1499,7 +1499,8 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 
 	ui_cleanup(0); // Clean up the interface and uipc variable so that we can trust it.
 
-	// Grab what statics we can from the uipc variable.
+	// Grab what statics we can from the uipc variable
+	CmtGetLock(lock_uipc);
 	p->n_inst = uipc.ni;								// Number of instructions
 	p->nCycles = uipc.nc;								// Number of cycles
 	p->nDims = uipc.nd;									// Number of indirect dimensions
@@ -1865,6 +1866,8 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 		free(zero_cstep);
 	}
 	
+	CmtReleaseLock(lock_uipc);
+	
 	return p;
 }
 
@@ -1887,8 +1890,7 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 	
 	// Now update the varied instructions
 	if(p->nDims) {
-		SetCtrlVal(pc.ndims[1], pc.ndims[0], p->nDims+1);
-		change_num_dims();
+		change_num_dims(p->nDims+1);
 		
 		set_ndon(1);
 	} else
@@ -2041,7 +2043,7 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 					if(len > 0)
 						SetCtrlVal(pc.cinst[num], pc.cexpr_delay, p->delay_exprs[i]);
 				
-					update_nd_from_exprs(num);
+					update_nd_from_exprs_safe(num);
 				} else {
 					update_nd_state(num, 1);
 				}
@@ -2271,9 +2273,9 @@ int ui_cleanup(int verbose) {
 			// First, if either of these is null, it may be that it was never evaluated, so check that.
 			if(uipc.nd_delays == NULL || uipc.nd_delays[i] == NULL || uipc.nd_data == NULL || uipc.nd_data[i] == NULL) {
 				if(state == 1) {
-					update_nd_increment(ind, MC_INC);	
+					update_nd_increment_safe(ind, MC_INC);	
 				} else if(state == 2) {
-					update_nd_from_exprs(ind);
+					update_nd_from_exprs_safe(ind);
 				}
 			}
 			
@@ -2439,7 +2441,7 @@ void change_instr_units(int panel) {
 	const double m_val = 21474836480.0; 
 	GetCtrlIndex(panel, pc.delayu, &newunits);
 	double max = m_val/pow(1000, newunits);
-	double min = 100/pow(1000, newunits); 	// Minimum is 100ns
+	double min = 0; 	// Minimum is 0ns
 	double oldmax, oldmin;
 	
 	GetCtrlAttribute(panel, pc.delay, ATTR_MAX_VALUE, &oldmax);
@@ -2703,7 +2705,7 @@ void change_instr_delay(int panel) {
 	
 	int state = get_nd_state(num);
 	if(state == 0 || state == 1)
-		update_nd_increment(num, MC_FINAL);
+		update_nd_increment_safe(num, MC_FINAL);
 }
 
 void change_instr_data(int panel) {
@@ -3121,8 +3123,9 @@ void set_ndon(int ndon) {
 	int dimmed, val = ndon, nd, i;
 
 	if(val) {
+		GetCtrlVal(pc.ndims[1], pc.ndims[0], &nd);
 		dimmed = 0;
-		change_num_dims();
+		change_num_dims(nd);
 	} else {
 		dimmed = 1;
 		CmtGetLock(lock_uipc);
@@ -3132,9 +3135,11 @@ void set_ndon(int ndon) {
 	
 	// Set the controls appropriately.
 	SetCtrlVal(pc.ndon[1], pc.ndon[0], val);
-	//SetCtrlVal(pc.andon[1], pc.andon[0], val);
+	SetCtrlVal(pc.andon[1], pc.andon[0], val);
 	SetPanelAttribute(pc.PPConfigCPan, ATTR_DIMMED, dimmed);
+	SetCtrlAttribute(pc.andims[1], pc.andims[0], ATTR_DIMMED, dimmed);
 	SetCtrlAttribute(pc.ndims[1], pc.ndims[0], ATTR_DIMMED, dimmed);
+	
 	for(i = 0; i<uipc.max_ni; i++) {
 		SetPanelAttribute(pc.cinst[i], ATTR_DIMMED, dimmed);
 		set_instr_nd_mode(i, ndon?get_nd_state(i):0);
@@ -3144,6 +3149,12 @@ void set_ndon(int ndon) {
 		SetCtrlAttribute(pc.skip[1], pc.skip[0], ATTR_DIMMED,dimmed);
 		SetCtrlAttribute(pc.skiptxt[1], pc.skiptxt[0], ATTR_DIMMED, dimmed);
 	}
+	
+	CmtGetLock(lock_uipc);
+	for(i = 0; i < uipc.anum; i++) {
+		set_aout_nd_dimmed(i, dimmed);
+	}
+	CmtReleaseLock(lock_uipc);
 }
 
 void update_nd_state(int num, int state) {	// Changes the state of a given ND control.   
@@ -3159,13 +3170,15 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 		state = get_nd_state(num);
 
 	// Set up the uipc variable.
-	int ind = -1, i;			
+	int ind = -1, i;
+	CmtGetLock(lock_uipc);
 	for(i=0; i<uipc.ndins; i++) {		// Get the place in the dim_ins array
 		if(uipc.dim_ins[i] == num) {   // -1 if it's not there.
 			ind = i;
 			break;
 		}
 	}
+	CmtReleaseLock(lock_uipc);
 	
 	if(!state) {
 		if(ind >=0) {
@@ -3269,9 +3282,9 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 			SetCtrlVal(panel, pc.nsteps, uipc.dim_steps[dim]);
 			CmtReleaseLock(lock_uipc);
 			if(state == 1)
-				update_nd_increment(num, MC_INC);
+				update_nd_increment_safe(num, MC_INC);
 			else
-				update_nd_from_exprs(num);
+				update_nd_from_exprs_safe(num);
 		}
 	}
 	
@@ -3342,9 +3355,12 @@ void set_instr_nd_mode(int num, int nd) {
 	
 }
 
-void change_num_dims() { 	// Updates the number of dimensions in the experiment
-	int i, j, nd;
-	GetCtrlVal(pc.ndims[1], pc.ndims[0], &nd);
+void change_num_dims(int nd) { 	// Updates the number of dimensions in the experiment
+	int i, j;
+
+	SetCtrlVal(pc.andims[1], pc.andims[0], nd);
+	SetCtrlVal(pc.ndims[1], pc.ndims[0], nd);
+
 	if(--nd == uipc.nd)
 		return;
 	
@@ -3417,11 +3433,23 @@ void change_num_dim_steps(int dim, int steps) { // Updates number of steps in th
 			change_nd_steps_instr(uipc.dim_ins[i], steps);
 	}
 	
+	int cdim;
+	for(i = 0; i < uipc.anum; i++) {
+		if(uipc.ac_varied[i]) {
+			GetCtrlVal(pc.ainst[i], pc.adim, &cdim);
+			if(dim == cdim)
+				change_ao_steps_instr(i, steps);
+		}
+	}
+	
 	// Now update the uipc variable and we're done.
-	CmtGetLock(lock_uipc);
 	uipc.dim_steps[dim] = steps;
+}
+
+void change_num_dim_steps_safe(int dim, int steps) {
+	CmtGetLock(lock_uipc);
+	change_num_dim_steps(dim, steps);
 	CmtReleaseLock(lock_uipc);
- 
 }
 
 void change_nd_steps_instr(int num, int steps) { // Changes the number of steps for a given instr
@@ -3437,7 +3465,36 @@ void change_nd_steps_instr(int num, int steps) { // Changes the number of steps 
 	} else if (state == 2) {
 		update_nd_from_exprs(num);	
 	}
+}
+
+void change_nd_steps_instr_safe(int num, int steps) {
+	CmtGetLock(lock_uipc);
+	change_nd_steps_instr(num, steps);
+	CmtReleaseLock(lock_uipc);
+}
+
+void change_ao_steps_instr(int num, int steps) {
+	int state = get_ao_nd_state(num);
+	int panel = pc.ainst[num];
 	
+	// Update controls
+	if(state) {
+		SetCtrlVal(panel, pc.asteps, steps);
+	
+		uipc.ao_vals[num] = realloc(uipc.ao_vals[num], sizeof(double)*steps);
+		
+		if(state == 1) {
+			update_ao_increment(num, MC_INC);
+		} else if(state == 2) {
+			// update_ao_increment_from_exprs(num);	
+		}
+	}
+}
+
+void change_ao_steps_instr_safe(int num, int steps) {
+	CmtGetLock(lock_uipc);
+	change_ao_steps_instr(num, steps);
+	CmtReleaseLock(lock_uipc);
 }
 
 void change_dimension (int num) {	// Change the dimension of a given instruction
@@ -3465,7 +3522,7 @@ void change_dimension (int num) {	// Change the dimension of a given instruction
 	// Update ins_dims and change the number of steps for the control.
 	uipc.ins_dims[ind] = dim;
 
-	change_nd_steps_instr(num, uipc.dim_steps[dim]);
+	change_nd_steps_instr_safe(num, uipc.dim_steps[dim]);
 }
 
 void populate_dim_points() {	// Function for updating the UI with the values from the uipc var
@@ -3505,9 +3562,14 @@ void populate_dim_points() {	// Function for updating the UI with the values fro
 		SetCtrlVal(pc.ndims[1], pc.ndims[0], 2);
 		set_ndon(0);
 	} else if (--nd != uipc.nd) {
-		SetCtrlVal(pc.ndims[1], pc.ndims[0], uipc.nd+1);
-		change_num_dims();
+		change_num_dims(uipc.nd+1);
 	}
+}
+
+void update_nd_increment_safe(int num, int mode) {
+	CmtGetLock(lock_uipc);
+	update_nd_increment(num, mode);
+	CmtReleaseLock(lock_uipc);
 }
 
 void update_nd_increment(int num, int mode) { // Updates Initial, Increment and Final controls
@@ -3585,7 +3647,6 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 	else
 		ind = -1;
 	
-	CmtGetLock(lock_uipc);
 	if(ind >= 0) {
 		if(uipc.nd_delays[ind] == NULL) 
 			uipc.nd_delays[ind] = malloc(sizeof(double)*steps);
@@ -3595,7 +3656,6 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 		for(i=0; i<steps; i++) 
 			uipc.nd_delays[ind][i] = init+inc*i;
 	}
-	CmtReleaseLock(lock_uipc);
 	
 	// Convert back to the appropriate units
 	init /= pow(1000, initu);
@@ -3646,7 +3706,6 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 		steps++;
 		
 		// Update the uipc variable
-		CmtGetLock(lock_uipc);
 		if(ind >= 0) {
 			if(uipc.nd_delays[ind] == NULL) 
 				uipc.nd_data[ind] = malloc(sizeof(int)*steps);
@@ -3656,7 +3715,6 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 			for(int i=0; i<steps; i++) 
 				uipc.nd_data[ind][i] = initd+incd*i;
 		}
-		CmtReleaseLock(lock_uipc);
 		
 		SetCtrlVal(panel, pc.dat_init, initd);
 		SetCtrlVal(panel, pc.dat_inc, incd);
@@ -3678,6 +3736,11 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 	SetCtrlVal(pc.inst[num], pc.instr_d, dat);
 }
 
+void update_nd_from_exprs_safe(int num) {
+	CmtGetLock(lock_uipc);
+	update_nd_from_exprs(num);
+	CmtReleaseLock(lock_uipc);
+}
 
 void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (state == 2)
 	// Return value is 0 or a positive error.
@@ -3744,7 +3807,6 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 	int steps;
 	GetCtrlVal(panel, pc.nsteps, &steps);
 	
-	CmtGetLock(lock_uipc);
 	if(eval_delay) {
 		if(uipc.nd_delays[ind] == NULL)
 			uipc.nd_delays[ind] = malloc(sizeof(double)*steps);
@@ -3758,7 +3820,6 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 		else
 			uipc.nd_data[ind] = realloc(uipc.nd_data[ind], sizeof(int)*steps);
 	}
-	CmtReleaseLock(lock_uipc);
 	
 	// Build the basic cstep
 	cstep = malloc(sizeof(int)*(uipc.nc+uipc.nd));
@@ -3783,7 +3844,6 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 	add_constant(c, "init", C_DOUBLE, &init);
 	add_constant(c, "fin", C_DOUBLE, &fin);
 	
-	CmtGetLock(lock_uipc);
 	for(i=0; i<steps; i++) {
 		cstep[dim]++;
 		update_constants(c, cstep);
@@ -3834,9 +3894,7 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 			}
 		}
 	}
-	
-	CmtReleaseLock(lock_uipc);
-	
+
 	free_constants(c);
 	
 	// If the evaluation was unsuccessful, the border should turn red.
@@ -3865,13 +3923,11 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 		SetCtrlVal(pc.cinst[num], pc.del_init, (uipc.nd_delays[ind][0])/pow(1000, initu));
 		SetCtrlVal(pc.cinst[num], pc.del_fin, (uipc.nd_delays[ind][steps-1])/pow(1000, finu));
 		
-		CmtGetLock(lock_uipc);
 		if(uipc.err_del = err_del) {			// Not a typo, I'm actually setting the
 			del_bgcolor = VAL_RED;			    // value of the uipc error field here.
 			del_textcolor = VAL_OFFWHITE;
 		} else 
 			del_bgcolor = VAL_GREEN;
-		CmtReleaseLock(lock_uipc);
 	} 
 	
 	if(eval_data) {
@@ -3882,13 +3938,11 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 		SetCtrlVal(pc.cinst[num], pc.dat_init, uipc.nd_data[ind][0]);
 		SetCtrlVal(pc.cinst[num], pc.dat_fin, uipc.nd_data[ind][steps-1]);
 		
-		CmtGetLock(lock_uipc);
 		if(uipc.err_dat = err_dat) {			// Again, not a typo.
 			dat_bgcolor = VAL_RED;
 			dat_textcolor = VAL_OFFWHITE;
 		} else 
 			dat_bgcolor = VAL_GREEN;
-		CmtReleaseLock(lock_uipc);
 	}
 	
 	free(cstep);
@@ -5272,7 +5326,7 @@ void change_ao_chan(int num) {
 	GetNumListItems(pan, ctrl, &nl);
 	if(nl >= 2) {
 		GetCtrlVal(pan, ctrl, &ind);
-		
+		CmtGetLock(lock_uipc);
 		if(ind == uipc.ao_chans[num])
 			return; 	// No change.
 		
@@ -5282,12 +5336,11 @@ void change_ao_chan(int num) {
 		}
 	
 		if(spot >= 0) {
-			CmtGetLock(lock_uipc);
 			ind = uipc.ao_avail_chans[dev][spot];
 			remove_array_item(uipc.ao_avail_chans[dev], spot, uipc.anum_avail_chans[dev]--);
 			uipc.ao_avail_chans[dev] = realloc(uipc.ao_avail_chans[dev], sizeof(int)*uipc.anum_avail_chans[dev]);
-			CmtReleaseLock(lock_uipc);
 		}
+		CmtReleaseLock(lock_uipc); 
 	}
 	
 	// If it was unavailable before, we need to add it back in.
@@ -5297,36 +5350,43 @@ void change_ao_chan(int num) {
 	}
 	
 	uipc.ao_chans[num] = ind;
+	int max_anum = uipc.max_anum;
 	CmtReleaseLock(lock_uipc);
 	
-	//  Go through and re-populate the controls
-	for(int i = 0; i < uipc.max_anum; i++) {
+	//  Go through and re-populate the controls 
+	for(int i = 0; i < max_anum; i++) {
 		populate_ao_chan(i);
 	}
-	
 }
 
 void populate_ao_dev(int num) {
-	int pan = pc.ainst[num], ctrl = pc.aodev, dev = uipc.ao_devs[num], nl;
+	int pan = pc.ainst[num], ctrl = pc.aodev, dev, nl;
 	
 	GetNumListItems(pan, ctrl, &nl);
 	if(nl > 0) { DeleteListItem(pan, ctrl, 0, -1); }
 	
 	InsertListItem(pan, ctrl, -1, "None", -1);
+	
+	CmtGetLock(lock_uipc);
 	for(int i = 0; i < uipc.anum_devs; i++) {
 		InsertListItem(pan, ctrl, -1, uipc.adev_display[i], i);	
 	}
 	
+	dev = uipc.ao_devs[num];
+	
 	SetCtrlVal(pan, ctrl, dev);
 	SetCtrlAttribute(pan, ctrl, ATTR_DFLT_VALUE, uipc.default_adev);
+	CmtReleaseLock(lock_uipc);
 }
 
 void populate_ao_chan(int num) {
 	// Populate the selected channel ring control as appropriate.
 	int dev, ind, pan = pc.ainst[num], ctrl = pc.aochan, cind, nl, i;
 	
+	CmtGetLock(lock_uipc);
 	dev = uipc.ao_devs[num];
 	ind = uipc.ao_chans[num];
+	CmtReleaseLock(lock_uipc);
 	
 	// Clear the old list
 	GetNumListItems(pan, ctrl, &nl);
@@ -5337,6 +5397,7 @@ void populate_ao_chan(int num) {
 	if(dev < 0)
 		return;
 	
+	CmtGetLock(lock_uipc);
 	if(uipc.anum_avail_chans[dev] > 0) {
 		for(i = 0; i < uipc.anum_avail_chans[dev]; i++) {
 			cind = uipc.ao_avail_chans[dev][i];
@@ -5356,6 +5417,8 @@ void populate_ao_chan(int num) {
 		InsertListItem(pan, ctrl, -1, uipc.ao_all_chans[dev][ind], ind); 		
 	}
 	
+	CmtReleaseLock(lock_uipc);
+	
 	SetCtrlVal(pan, ctrl, ind);
 }
 
@@ -5368,7 +5431,11 @@ void change_num_aouts() {
 	if(num == uipc.anum)
 		return;		// We're done.
 	
-	SetPanelAttribute(pc.ainst[0], ATTR_DIMMED, (num == 0)?1:0); 
+	
+	int ndon;
+	GetCtrlVal(pc.ndon[1], pc.ndon[0], &ndon);
+												
+	set_aout_dimmed(0, (num == 0), ndon);
 	
 	if(num < uipc.anum) {
 		int dev, ind, s;
@@ -5400,10 +5467,10 @@ void change_num_aouts() {
 		CmtReleaseLock(lock_uipc);
 		return;
 	}
-	
+
 	// Make some more panels if necessary.
 	if(num > uipc.max_anum) {
-		int top, left, height, mi = uipc.max_anum-1;
+		int top, left, height, mi = (uipc.max_anum > 0)?uipc.max_anum-1:0;
 		GetPanelAttribute(pc.ainst[mi], ATTR_TOP, &top);
 		GetPanelAttribute(pc.ainst[mi], ATTR_LEFT, &left);
 		GetPanelAttribute(pc.ainst[mi], ATTR_HEIGHT, &height);
@@ -5430,6 +5497,17 @@ void change_num_aouts() {
 		memset(uipc.ao_chans+uipc.max_anum, -1, sizeof(int)*diff);
 		memset(uipc.ao_exprs+uipc.max_anum, 0, sizeof(char*)*diff);
 		
+		if(uipc.max_anum == 0) {
+			uipc.ao_vals[0] = malloc(sizeof(double));
+			GetCtrlAttribute(pc.ainst[0], pc.ainitval, ATTR_DFLT_VALUE, uipc.ao_vals[0]);
+			
+			uipc.ao_devs[0] = uipc.default_adev;
+			
+			populate_ao_dev(0);
+			populate_ao_chan(0);
+			
+			uipc.max_anum++;
+		}
 		
 		for(i=uipc.max_anum; i<num; i++) {
 			pc.ainst[i] = LoadPanel(pc.AOutCPan, pc.uifname, pc.a_inst);
@@ -5450,10 +5528,13 @@ void change_num_aouts() {
 		CmtReleaseLock(lock_uipc);
 	}
 	
-	
+	CmtGetLock(lock_uipc);
 	for(i = uipc.anum; i<num; i++) {
-		DisplayPanel(pc.ainst[i]);	
+		DisplayPanel(pc.ainst[i]);
+		
+		set_aout_nd_dimmed(i, !ndon);
 	}
+	CmtReleaseLock(lock_uipc);
 
 	// Finally update uipc for later.
 	CmtGetLock(lock_uipc);
@@ -5513,6 +5594,45 @@ void clear_aout(int num) {
 	}
 }
 
+void set_aout_dimmed(int num, int dimmed, int nd) {
+	// Dim an entire analog output
+	// nd tells you whether or not to undim the multidimensional bit.
+	int pan = pc.ainst[num];
+	
+	set_aout_nd_dimmed_safe(num, dimmed || !nd);
+	
+	SetCtrlAttribute(pan, pc.ainitval, ATTR_DIMMED, dimmed);
+	SetCtrlAttribute(pan, pc.aodev, ATTR_DIMMED, dimmed);
+	SetCtrlAttribute(pan, pc.aochan, ATTR_DIMMED, dimmed);
+	SetCtrlAttribute(pan, pc.axbutton, ATTR_DIMMED, dimmed);
+}
+
+void set_aout_nd_dimmed(int num, int dimmed) {
+	// Dim the ND controls for the analog output.
+	int pan = pc.ainst[num];
+	int state = get_ao_nd_state(num);
+	
+	SetCtrlAttribute(pan, pc.aindon, ATTR_DIMMED, dimmed);
+	
+	if(state) {
+		SetCtrlAttribute(pan, pc.asteps, ATTR_DIMMED, dimmed);
+		SetCtrlAttribute(pan, pc.aincexpr, ATTR_DIMMED, dimmed);
+		SetCtrlAttribute(pan, pc.aincval, ATTR_DIMMED, dimmed);
+		SetCtrlAttribute(pan, pc.afinval, ATTR_DIMMED, dimmed);
+		SetCtrlAttribute(pan, pc.adim, ATTR_DIMMED, dimmed);
+	}
+	
+	if(uipc.ac_varied != NULL) {
+		uipc.ac_varied[num] = state;
+	}
+}
+
+void set_aout_nd_dimmed_safe(int num, int dimmed) {
+	CmtGetLock(lock_uipc);
+	set_aout_nd_dimmed(num, dimmed);
+	CmtReleaseLock(lock_uipc);
+}
+
 void change_ao_val(int num) {
 	// Function called to change the analog output value on channel "num"
 	// Only call this for non-varying channels.
@@ -5521,6 +5641,83 @@ void change_ao_val(int num) {
 	GetCtrlVal(pan, pc.ainitval, &val);
 	
 	uipc.ao_vals[num][0] = val;		
+}
+
+void set_ao_nd_state(int num, int state) {
+	// For allowing variation in an analog dimension.
+	int pan = pc.ainst[num], dimmed = 1, expr_visible = 0;
+	
+	SetCtrlVal(pan, pc.aindon, state);
+	SetCtrlAttribute(pan, pc.aindon, ATTR_ON_COLOR, (state == 2)?VAL_BLUE:VAL_RED);
+	
+	switch(state) {
+		case 2:
+			expr_visible = 1;
+		case 1:
+			dimmed = 0;
+	}
+	
+	// Update the controls if appropriate
+	int nl, dim, dims, steps;
+	if(state) {
+		GetNumListItems(pan, pc.adim, &nl);
+		CmtGetLock(lock_uipc);
+		
+		if(nl < uipc.nd) {
+			for(int i = nl; i < uipc.nd; i++) {
+				int elements;
+				char **c = generate_char_num_array(1, uipc.nd, &elements);
+				
+				for(i = nl; i < uipc.nd; i++) {
+					InsertListItem(pan, pc.adim, -1, c[i], i);
+				}
+				
+				c = free_string_array(c, elements);
+			}
+		} else if(nl > uipc.nd) {
+			DeleteListItem(pan, pc.adim, uipc.nd, -1);	
+		}
+		
+		GetCtrlVal(pan, pc.adim, &dim);
+		SetCtrlVal(pan, pc.asteps, uipc.dim_steps[dim]);
+		
+		uipc.ao_vals[num] = realloc(uipc.ao_vals[num], sizeof(double)*uipc.dim_steps[dim]);
+		
+		dimmed = 0;
+		
+		CmtReleaseLock(lock_uipc);
+		
+		if(state == 2) {
+			expr_visible = 1;
+		} else {
+			state = 1;
+			update_ao_increment(num, MC_INC);
+		}
+	}
+	
+	CmtGetLock(lock_uipc);
+	if(uipc.ac_varied != NULL) { uipc.ac_varied[num] = state; } 
+	
+	SetCtrlAttribute(pan, pc.asteps, ATTR_DIMMED, dimmed);
+	SetCtrlAttribute(pan, pc.aincexpr, ATTR_DIMMED, dimmed);
+	SetCtrlAttribute(pan, pc.aincval, ATTR_DIMMED, dimmed);
+	SetCtrlAttribute(pan, pc.afinval, ATTR_DIMMED, dimmed);
+	SetCtrlAttribute(pan, pc.adim, ATTR_DIMMED, dimmed);
+	
+	SetCtrlAttribute(pan, pc.aincexpr, ATTR_VISIBLE, expr_visible);
+	SetCtrlAttribute(pan, pc.aincval, ATTR_VISIBLE, !expr_visible);
+
+	CmtReleaseLock(lock_uipc);
+}
+
+int get_ao_nd_state(int num) {
+	int pan = pc.ainst[num], on, col, state;
+	
+	GetCtrlVal(pan, pc.aindon, &on);
+	GetCtrlAttribute(pan, pc.aindon, ATTR_ON_COLOR, &col);
+	state = (on && col == VAL_BLUE)?2:on;
+	
+	return state;
 }
 
 void update_ao_increment(int num, int mode) {
@@ -5600,7 +5797,6 @@ void update_ao_increment(int num, int mode) {
 	SetCtrlVal(panel, pc.ainitval, init);
 	SetCtrlVal(panel, pc.aincval, inc);
 	SetCtrlVal(panel, pc.afinval, fin);
-	
 }
 
 

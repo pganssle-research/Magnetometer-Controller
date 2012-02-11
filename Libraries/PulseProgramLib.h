@@ -161,13 +161,19 @@ extern void get_updated_instr(PINSTR *instr, int num, int *cstep, int *cind, int
 extern void set_ndon(int ndon);
 extern void update_nd_state(int num, int state);
 extern void set_instr_nd_mode(int num, int nd);
-extern void change_num_dims(void);
+extern void change_num_dims(int num);
 extern void change_num_dim_steps(int dim, int steps);
+extern void change_num_dim_steps_safe(int dim, int steps);
 extern void change_nd_steps_instr(int num, int steps);
+extern void change_nd_steps_instr_safe(int num, int steps);
+extern void change_ao_steps_instr(int num, int steps);
+extern void change_ao_steps_instr_safe(int num, int steps);
 extern void change_dimension(int num);
 extern void populate_dim_points(void);
 extern void update_nd_increment(int num, int mode);
+extern void update_nd_increment_safe(int num, int mode);
 extern void update_nd_from_exprs(int num);
+extern void update_nd_from_exprs_safe(int num);
 extern void update_skip_condition(void);
 extern char *get_tooltip(int skip);
 
@@ -205,6 +211,12 @@ extern void change_ao_device(int num);
 extern void change_ao_chan(int num);
 extern void populate_ao_dev(int num);
 extern void populate_ao_chan(int num);
+
+extern void set_aout_dimmed(int num, int dimmed, int nd);
+extern void set_aout_nd_dimmed(int num, int dimmed);
+extern void set_aout_nd_dimmed_safe(int num, int dimmed);
+extern void set_ao_nd_state(int num, int state);
+extern int get_ao_nd_state(int num);
 
 extern void change_ao_val(int num);
 extern void update_ao_increment(int num, int mode);

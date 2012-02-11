@@ -2928,8 +2928,14 @@ int load_DAQ_info() {
 	CmtReleaseLock(lock_uidc);
 	
 	// Fix up the current channel setup while we're at it.
-	if(uidc.onchans)
+	if(uidc.onchans) {
+		GetNumListItems(pc.curchan[1], pc.curchan[0], &nl);
+		if(curr_chan < 0) {
+			curr_chan = 0;
+		}
+		
 		SetCtrlIndex(pc.curchan[1], pc.curchan[0], (curr_chan>=uidc.onchans)?uidc.onchans-1:curr_chan);
+	}
 	
 	SetCtrlAttribute(pc.curchan[1], pc.curchan[0], ATTR_DIMMED, uidc.onchans?0:1);
 	SetCtrlAttribute(pc.range[1], pc.range[0], ATTR_DIMMED, uidc.onchans?0:1);

@@ -228,7 +228,7 @@ int main (int argc, char *argv[])
 
 	return 0;
 }
-
+			
 
 //////////////////////////////////////////////////////
 //                                      	        //
@@ -827,9 +827,9 @@ int CVICALLBACK ChangeInitOrFinal (int panel, int control, int event,
 			GetCtrlVal(panel, pc.cins_num, &num);
 			
 			if(control == pc.del_fin || control == pc.dat_fin)
-				update_nd_increment(num, MC_INC);
+				update_nd_increment_safe(num, MC_INC);
 			else
-				update_nd_increment(num, MC_FINAL);
+				update_nd_increment_safe(num, MC_FINAL);
 			break;
 	}
 	return 0;
@@ -845,7 +845,7 @@ int CVICALLBACK ChangeInc (int panel, int control, int event,
 			int num;
 			GetCtrlVal(panel, pc.cins_num, &num);
 			
-			update_nd_increment(num, MC_FINAL);
+			update_nd_increment_safe(num, MC_FINAL);
 			break;
 	}
 	return 0;
@@ -1291,7 +1291,10 @@ int CVICALLBACK NumDimensionCallback (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-				change_num_dims();	
+			int val;
+			GetCtrlVal(panel, control, &val);
+		
+			change_num_dims(val);	
 			break;
 	}
 	return 0;
@@ -1396,7 +1399,7 @@ int CVICALLBACK EditExpression (int panel, int control, int event,
 			int num;
 			GetCtrlVal(panel, pc.cins_num, &num);
 				
-			update_nd_from_exprs(num);
+			update_nd_from_exprs_safe(num);
 			break;
 			
 		case EVENT_RIGHT_CLICK:
@@ -2262,7 +2265,11 @@ int CVICALLBACK ChangeChanNumSteps (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+			int dim, steps;
+			GetCtrlVal(panel, pc.adim, &dim);
+			GetCtrlVal(panel, pc.asteps, &steps);
+			
+			change_num_dim_steps_safe(dim, steps);
 			break;
 	}
 	return 0;
@@ -2327,6 +2334,73 @@ int CVICALLBACK ChangeAOVal (int panel, int control, int event,
 					// update_ao_from_exprs(ind);	
 				}
 			}
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK NDToggleAO (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	int up = 1;
+	switch (event)
+	{
+		case EVENT_RIGHT_CLICK:
+		case EVENT_RIGHT_DOUBLE_CLICK:
+			up = -1;	// This will only be seen if they right clicked
+		case EVENT_LEFT_CLICK:			// Because there was no break statement, these
+		case EVENT_LEFT_DOUBLE_CLICK:   // conditions will also be met by right clicks
+			int num = int_in_array(pc.ainst, panel, uipc.max_anum);
+			
+			if(num < 0)
+				break;
+			
+			int state = get_ao_nd_state(num);
+			
+			state+=up;
+			state = (state+3)%3; 	// In C, mod is signed, so we need to add 3 first here
+	
+			set_ao_nd_state(num, state);	// Finally we can update the state.
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeAOFinVal (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			int num = int_in_array(pc.ainst, panel, uipc.max_anum);
+			
+			if(num < 0)
+				break;
+			
+			if(uipc.ac_varied[num] == 1) {
+				update_ao_increment(num, MC_INC);
+			} else if(uipc.ac_varied[num] == 2) {
+				//update_ao_inc_from_expr(num);
+			}
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeAOIncVal (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			int num = int_in_array(pc.ainst, panel, uipc.max_anum);
+			
+			if(num < 0)
+				break;
+			
+			update_ao_increment(num, MC_FINAL);   
+			
 			break;
 	}
 	return 0;

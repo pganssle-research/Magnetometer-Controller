@@ -30,10 +30,10 @@
 #define  AOInstPan_AOutChan               2       /* control type: ring, callback function: ChangeAOutChan */
 #define  AOInstPan_DimRing                3       /* control type: ring, callback function: ChangeAOChanDim */
 #define  AOInstPan_ChanDev                4       /* control type: ring, callback function: ChangeAODev */
-#define  AOInstPan_ChanValFin             5       /* control type: numeric, callback function: (none) */
-#define  AOInstPan_ChanIncVal             6       /* control type: numeric, callback function: (none) */
+#define  AOInstPan_ChanValFin             5       /* control type: numeric, callback function: ChangeAOFinVal */
+#define  AOInstPan_ChanIncVal             6       /* control type: numeric, callback function: ChangeAOIncVal */
 #define  AOInstPan_InitChanVal            7       /* control type: numeric, callback function: ChangeAOVal */
-#define  AOInstPan_NDToggle               8       /* control type: LED, callback function: (none) */
+#define  AOInstPan_NDToggle               8       /* control type: LED, callback function: NDToggleAO */
 #define  AOInstPan_ExpressionCtrl         9       /* control type: string, callback function: ModifyAOChanInstr */
 #define  AOInstPan_ChanNumSteps           10      /* control type: numeric, callback function: ChangeChanNumSteps */
 #define  AOInstPan_xButton                11      /* control type: pictButton, callback function: DeleteAOInstr */
@@ -401,6 +401,8 @@ int  CVICALLBACK Change_Trigger(int panel, int control, int event, void *callbac
 int  CVICALLBACK ChangeAcquisitionChannel(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeAOChanDim(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeAODev(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeAOFinVal(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeAOIncVal(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeAOutChan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeAOVal(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeChannelRange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
@@ -471,6 +473,7 @@ void CVICALLBACK LoadProgramMenu(int menubar, int menuItem, void *callbackData, 
 int  CVICALLBACK ModifyAOChanInstr(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK MoveInst(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK MoveInstButton(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK NDToggleAO(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK NewAcquisitionMenu(int menubar, int menuItem, void *callbackData, int panel);
 int  CVICALLBACK NewProgram(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK NewProgramMenu(int menubar, int menuItem, void *callbackData, int panel);

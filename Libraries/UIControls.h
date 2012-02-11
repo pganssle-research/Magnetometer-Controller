@@ -133,6 +133,7 @@ struct {
 	int aindon;			// Whether or not it varies.
 	int aodev;			// Analog output device.
 	int aochan;			// Analog output channel.
+	int axbutton;		// Analog delete button.
 	
 	// What we need to load new panels.
 	char *uifname;
@@ -329,7 +330,7 @@ struct {
 	int *ac_varied;				// Is the channel varied		Suze = [max_anum]
 	int *ao_devs;				// The device for each chan.	Size = [max_anum]
 	int *ao_chans;				// Physical channel on dev.		Size = [max_anum]
-	double **ao_vals;			// Array of vals per channel	Size = [max_anum][varied?max_n_steps:1]
+	double **ao_vals;			// Array of vals per channel	Size = [max_anum][nsteps[dim]:1]
 	char **ao_exprs;			// Variable expressions.		Size = [max_anum]
 
 	// Other

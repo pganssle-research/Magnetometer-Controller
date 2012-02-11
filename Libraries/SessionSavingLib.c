@@ -260,7 +260,7 @@ void initialize_program() {
 	uipc.max_cinstrs = NULL;
 	
 	uipc.anum = 0;
-	uipc.max_anum=1;
+	uipc.max_anum=0;
 	uipc.anum_devs = 0;
 	uipc.anum_all_chans = 0;
 	uipc.anum_avail_chans = 0;
@@ -299,7 +299,7 @@ void initialize_program() {
 	
 	SetPanelPos(pc.ainst[0], 60, 5);
 	DisplayPanel(pc.ainst[0]);
-	SetPanelAttribute(pc.ainst[0], ATTR_DIMMED, 1);
+	set_aout_dimmed(0, 1, 0);
 	
 	// Set up the initial callback data for np, sr and at callbacks.
 	InstallCtrlCallback(pc.sr[1], pc.sr[0], ChangeNP_AT_SR, (void *)0);
@@ -658,6 +658,7 @@ void initialize_uicontrols() {
 	pc.aindon = AOInstPan_NDToggle;
 	pc.aodev = AOInstPan_ChanDev;
 	pc.aochan = AOInstPan_AOutChan;
+	pc.axbutton = AOInstPan_xButton;
 }
 
 void initialize_ce() {
@@ -1012,8 +1013,10 @@ int save_session(char *filename) { // Primary session saving function
 	free(a);
 	
 	// Now save the Pulseblaster device.
-	int pb_dev;
-	GetCtrlVal(pc.pbdev[1], pc.pbdev[0], &pb_dev);
+	int pb_dev = -1;
+	GetNumListItems(pc.pbdev[1], pc.pbdev[0], &nl);
+	
+	if(nl > 1) { GetCtrlVal(pc.pbdev[1], pc.pbdev[0], &pb_dev); }
 	
 	if(pb_dev >= 0) {
 		sprintf(buff, "%d", pb_dev);
@@ -1227,7 +1230,7 @@ int save_session(char *filename) { // Primary session saving function
 		sprintf(gains, f_str, gains, uidc.fgain[i]);
 		
 		// The offsets
-		digs = (int)log10(uidc.foff[i])+1;
+		digs = (uidc.foff[i] > 0)?((int)log10(uidc.foff[i])+1):1;
 		sprintf(f_str, "%%s%%.%dlf;", (digs>=8)?1:8-digs);
 		digs = (digs>=8)?digs+3:11;
 		offl+= digs;
@@ -1300,7 +1303,7 @@ int save_session(char *filename) { // Primary session saving function
 		sprintf(gains, f_str, gains, uidc.sgain[i]);
 		
 		// The offsets
-		digs = (int)log10(uidc.soff[i])+1;
+		digs = (uidc.soff[i] > 0)?((int)log10(uidc.soff[i])+1):0;
 		sprintf(f_str, "%%s%%.%dlf;", (digs>=8)?1:8-digs);
 		digs = (digs>=8)?digs+3:11;
 		offl+= digs;
