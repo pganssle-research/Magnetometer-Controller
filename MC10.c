@@ -245,7 +245,7 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			// is waiting for a trigger, it sends a software trigger.
 			
 			// Send a software trigger if it's waiting for one.
-			int status = update_status(0);
+			int status = update_status_safe(0);
 			if(status & PB_WAITING) {
 				pb_start_safe(1);
 				break;
@@ -603,21 +603,15 @@ int CVICALLBACK MoveInst (int panel, int control, int event,
 		case EVENT_COMMIT:
 			// First find the old panel.
 			
-			int to, from;
-			int i;
-			for(i=0; i<uipc.ni; i++) {
-				if(pc.inst[i] == panel) {
-					from = i;
-					break;
-				}
-			}
+			int to;
+			int from = int_in_array(pc.inst, panel, uipc.ni);
 			
-			if(i == uipc.ni)
-				break;	// Error.
+			if(from < 0)
+				break;
 			
 			GetCtrlVal(panel, pc.ins_num, &to);
 			
-			move_instruction(to, from);
+			move_instruction_safe(to, from);
 			break;
 	}
 	return 0;
@@ -644,9 +638,9 @@ int CVICALLBACK MoveInstButton (int panel, int control, int event,
 				
 				// Now we just decide if it was called by the up button or the down button and move the instruction.
 				if(control == pc.uparrow && num >= 1)
-					move_instruction(num-1, num);
+					move_instruction_safe(num-1, num);
 				else if(control == pc.downarrow && num < (uipc.ni-1)) 
-					move_instruction(num+1, num);
+					move_instruction_safe(num+1, num);
 				else
 					break;
 				
@@ -668,7 +662,7 @@ int CVICALLBACK DeleteInstructionCallback (int panel, int control, int event,
 				int num;
 				GetCtrlVal(panel, pc.ins_num, &num);
 				
-				delete_instruction(num);
+				delete_instruction_safe(num);
 			break;
 	}
 	return 0;
@@ -777,7 +771,7 @@ int CVICALLBACK ChangeInstrVary (int panel, int control, int event,
 			if(val == VAL_OFFWHITE)
 				return -1;
 			
-			update_nd_state(num, state);	// Finally we can update the state.
+			update_nd_state_safe(num, state);	// Finally we can update the state.
 			break;
 	}
 	return 0;
@@ -810,7 +804,7 @@ int CVICALLBACK ChangeDimension (int panel, int control, int event,
 			int num;
 			GetCtrlVal(panel, pc.cins_num, &num);
 			
-			change_dimension(num);
+			change_dimension_safe(num);
 			break;
 	}
 	return 0;
@@ -869,7 +863,7 @@ int CVICALLBACK PhaseCycleInstr (int panel, int control, int event,
 			
 			int state = get_pc_state(num);
 			
-			update_pc_state(num, !state);
+			update_pc_state_safe(num, !state);
 			break;
 	}
 	return 0;
@@ -881,7 +875,7 @@ int CVICALLBACK ChangeNumCycles (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-				change_num_cycles();
+				change_num_cycles_safe();
 			break;
 	}
 	return 0;
@@ -897,7 +891,7 @@ int CVICALLBACK InstrChangeCycleNum (int panel, int control, int event,
 			int cyc, steps;
 			GetCtrlVal(panel, pc.pcsteps, &steps);
 			GetCtrlVal(panel, pc.pclevel, &cyc);
-			change_cycle_num_steps(cyc, steps);
+			change_cycle_num_steps_safe(cyc, steps);
 			break;
 	}
 	return 0;
@@ -912,7 +906,7 @@ int CVICALLBACK ChangePhaseCycleLevel (int panel, int control, int event,
 			int num;
 			GetCtrlVal(panel, pc.ins_num, &num);
 			
-			change_cycle(num);
+			change_cycle_safe(num);
 			break;
 	}
 	return 0;
@@ -926,7 +920,7 @@ int CVICALLBACK ChangePhaseCycleStep (int panel, int control, int event,
 		case EVENT_COMMIT:
 			int num;
 			GetCtrlVal(panel, pc.ins_num, &num);
-			change_cycle_step(num);
+			change_cycle_step_safe(num);
 			break;
 	}
 	return 0;
@@ -950,6 +944,8 @@ int CVICALLBACK MoveInstButtonExpanded (int panel, int control, int event, void 
 			
 			int cyc, steps;
 			GetCtrlIndex(pc.inst[num], pc.pclevel, &cyc);
+			
+			CmtGetLock(lock_uipc);
 			steps = uipc.cyc_steps[cyc];
 			
 			// Determine if we should move it, and get the info we need to do so
@@ -958,10 +954,13 @@ int CVICALLBACK MoveInstButtonExpanded (int panel, int control, int event, void 
 				nstep = step-1;
 			else if (!up && step < steps-1)
 				nstep = step+1;
-			else
+			else {
+				CmtReleaseLock(lock_uipc);
 				break;
+			}
 			
 			move_expanded_instruction(num, nstep, step);	// Move the instruction
+			CmtReleaseLock(lock_uipc);
 			
 			// Move the cursor if you need to.
 			if(nstep > 0) {
@@ -1006,7 +1005,7 @@ int CVICALLBACK ChangePhaseCycleStepExpanded (int panel, int control, int event,
 			if(nstep == step)
 				break;
 			
-			move_expanded_instruction(num, nstep, step);
+			move_expanded_instruction_safe(num, nstep, step);
 			SetCtrlIndex(panel, control, step);
 			break;
 	}
@@ -1025,10 +1024,12 @@ int CVICALLBACK DeleteInstructionCallbackExpanded (int panel, int control, int e
 
 			int cyc;
 			GetCtrlIndex(pc.inst[num], pc.pclevel, &cyc);
-			if(uipc.cyc_steps[cyc] < 3)
-				break;
 			
-			delete_expanded_instruction(num, step);
+			CmtGetLock(lock_uipc);
+			if(uipc.cyc_steps[cyc] >= 3) {
+				delete_expanded_instruction(num, step);
+			}
+			CmtReleaseLock(lock_uipc);
 			break;
 	}
 	return 0;
@@ -1044,7 +1045,7 @@ int CVICALLBACK ExpandPhaseCycle (int panel, int control, int event,
 			int num;
 			GetCtrlVal(panel, pc.ins_num, &num);
 			
-			set_phase_cycle_expanded(num, 1);
+			set_phase_cycle_expanded_safe(num, 1);
 			break;
 	}
 	return 0;
@@ -1060,7 +1061,7 @@ int CVICALLBACK CollapsePhaseCycle (int panel, int control, int event,
 			int num;
 			GetCtrlVal(panel, pc.ins_num, &num);
 			
-			set_phase_cycle_expanded(num, 0);
+			set_phase_cycle_expanded_safe(num, 0);
 			break;
 	}
 	return 0;
@@ -1123,7 +1124,7 @@ int CVICALLBACK Change_Trigger (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-			change_trigger_ttl();
+			change_trigger_ttl_safe();
 			break;
 	}
 	return 0;
@@ -1147,7 +1148,7 @@ int CVICALLBACK InstNumChange (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-			change_number_of_instructions();
+			change_number_of_instructions_safe();
 			break;
 	}
 	return 0;
@@ -1160,7 +1161,7 @@ int CVICALLBACK NewProgram (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-			clear_program();
+			clear_program_safe();
 			break;
 	}
 	return 0;
@@ -1294,7 +1295,7 @@ int CVICALLBACK NumDimensionCallback (int panel, int control, int event,
 			int val;
 			GetCtrlVal(panel, control, &val);
 		
-			change_num_dims(val);	
+			change_num_dims_safe(val);	
 			break;
 	}
 	return 0;
@@ -1310,7 +1311,7 @@ int CVICALLBACK ToggleND (int panel, int control, int event, void *callbackData,
 		case EVENT_RIGHT_DOUBLE_CLICK:
 			int ndon;
 			GetCtrlVal(panel, control, &ndon);
-			set_ndon(!ndon);
+			set_ndon_safe(!ndon);
 			break;
 	}
 	return 0;
@@ -1476,7 +1477,7 @@ int CVICALLBACK EditSkipCondition (int panel, int control, int event,
 			break;
 		case EVENT_LOST_FOCUS:
 		case EVENT_COMMIT:
-			update_skip_condition();
+			update_skip_condition_safe();
 			break;
 		case EVENT_RIGHT_CLICK:
 			// If there's an error, right click here to get a popup with details.
@@ -1573,7 +1574,7 @@ void CVICALLBACK LoadProgramMenu (int menuBar, int menuItem, void *callbackData,
 void CVICALLBACK NewProgramMenu (int menuBar, int menuItem, void *callbackData,
 		int panel)
 {
-	clear_program();
+	clear_program_safe();
 }
 
 void CVICALLBACK SaveProgramMenu (int menuBar, int menuItem, void *callbackData,
@@ -1646,7 +1647,7 @@ int CVICALLBACK ToggleBrokenTTL (int panel, int control, int event, void *callba
 			GetCtrlVal(panel, control, &val);
 			
 			if(val) {
-				int reserved = ttls_in_use();		// Get the ttls currently in use.
+				int reserved = ttls_in_use_safe();		// Get the ttls currently in use.
 				
 				// If it's in use, offer to swap with whatever you want. Currently only one
 				// level of swapping. On cancel, no swap takes place.
@@ -1672,7 +1673,7 @@ int CVICALLBACK ToggleBrokenTTL (int panel, int control, int event, void *callba
 				CmtReleaseLock(lock_uipc);
 			}
 				
-			setup_broken_ttls(); // Update the controls.
+			setup_broken_ttls_safe(); // Update the controls.
 			break;
 	}
 	return 0;
@@ -1691,8 +1692,8 @@ int CVICALLBACK BrokenTTLsClearAll (int panel, int control, int event, void *cal
 			
 			CmtGetLock(lock_uipc);
 			uipc.broken_ttls = 0;
-			CmtReleaseLock(lock_uipc);
 			setup_broken_ttls();
+			CmtReleaseLock(lock_uipc);
 			break;
 	}
 	return 0;
@@ -2203,7 +2204,7 @@ int CVICALLBACK ChangeNumAOuts (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-				change_num_aouts();
+				change_num_aouts_safe();
 			break;
 	}
 	return 0;
@@ -2229,7 +2230,7 @@ int CVICALLBACK ChangeAODev (int panel, int control, int event,
 		case EVENT_COMMIT:
 				int num = int_in_array(pc.ainst, panel, uipc.max_anum);
 				if(num >= 0)
-					change_ao_device(num);
+					change_ao_device_safe(num);
 			break;
 	}
 	return 0;
@@ -2281,7 +2282,13 @@ int CVICALLBACK ChangeAOChanDim (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+				CmtGetLock(lock_uipc);
+				int num = int_in_array(pc.ainst, panel, uipc.max_anum); 
+				CmtReleaseLock(lock_uipc);
+			
+				if(num >= 0) { 
+					change_ao_dim_safe(num); 
+				}
 			break;
 	}
 	return 0;
@@ -2296,7 +2303,7 @@ int CVICALLBACK ChangeAOutChan (int panel, int control, int event,
 				int spot = int_in_array(pc.ainst, panel, uipc.max_anum);
 				
 				if(spot >= 0)
-					change_ao_chan(spot);
+					change_ao_chan_safe(spot);
 			break;
 	}
 	return 0;
@@ -2311,7 +2318,7 @@ int CVICALLBACK DeleteAOInstr (int panel, int control, int event,
 			int ind = int_in_array(pc.ainst, panel, uipc.max_anum);
 			
 			if(ind >= 0)
-				delete_aout(ind);
+				delete_aout_safe(ind);
 			break;
 	}
 	return 0;
@@ -2323,6 +2330,7 @@ int CVICALLBACK ChangeAOVal (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			CmtGetLock(lock_uipc);
 			int ind = int_in_array(pc.ainst, panel, uipc.max_anum);
 			
 			if(ind >= 0) {
@@ -2334,6 +2342,7 @@ int CVICALLBACK ChangeAOVal (int panel, int control, int event,
 					// update_ao_from_exprs(ind);	
 				}
 			}
+			CmtReleaseLock(lock_uipc);
 			break;
 	}
 	return 0;
@@ -2360,7 +2369,7 @@ int CVICALLBACK NDToggleAO (int panel, int control, int event,
 			state+=up;
 			state = (state+3)%3; 	// In C, mod is signed, so we need to add 3 first here
 	
-			set_ao_nd_state(num, state);	// Finally we can update the state.
+			set_ao_nd_state_safe(num, state);	// Finally we can update the state.
 
 			break;
 	}
@@ -2378,11 +2387,13 @@ int CVICALLBACK ChangeAOFinVal (int panel, int control, int event,
 			if(num < 0)
 				break;
 			
+			CmtGetLock(lock_uipc);
 			if(uipc.ac_varied[num] == 1) {
 				update_ao_increment(num, MC_INC);
 			} else if(uipc.ac_varied[num] == 2) {
 				//update_ao_inc_from_expr(num);
 			}
+			CmtReleaseLock(lock_uipc);
 			break;
 	}
 	return 0;
@@ -2394,12 +2405,14 @@ int CVICALLBACK ChangeAOIncVal (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			CmtGetLock(lock_uipc);
 			int num = int_in_array(pc.ainst, panel, uipc.max_anum);
+			CmtReleaseLock(lock_uipc);
 			
 			if(num < 0)
 				break;
 			
-			update_ao_increment(num, MC_FINAL);   
+			update_ao_increment_safe(num, MC_FINAL);   
 			
 			break;
 	}

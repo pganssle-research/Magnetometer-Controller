@@ -406,7 +406,6 @@ extern int *GetPointerToStatus(void);
 extern void ReleasePointerToStatus(void);
 extern void SetStatus(int val);
 extern int GetStatus(void);
-extern int clear_instruction(int num);
 extern int load_fid_data(char *filename,
                          int np, double *fid);
 extern int load_fft_data(char *filename,
@@ -436,7 +435,6 @@ extern int change_precision(int panel,
                             int control);
 extern int update_final_val(int panel);
 extern int fix_number_of_dimensions(void);
-extern int change_dimension(int panel);
 extern int change_increment(int panel);
 extern int change_num_steps(int panel);
 extern int change_nc_or_cf(int panel);
@@ -509,7 +507,6 @@ extern int fit_graph(int panel, int control,
                      int xy);
 extern int run_hotkey(int panel, int control,
                       int eventData1, int eventData2);
-extern int setup_broken_ttls(void);
 extern int __cdecl QuitBrokenTTL(int panel,
                                  int control, int event, void *callbackData,
                                  int eventData1, int eventData2);

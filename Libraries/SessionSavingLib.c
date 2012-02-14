@@ -118,7 +118,7 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 		display_xml_error(rv);
 	
 	// Now load what UI stuff that needs to be loaded
-	setup_broken_ttls();
+	setup_broken_ttls_safe();
 	for(i = 0; i < 8; i++) {
 		change_fid_chan_col(i);
 		change_spec_chan_col(i);
@@ -193,6 +193,12 @@ void setup_broken_ttls() {
 		for(j = 0; j < uipc.max_ni; j++) 
 			SetCtrlAttribute(pc.inst[j], pc.TTLs[i], ATTR_DIMMED, dimmed);
 	}
+}
+
+void setup_broken_ttls_safe() {
+	CmtGetLock(lock_uipc);
+	setup_broken_ttls();
+	CmtReleaseLock(lock_uipc);
 }
 
 /*************************** Panel Releases ***************************/
@@ -271,6 +277,7 @@ void initialize_program() {
 	uipc.ao_all_chans = NULL;
 	
 	uipc.ac_varied = NULL;
+	uipc.ac_dim = NULL;
 	uipc.ao_devs = NULL;
 	uipc.ao_chans = NULL;
 	uipc.ao_vals = NULL;
@@ -299,7 +306,7 @@ void initialize_program() {
 	
 	SetPanelPos(pc.ainst[0], 60, 5);
 	DisplayPanel(pc.ainst[0]);
-	set_aout_dimmed(0, 1, 0);
+	set_aout_dimmed_safe(0, 1, 0);
 	
 	// Set up the initial callback data for np, sr and at callbacks.
 	InstallCtrlCallback(pc.sr[1], pc.sr[0], ChangeNP_AT_SR, (void *)0);
@@ -2284,7 +2291,7 @@ int load_session(char *filename) { // Primary session loading function
 			goto error;
 		
 		if(p != NULL) {
-			set_current_program(p);
+			set_current_program_safe(p);
 			free_pprog(p);
 		}
 	}

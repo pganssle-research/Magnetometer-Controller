@@ -73,8 +73,10 @@ extern void change_spec_offset(int num);
 extern int get_current_fname(char *path, char *fname, int next);
 
 extern int get_devices(void);
+extern int get_devices_safe(void);
 extern int load_DAQ_info(void);
 extern int load_AO_info(void);
+extern int load_AO_info_safe(void);
 
 extern void toggle_ic(void);
 extern void add_chan(char *label, int val);

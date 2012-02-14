@@ -203,19 +203,25 @@ void *malloc_or_realloc(void *pointer, size_t size) {
 //////////////////////////////////////////////////////////////
 
 /******************** Safe PulseBlaster Functions *********************/ 
-int pb_init_safe (int verbose)
-{
-	CmtGetLock(lock_pb);
+int pb_initialize(int verbose) {
 	int rv = pb_init();
 	pb_set_clock(100.0);
-    CmtReleaseLock(lock_pb);
-
+	
 	if(rv < 0 && verbose)
 		MessagePopup("Error Initializing PulseBlaster", pb_get_error());
 	
 	if(rv >= 0)
 		SetInitialized(1);
 
+	return rv;
+}
+
+int pb_init_safe (int verbose)
+{
+	CmtGetLock(lock_pb);
+	int rv = pb_initialize(verbose);
+	CmtReleaseLock(lock_pb);
+	
 	return rv;
 }
 
@@ -268,20 +274,17 @@ int pb_close_safe (int verbose)
 	return rv;
 }
 
-int pb_read_status_safe(int verbose)
-{
+int pb_read_status_or_error(int verbose) {
 	int rv = 0;
 	if(!GetInitialized()) {
-		rv = pb_init_safe(verbose);
+		rv = pb_init();
 		if(rv < 0)
-			return rv;
+			goto error;
 	}
-	
-	
-	CmtGetLock(lock_pb);
+
 	rv = pb_read_status();
-	CmtReleaseLock(lock_pb);
 	
+	error:
 	if((rv <= 0 || rv > 32) && verbose)
 	{
 		int i, length = (int)((log10(abs(rv))/log10(2))+1);
@@ -303,6 +306,15 @@ int pb_read_status_safe(int verbose)
 		
 		free(err_str);
 	}
+	
+	return rv;
+}
+
+int pb_read_status_safe(int verbose)
+{
+	CmtGetLock(lock_pb);
+	int rv = pb_read_status_or_error(verbose);
+	CmtReleaseLock(lock_pb);
 
 	return rv;
 }

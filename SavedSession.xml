@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<SSRoot Version="Magnetometer Controller Version 1.0">
+<Preferences>
+<NPSRATPrefs>0;0;1</NPSRATPrefs>
+<TransientView>0</TransientView>
+</Preferences>
+<General>
+<ActiveTab>4</ActiveTab>
+<BaseDataFName>Experiment</BaseDataFName>
+<DataPath>C:\Documents and Settings\OmegaUser\My Documents\Omega Project\Files\Experiments\</DataPath>
+<DataLoadPath>C:\Documents and Settings\OmegaUser\My Documents\Omega Project\Files\Experiments\</DataLoadPath>
+<ProgPath>Programs</ProgPath>
+<DataDescription> </DataDescription>
+<LoadFileInfo>0</LoadFileInfo>
+</General>
+<PulseProgConfig TriggerTTL="0">
+<Device Index="0">Dev1</Device>
+<ChansOn Number="1">0</ChansOn>
+<ChanNames>ai0</ChanNames>
+<ChanRanges>10.0</ChanRanges>
+<CurrentChan Index="0">ai0</CurrentChan>
+<CounterChan Index="0">ctr0</CounterChan>
+<TrigChannel TrigEdge="10280">PFI0</TrigChannel>
+<BrokenTTLS>0</BrokenTTLS>
+</PulseProgConfig>
+<DataDisp>
+<FID Autoscale="1">
+<ChansOn Number="1">0</ChansOn>
+<Colors>ffffff;00ff00;ff0000;00ffff;ffff00;a0a0a0;ff00ff;ff6103</Colors>
+<Gains>1.0000000;1.0000000;1.0000000;1.0000000;1.0000000;1.0000000;1.0000000;1.0000000</Gains>
+<Offsets>0.0000000;0.0000000;0.0000000;0.0000000;0.0000000;0.0000000;0.0000000;0.0000000</Offsets>
+</FID>
+<Spectrum Autoscale="1">
+<ChansOn Number="1">0</ChansOn>
+<Colors>ffffff;00ff00;ff0000;00ffff;ffff00;a0a0a0;ff00ff;ff6103</Colors>
+<Gains>1.0000000;1.0000000;1.0000000;1.0000000;1.0000000;1.0000000;1.0000000;1.0000000</Gains>
+<Offsets>0.00000000;0.00000000;0.00000000;0.00000000;0.00000000;0.00000000;0.00000000;0.00000000</Offsets>
+</Spectrum>
+</DataDisp>
+</SSRoot>
+

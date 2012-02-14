@@ -93,7 +93,7 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 		return 0;
 	
 	if(ip == NULL) { 
-		p = get_current_program();
+		p = get_current_program_safe();
 		if(p == NULL) {
 			rv = -247;
 			goto error;
@@ -1392,7 +1392,7 @@ int program_pulses(PINSTR *ilist, int n_inst, int verbose) {
 
 	// Attempt to initialize if necessary
 	if(!GetInitialized()) {
-		pb_init_safe(verbose);
+		pb_initialize(verbose);
 		
 		if(!GetInitialized())
 			return -1;
@@ -1411,7 +1411,7 @@ int program_pulses(PINSTR *ilist, int n_inst, int verbose) {
 		}
 	}
 	
-	int rv = pb_start_programming_safe(verbose, PULSE_PROGRAM);
+	int rv = pb_start_programming(PULSE_PROGRAM);
 	if(rv < 0)  
 		return rv;
 	
@@ -1421,7 +1421,6 @@ int program_pulses(PINSTR *ilist, int n_inst, int verbose) {
 	
 	int in, instr_data; 
 	
-	CmtGetLock(lock_pb);
 	for(i = 0; i < n_inst; i++) {
 		in = ilist[i].instr;
 		instr_data = ilist[i].instr_data;
@@ -1439,15 +1438,14 @@ int program_pulses(PINSTR *ilist, int n_inst, int verbose) {
 				instr_data = fid[instr_data];
 		}
 		
-		fid[i] = pb_inst_pbonly_safe(verbose, ilist[i].flags, in, instr_data, ilist[i].instr_time);
+		fid[i] = pb_inst_pbonly(ilist[i].flags, in, instr_data, ilist[i].instr_time);
 		if(fid[i] < 0) {
 			rv = -3;
 			break;
 		}
 	}
-	CmtReleaseLock(lock_pb);
 	
-	pb_stop_programming_safe(verbose);
+	pb_stop_programming();
 	
 	// Error processing.
 	if(rv == -3) {
@@ -1463,7 +1461,14 @@ int program_pulses(PINSTR *ilist, int n_inst, int verbose) {
 	}
 
 	return 0;
+}
+
+int program_pulses_safe(PINSTR *ilist, int n_inst, int verbose) {  
+	CmtGetLock(lock_pb);
+	int rv = program_pulses(ilist, n_inst, verbose);
+	CmtReleaseLock(lock_pb);
 	
+	return rv;
 }
 
 int update_status(int verbose) {
@@ -1472,7 +1477,7 @@ int update_status(int verbose) {
 	
 	int rv = 0;
 	
-	rv = pb_read_status_safe(verbose);
+	rv = pb_read_status_or_error(verbose);
 	
 	if(rv < 0)
 		return rv;
@@ -1488,6 +1493,14 @@ int update_status(int verbose) {
 	return rv;	// Return the value.
 }
 
+int update_status_safe(int verbose) {
+	CmtGetLock(lock_pb);
+	int rv = update_status(verbose);
+	CmtReleaseLock(lock_pb);
+	
+	return rv;
+}
+
 //////////////////////////////////////////////////////////////
 // 															//
 //				UI Interaction Functions					//
@@ -1500,7 +1513,7 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	ui_cleanup(0); // Clean up the interface and uipc variable so that we can trust it.
 
 	// Grab what statics we can from the uipc variable
-	CmtGetLock(lock_uipc);
+
 	p->n_inst = uipc.ni;								// Number of instructions
 	p->nCycles = uipc.nc;								// Number of cycles
 	p->nDims = uipc.nd;									// Number of indirect dimensions
@@ -1549,7 +1562,6 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 		cyc_array[1] = uipc.ins_cycs;
 	
 		// We'll sort the arrays.
-		CmtGetLock(lock_uipc);
 		sort_linked(dim_array, 4, uipc.ndins);
 		sort_linked(cyc_array, 2, uipc.ncins);
 
@@ -1571,9 +1583,7 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 		
 		uipc.nd_delays = nd_delays;
 		uipc.nd_data = nd_data;
-		
-		CmtReleaseLock(lock_uipc);
-		
+
 		free(index);
 		free(dim_array);
 		free(cyc_array);
@@ -1816,8 +1826,6 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 					
 					GetCtrlVal(pc.cinst[p->v_ins[i]], pc.cexpr_data, p->data_exprs[i]);
 				}
-				
-				
 			}
 		}
 
@@ -1865,9 +1873,15 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 		free(places);
 		free(zero_cstep);
 	}
-	
+
+	return p;
+}
+
+PPROGRAM *get_current_program_safe() {
+	CmtGetLock(lock_uipc);
+	PPROGRAM *p = get_current_program();
 	CmtReleaseLock(lock_uipc);
-	
+
 	return p;
 }
 
@@ -1885,8 +1899,9 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 	SetCtrlVal(pc.ninst[1], pc.ninst[0], p->n_inst);
 	change_number_of_instructions();
 	
-	for(i=0; i < p->n_inst; i++)
+	for(i=0; i < p->n_inst; i++) {
 		set_instr(i, p->instrs[i]);
+	}
 	
 	// Now update the varied instructions
 	if(p->nDims) {
@@ -1949,14 +1964,10 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 				change_cycle(num);
 			
 				// Now update the uipc file with the relevant instructions.
-				CmtGetLock(lock_uipc);
 				if(uipc.c_instrs[num] == NULL || uipc.max_cinstrs[num] < p->maxsteps[cyc]) {
-					if(uipc.c_instrs[num] == NULL)
-						uipc.c_instrs[num] = malloc(sizeof(PINSTR*)*p->maxsteps[cyc]);
-					else
-						uipc.c_instrs[num] = realloc(uipc.c_instrs[num], sizeof(PINSTR*)*p->maxsteps[cyc]);
-				
-					for(j = uipc.max_cinstrs[num]; j < p->maxsteps[cyc]; j++)
+					uipc.c_instrs[num] = malloc_or_realloc(uipc.c_instrs[num], sizeof(PINSTR*)*p->maxsteps[cyc]);
+					
+					for(j = uipc.max_cinstrs[num]; j < p->maxsteps[cyc]; j++) // Replace with memset?
 						uipc.c_instrs[num][j] = NULL;
 				
 					uipc.max_cinstrs[num] = p->maxsteps[cyc];
@@ -1973,7 +1984,6 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 			
 				// Reset the cstep (probably unnecessary)
 				cstep[cyc] = 0;
-				CmtReleaseLock(lock_uipc);
 			}
 		
 			if(p->v_ins_mode[i] & PP_V_ID) {
@@ -2043,7 +2053,7 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 					if(len > 0)
 						SetCtrlVal(pc.cinst[num], pc.cexpr_delay, p->delay_exprs[i]);
 				
-					update_nd_from_exprs_safe(num);
+					update_nd_from_exprs(num);
 				} else {
 					update_nd_state(num, 1);
 				}
@@ -2061,7 +2071,6 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 				
 					int ind = j;
 					
-					CmtGetLock(lock_uipc);
 					if(del) {
 						for(j = 0; j < steps; j++)
 							uipc.nd_delays[ind][j] = nd_delays[j];
@@ -2071,7 +2080,6 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 						for(j = 0; j < steps; j++)
 							uipc.nd_data[ind][j] = nd_data[j];
 					}
-					CmtReleaseLock(lock_uipc);
 				}
 				
 				free(nd_data);
@@ -2097,6 +2105,13 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 		free(cstep);
 }
 
+void set_current_program_safe(PPROGRAM *p) {
+	CmtGetLock(lock_uipc);
+	set_current_program(p);
+	CmtReleaseLock(lock_uipc);
+}
+
+
 void load_prog_popup() {
 	// Function that generates a popup and allows the user to load a program from file.
 	char *path = malloc(MAX_FILENAME_LEN+MAX_PATHNAME_LEN);
@@ -2106,7 +2121,7 @@ void load_prog_popup() {
 		free(path);
 		return;
 	} else 
-		add_prog_path_to_recent(path);
+		add_prog_path_to_recent_safe(path);
 
 	int err_val;
 	PPROGRAM *p = LoadPulseProgram(path, &err_val);
@@ -2115,7 +2130,7 @@ void load_prog_popup() {
 		display_ddc_error(err_val);
 
 	if(p != NULL) {
-		set_current_program(p);
+		set_current_program_safe(p);
 		free_pprog(p);
 	}
 
@@ -2130,9 +2145,9 @@ void save_prog_popup() {
 		free(path);
 		return;
 	} else
-		add_prog_path_to_recent(path);
+		add_prog_path_to_recent_safe(path);
 
-	PPROGRAM *p = get_current_program();
+	PPROGRAM *p = get_current_program_safe();
 
 	int err_val = SavePulseProgram(path, p);
 
@@ -2159,26 +2174,24 @@ void add_prog_path_to_recent(char *opath) {
 	c[1] = NULL;				   // Truncate after the last separator.
 
 	if(c != NULL && FileExists(path, NULL)) {
-		
-		CmtGetLock(lock_uipc);
-		if(uipc.ppath == NULL)
-			uipc.ppath = malloc(strlen(path)+1);
-		else
-			uipc.ppath = realloc(uipc.ppath, strlen(path)+1);
-		
+		uipc.ppath = malloc_or_realloc(uipc.ppath, strlen(path)+1);
 		strcpy(uipc.ppath, path);
-		CmtReleaseLock(lock_uipc);
 	}
 	
 	free(path);
+}
+
+void add_prog_path_to_recent_safe(char *opath) {
+	CmtGetLock(lock_uipc);
+	add_prog_path_to_recent(opath);
+	CmtReleaseLock(lock_uipc);
 }
 
 void clear_program() {
 	// Deletes all instructions for a new program.
 	
 	// Clear all the instructions
-	for(int i = 0; i < uipc.max_ni; i++)
-		clear_instruction(i);
+	for(int i = 0; i < uipc.max_ni; i++) { clear_instruction(i); }
 	
 	// Update the number of instructions
 	SetCtrlVal(pc.ninst[1], pc.ninst[0], 1);
@@ -2189,7 +2202,6 @@ void clear_program() {
 	change_num_cycles();
 	
 	// Free up the uipc stuff
-	CmtGetLock(lock_uipc);
 	if(uipc.c_instrs != NULL)
 		free(uipc.c_instrs);	// The values should have been freed by clear_instruction
 	if(uipc.max_cinstrs != NULL)
@@ -2202,7 +2214,6 @@ void clear_program() {
 	uipc.c_instrs = NULL;
 	uipc.max_cinstrs = NULL;
 	uipc.cyc_pans = NULL;
-	CmtReleaseLock(lock_uipc);
 	
 	// Turn off the skips if necessary.
 	SetCtrlVal(pc.skip[1], pc.skip[0], 0);
@@ -2212,14 +2223,19 @@ void clear_program() {
 	SetCtrlAttribute(pc.skiptxt[1], pc.skiptxt[0], ATTR_TEXT_BOLD, 0);
 	SetCtrlAttribute(pc.skip[1], pc.skip[0], ATTR_CTRL_MODE, VAL_INDICATOR);
 	
-	char *def_val;
 	int def_len;
 	GetCtrlAttribute(pc.skiptxt[1], pc.skiptxt[0], ATTR_DFLT_VALUE_LENGTH, &def_len);
-	def_val = malloc(def_len+1);
+	char *def_val = malloc(def_len+1);
 	
 	GetCtrlAttribute(pc.skiptxt[1], pc.skiptxt[0], ATTR_DFLT_VALUE, def_val);
 	SetCtrlVal(pc.skiptxt[1], pc.skiptxt[0], def_val);
 	free(def_val);
+}
+
+void clear_program_safe() {
+	CmtGetLock(lock_uipc);
+	clear_program();
+	CmtReleaseLock(lock_uipc);
 }
 
 void get_pinstr_array(PINSTR **ins_ar, PPROGRAM *p, int *cstep) {
@@ -2228,19 +2244,21 @@ void get_pinstr_array(PINSTR **ins_ar, PPROGRAM *p, int *cstep) {
 	int i;
 	
 	// Copy over all the initial instructions to start with.
-	for(i = 0; i < p->n_inst; i++)
+	for(i = 0; i < p->n_inst; i++) {
 		copy_pinstr(p->instrs[i], ins_ar[i]);
+	}
 	
-	if(p->varied)
+	if(p->varied) {
 		return;			// If there's no variation, we're done.
+	}
 	
 	int ins_ind, lindex = get_lindex(cstep, p->maxsteps, p->nDims+p->nCycles);
 	
 	// Now we just need to copy the instructions from p->intrs. The locations for each
 	// stage in acquisition space is stored in p->v_ins_locs.
-	for(i = 0; i < p->nVaried; i++)
+	for(i = 0; i < p->nVaried; i++) {
 		copy_pinstr(ins_ar[p->v_ins[i]], p->instrs[p->v_ins_locs[i][lindex]]);
-	
+	}
 }
 
 int ui_cleanup(int verbose) {
@@ -2255,12 +2273,20 @@ int ui_cleanup(int verbose) {
 	
 	int change = 0;		// Flag if there's a change
 	int i, j, state, steps, dim, cyc, ind, step;
-	int data_on, delay_on;
+	int data_on, delay_on, ao_on = 0;
 	double time;
 	
 	// First go through and find any problems within the multidimensional acquisition, if applicable.
 	if(uipc.nd) {
-		if(uipc.ndins == 0) {			// No instructions actually vary.
+		if(uipc.ac_varied != NULL) {
+			for(i = 0; i < uipc.anum; i++) {
+				if(uipc.ao_devs[i] >= 0 && uipc.ao_chans[i] >= 0 && uipc.ac_varied[i]) {
+					ao_on = 1;	
+				}
+			}
+		}
+		
+		if(!ao_on && uipc.ndins == 0) {		// No instructions actually vary.
 			change = 1;
 			set_ndon(0);
 		}
@@ -2273,23 +2299,25 @@ int ui_cleanup(int verbose) {
 			// First, if either of these is null, it may be that it was never evaluated, so check that.
 			if(uipc.nd_delays == NULL || uipc.nd_delays[i] == NULL || uipc.nd_data == NULL || uipc.nd_data[i] == NULL) {
 				if(state == 1) {
-					update_nd_increment_safe(ind, MC_INC);	
+					update_nd_increment(ind, MC_INC);	
 				} else if(state == 2) {
-					update_nd_from_exprs_safe(ind);
+					update_nd_from_exprs(ind);
 				}
 			}
 			
 			// Check if delay variation is on.
-			if(uipc.nd_delays == NULL || uipc.nd_delays[i] == NULL || constant_array_double(uipc.nd_delays[i], steps))
+			if(uipc.nd_delays == NULL || uipc.nd_delays[i] == NULL || constant_array_double(uipc.nd_delays[i], steps)) {
 				delay_on = 0;
-			else
+			} else {
 				delay_on = 1;
+			}
 			
 			// Check if data variation is on
-			if(uipc.nd_data == NULL || uipc.nd_data[i] == NULL || constant_array_int(uipc.nd_data[i], steps))
+			if(uipc.nd_data == NULL || uipc.nd_data[i] == NULL || constant_array_int(uipc.nd_data[i], steps)) {
 				data_on = 0;
-			else
+			} else {
 				data_on = 1;
+			}
 			
 			// If neither is actually on, turn variation off.
 			if(!data_on && !delay_on) {
@@ -2299,28 +2327,47 @@ int ui_cleanup(int verbose) {
 			}
 		}
 		
+		// Iterate through the analog outputs now and turn them off if they don't really.
+		for(i = 0; i < uipc.anum; i++) {
+			// Skip any non-varying or disabled ones
+			if(!uipc.ac_varied[i] || uipc.ao_devs[i] < 0 || uipc.ao_chans[i] < 0) { continue; }
+			
+			if(uipc.ac_dim[i] < 0 || constant_array_double(uipc.ao_vals[i], uipc.dim_steps[uipc.ac_dim[i]])) {
+				set_ao_nd_state(i, 0);
+			}
+		}
+		
 		// Now check that there aren't more dimensions than are actually being varied.
 		for(i = 0; i<uipc.nd; i++) {
+			// First check ND instructions
 			for(j=0; j<uipc.ndins; j++) {
-				if(uipc.ins_dims[j] == i)
-					break;			// We've found an example of this dimension, so break
+				// Break on first example of this dimension
+				if(uipc.ins_dims[j] == i) { break; }
 			}
 			
-			if(j < uipc.ndins)
-				continue;
+			if(j < uipc.ndins) { continue; }
+			
+			// Now check analog outputs
+			for(j = 0; j < uipc.anum; j++) {
+				// Skip anything disabled or not varying
+				if(!uipc.ac_varied[j] || uipc.ao_devs[j] < 0 || uipc.ao_chans[j] < 0) {
+					continue;
+				}
+				
+				if(uipc.ac_dim[j] == i) { break; }
+			}
+			
+			if(j < uipc.anum) { continue; }
 			
 			// If we're at this point, we need to remove this dimension from the experiment
 			change = 1;
 			
-			CmtGetLock(lock_uipc);
 			remove_array_item(uipc.dim_steps, i, uipc.nd); // Remove the steps.
 			for(j=0; j<uipc.ndins; j++) {
-				if(uipc.ins_dims[j] > i)
-					uipc.ins_dims[j]--;
+				if(uipc.ins_dims[j] > i) { uipc.ins_dims[j]--; }
 			}
 			uipc.nd--;				// Update number of dimensions
 			i--;					// We removed one, so drop it back one.
-			CmtReleaseLock(lock_uipc);
 		}
 		if(uipc.nd)
 			populate_dim_points();		// Update the UI
@@ -2370,8 +2417,9 @@ int ui_cleanup(int verbose) {
 				
 				// If a user doesn't define a step in a cycle, just repeat the last cycle that they defined. 
 				for(j = 1; j<steps; j++) {
-					if(uipc.c_instrs[ind][j] == NULL)
-						update_cyc_instr(ind, uipc.c_instrs[ind][j-1], j);
+					if(uipc.c_instrs[ind][j] == NULL) {
+						update_cyc_instr(ind, uipc.c_instrs[ind][j-1], j); 
+					}
 				}
 
 				// Now just to be sure, check if the array is constant.
@@ -2395,7 +2443,6 @@ int ui_cleanup(int verbose) {
 			
 			// If we're at this point, we need to remove the cycle from the expriment
 			change = 1;
-			CmtGetLock(lock_uipc);
 			remove_array_item(uipc.cyc_steps, i, uipc.nc);	// Remove the steps from the array
 			for(j=0; j<uipc.ncins; j++) {
 				if(uipc.ins_cycs[j] > i)
@@ -2403,7 +2450,6 @@ int ui_cleanup(int verbose) {
 			}
 			uipc.nc--;			// Update number of cycles
 			i--;				// We removed one, so decrement the counter.
-			CmtReleaseLock(lock_uipc);
 		}
 		
 		populate_cyc_points();	// Update the UI.
@@ -2429,6 +2475,14 @@ int ui_cleanup(int verbose) {
 	
 	return change;
 } 
+
+int ui_cleanup_safe(int verbose) {
+	CmtGetLock(lock_uipc);
+	int rv = ui_cleanup(verbose);
+	CmtReleaseLock(lock_uipc);
+	
+	return rv;
+}
 
 void change_instr_units(int panel) {
 	// Function for changing the units of a given instruction.
@@ -2923,12 +2977,10 @@ void change_trigger_ttl() {
 		set_ttl_trigger(cp, nt, 1);
 
 		// If there are instructions hidden, find them and move the TTLs around.
-		CmtGetLock(lock_uipc);
 		if(uipc.c_instrs != NULL && uipc.c_instrs[i] != NULL && uipc.max_cinstrs[i] > 0) {
 			for(int j = 1; j < uipc.max_cinstrs[i]; j++)
 				uipc.c_instrs[i][j]->flags = move_bit_skip(uipc.c_instrs[i][j]->flags, skip, nt, ot);
 		}
-		CmtReleaseLock(lock_uipc);
 
 		// Check if it's expanded.
 		GetCtrlAttribute(cp, pc.collapsepc, ATTR_VISIBLE, &expanded);
@@ -2946,15 +2998,19 @@ void change_trigger_ttl() {
 		move_ttl(i, nt, ot);
 	}
 	
-	CmtGetLock(lock_uipc);
 	uipc.trigger_ttl = nt;
+}
+
+void change_trigger_ttl_safe() {
+	CmtGetLock(lock_uipc);
+	change_trigger_ttl();
 	CmtReleaseLock(lock_uipc);
 }
 
 void set_ttl_trigger(int panel, int ttl, int on) {
 	// Pass -1 to ttl to set it to whatever the current trigger is.
 	if(ttl < 0 || ttl >= 24)
-		ttl = uipc.trigger_ttl;
+		ttl = uipc.trigger_ttl;		// Exactly one call - does not need to be locked by itself.
 	
 	// Call this when you first create a panel to initialize the TTL state
 	if(on) {
@@ -3010,6 +3066,14 @@ int ttls_in_use() {
 	}
 	
 	return ttls;
+}
+
+int ttls_in_use_safe() {
+	CmtGetLock(lock_uipc);
+	int rv = ttls_in_use();
+	CmtReleaseLock(lock_uipc);
+	
+	return rv;
 }
 
 /************* Get ND and Phase Cycling Parameters *************/  
@@ -3117,6 +3181,12 @@ void get_updated_instr(PINSTR *instr, int num, int *cstep, int *cind, int *dind,
 	}
 }
 
+void get_updated_instr_safe(PINSTR *instr, int num, int *cstep, int *cind, int *dind, int mode) {
+	CmtGetLock(lock_uipc);
+	get_updated_instr(instr, num, cstep, cind, dind, mode);
+	CmtReleaseLock(lock_uipc);
+}
+
 /**************** Set ND Instruction Parameters ****************/  
 void set_ndon(int ndon) {
 	// Sets whether it's a multidimensional experiment
@@ -3128,9 +3198,7 @@ void set_ndon(int ndon) {
 		change_num_dims(nd);
 	} else {
 		dimmed = 1;
-		CmtGetLock(lock_uipc);
 		uipc.nd = 0;
-		CmtReleaseLock(lock_uipc);
 	}
 	
 	// Set the controls appropriately.
@@ -3150,10 +3218,14 @@ void set_ndon(int ndon) {
 		SetCtrlAttribute(pc.skiptxt[1], pc.skiptxt[0], ATTR_DIMMED, dimmed);
 	}
 	
-	CmtGetLock(lock_uipc);
 	for(i = 0; i < uipc.anum; i++) {
 		set_aout_nd_dimmed(i, dimmed);
 	}
+}
+
+void set_ndon_safe(int ndon) {
+	CmtGetLock(lock_uipc);
+	set_ndon(ndon);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -3171,19 +3243,16 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 
 	// Set up the uipc variable.
 	int ind = -1, i;
-	CmtGetLock(lock_uipc);
 	for(i=0; i<uipc.ndins; i++) {		// Get the place in the dim_ins array
 		if(uipc.dim_ins[i] == num) {   // -1 if it's not there.
 			ind = i;
 			break;
 		}
 	}
-	CmtReleaseLock(lock_uipc);
 	
 	if(!state) {
 		if(ind >=0) {
 			// Remove the index from the lists and decrement the number of instructions
-			CmtGetLock(lock_uipc);
 			remove_array_item(uipc.dim_ins, ind, uipc.ndins);
 			remove_array_item(uipc.ins_state, ind, uipc.ndins);
 			remove_array_item(uipc.ins_dims, ind, uipc.ndins);
@@ -3216,11 +3285,9 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 				uipc.nd_data = realloc(uipc.nd_data, sizeof(int*)*uipc.ndins);
 				uipc.nd_delays = realloc(uipc.nd_delays, sizeof(double*)*uipc.ndins);	
 			}
-			CmtReleaseLock(lock_uipc);
 		}
 	} else {
 		if(ind < 0) {				// only need to update if we're not already there.
-			CmtGetLock(lock_uipc);
 			uipc.ndins++;			// Increment the number of instructions varied 
 			
 			// Memory allocation is important.
@@ -3280,11 +3347,10 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 			uipc.nd_delays[uipc.ndins-1] = NULL;
 			
 			SetCtrlVal(panel, pc.nsteps, uipc.dim_steps[dim]);
-			CmtReleaseLock(lock_uipc);
 			if(state == 1)
-				update_nd_increment_safe(num, MC_INC);
+				update_nd_increment(num, MC_INC);
 			else
-				update_nd_from_exprs_safe(num);
+				update_nd_from_exprs(num);
 		}
 	}
 	
@@ -3326,6 +3392,12 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 	set_instr_nd_mode(num, state);
 }
 
+void update_nd_state_safe(int num, int state) {
+	CmtGetLock(lock_uipc);
+	update_nd_state(num, state);
+	CmtReleaseLock(lock_uipc);
+}
+
 void set_instr_nd_mode(int num, int nd) {
 	// Sets the mode for the 1D instruction based to "ND" if nd > 0
 	// otherwise to the normal 1D mode.
@@ -3364,21 +3436,18 @@ void change_num_dims(int nd) { 	// Updates the number of dimensions in the exper
 	if(--nd == uipc.nd)
 		return;
 	
-	// Update the UI elements
-	if(uipc.ndins) {
-		char **c = NULL;
-		int elements = 0;
-		if(nd > uipc.nd)
-		c = generate_char_num_array(1, nd, &elements);
-		
+	// Update the UI elements 
+	int elements = 0; 
+	char **c = (nd > uipc.nd)?generate_char_num_array(1, nd, &elements):NULL;
+	
+	if(uipc.ndins) {	
 		// We are going to be updating uipc as we go, so we want a local copy so that as we
 		// iterate through it we don't end up skipping instructions and such
 		int ndins = uipc.ndins;
 		int *ins_dims = malloc(sizeof(int)*ndins), *dim_ins = malloc(sizeof(int)*ndins);
-		for(i = 0; i<ndins; i++) {
-			ins_dims[i] = uipc.ins_dims[i];
-			dim_ins[i] = uipc.dim_ins[i];
-		}
+		
+		memcpy(ins_dims, uipc.ins_dims, sizeof(int)*ndins);
+		memcpy(dim_ins, uipc.dim_ins, sizeof(int)*ndins);
 		
 		for(i = 0; i<ndins; i++) {
 			if(ins_dims[i] >= nd) {
@@ -3396,16 +3465,29 @@ void change_num_dims(int nd) { 	// Updates the number of dimensions in the exper
 		
 		free(dim_ins);
 		free(ins_dims);
-		if(c != NULL) {
-			for(i = 0; i<elements; i++)
-				free(c[i]);
-			free(c);
+	}
+	
+	if(uipc.ac_varied != NULL) { 
+		for(i = 0; i < uipc.max_anum; i++) {
+			if(!uipc.ac_varied)
+				continue;
+			
+			if(uipc.ac_dim[i] >= nd) {
+				set_ao_nd_state(i, 0);	// Turn it off if it's not used.
+				continue;
+			}
+			
+			if(nd < uipc.nd) {
+				DeleteListItem(pc.ainst[i], pc.adim, nd, -1); // Delete the rest of them.
+			} else {
+				for(j=uipc.nd;j<nd;j++) { InsertListItem(pc.ainst[i], pc.adim, -1, c[j], j); }
+			}
 		}
 	}
 	
-	// Update the uipc variable
+	if(c != NULL) { free_string_array(c, elements); } // Free c if necessary.
 	
-	CmtGetLock(lock_uipc);
+	// Update the uipc variable
 	uipc.nd = nd;
 	if(uipc.max_nd < nd) {
 		if(uipc.dim_steps == NULL)
@@ -3418,6 +3500,11 @@ void change_num_dims(int nd) { 	// Updates the number of dimensions in the exper
 		
 		uipc.max_nd = nd;
 	}
+}
+
+void change_num_dims_safe(int nd) {
+	CmtGetLock(lock_uipc);
+	change_num_dims(nd);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -3436,8 +3523,7 @@ void change_num_dim_steps(int dim, int steps) { // Updates number of steps in th
 	int cdim;
 	for(i = 0; i < uipc.anum; i++) {
 		if(uipc.ac_varied[i]) {
-			GetCtrlVal(pc.ainst[i], pc.adim, &cdim);
-			if(dim == cdim)
+			if(dim == uipc.ac_dim[i])
 				change_ao_steps_instr(i, steps);
 		}
 	}
@@ -3509,20 +3595,21 @@ void change_dimension (int num) {	// Change the dimension of a given instruction
 	else
 		dim = 0;
 	
-	for(i=0; i<uipc.ndins; i++) {
-		if(uipc.dim_ins[i] == num)
-			break;
-	}
+	ind = int_in_array(uipc.dim_ins, num, uipc.ndins);
 	
-	if(i == uipc.ndins) 
+	if(ind < 0) 
 		return;				// Something's wrong, return.
 	
-	
-	ind = i;
 	// Update ins_dims and change the number of steps for the control.
 	uipc.ins_dims[ind] = dim;
 
-	change_nd_steps_instr_safe(num, uipc.dim_steps[dim]);
+	change_nd_steps_instr(num, uipc.dim_steps[dim]);
+}
+
+void change_dimension_safe(int num) {
+	CmtGetLock(lock_uipc);
+	change_dimension(num);
+	CmtReleaseLock(lock_uipc);
 }
 
 void populate_dim_points() {	// Function for updating the UI with the values from the uipc var
@@ -3564,6 +3651,12 @@ void populate_dim_points() {	// Function for updating the UI with the values fro
 	} else if (--nd != uipc.nd) {
 		change_num_dims(uipc.nd+1);
 	}
+}
+
+void populate_dim_points_safe() {
+	CmtGetLock(lock_uipc);
+	populate_dim_points();
+	CmtReleaseLock(lock_uipc);
 }
 
 void update_nd_increment_safe(int num, int mode) {
@@ -3988,6 +4081,7 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 	if(len == 0)
 		return;						// Nothing to evaluate
 	
+	// May need to change this.
 	ui_cleanup(0);					// Clean up before evaluation.
 	
 	expr = malloc(len+1);
@@ -3996,7 +4090,6 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 	// Get max_n_steps and maxsteps;
 	int *maxsteps = malloc(sizeof(int)*size);
 	
-	CmtGetLock(lock_uipc);
 	uipc.max_n_steps = 1;
 	for(i=0; i<uipc.nc; i++) {
 		uipc.max_n_steps*=uipc.cyc_steps[i];
@@ -4007,8 +4100,7 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 		uipc.max_n_steps*=uipc.dim_steps[i];
 		maxsteps[i+uipc.nc] = uipc.dim_steps[i];
 	}
-	CmtReleaseLock(lock_uipc);
-	
+
 	// Allocate space for skip_locs. One for each step. We'll use an
 	// unsigned char array since bools aren't a thing in C
 	int max_n_steps = uipc.max_n_steps;
@@ -4018,12 +4110,8 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 		return;
 	}
 	
-	CmtGetLock(lock_uipc);
-	if(uipc.skip_locs == NULL)
-		uipc.skip_locs = malloc(sizeof(unsigned char)*max_n_steps);
-	else
-		uipc.skip_locs = realloc(uipc.skip_locs, sizeof(unsigned char)*max_n_steps);
-	
+	uipc.skip_locs = malloc_or_realloc(uipc.skip_locs, sizeof(unsigned char)*max_n_steps);
+																						  
 	// Set up the static constants
 	constants *c = setup_constants();
 	
@@ -4070,9 +4158,7 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 		
 		uipc.real_n_steps = max_n_steps; 	// If we fucked it up, there will be no skipping.
 	}
-	
-	CmtReleaseLock(lock_uipc);
-	
+
 	SetCtrlAttribute(pan, ctrl, ATTR_TEXT_BOLD, 1);
 	SetCtrlAttribute(pan, ctrl, ATTR_TEXT_BGCOLOR, bg);
 	SetCtrlAttribute(pan, ctrl, ATTR_TEXT_COLOR, txt);
@@ -4085,7 +4171,12 @@ void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
 	free(expr);
 	free(maxsteps);
 	free(cstep);
-	
+}
+
+void update_skip_condition_safe() {
+	CmtGetLock(lock_uipc);
+	update_skip_condition();
+	CmtReleaseLock(lock_uipc);
 }
 
 char *get_tooltip(int skip) {
@@ -4142,7 +4233,6 @@ void update_pc_state(int num, int state) {
 	int left = 1106;	// This is the "PC off" state.
 	
 	// Find out if it's already in the list.
-	CmtGetLock(lock_uipc);
 	if(uipc.cyc_ins != NULL) {
 		for(i = 0; i<uipc.ncins; i++) {
 			if(uipc.cyc_ins[i] == num) {
@@ -4151,7 +4241,6 @@ void update_pc_state(int num, int state) {
 			}
 		}
 	}
-	CmtReleaseLock(lock_uipc);
 								
 	if(!state) {
 		all = MC_DIMMED;
@@ -4164,7 +4253,6 @@ void update_pc_state(int num, int state) {
 		
 		if(ind>=0) {
 			// Remove the index from the lists
-			CmtGetLock(lock_uipc);
 			remove_array_item(uipc.cyc_ins, ind, uipc.ncins);
 			remove_array_item(uipc.ins_cycs, ind, uipc.ncins);
 			
@@ -4179,8 +4267,7 @@ void update_pc_state(int num, int state) {
 				uipc.cyc_ins = realloc(uipc.cyc_ins, sizeof(int)*uipc.ncins);
 				uipc.ins_cycs = realloc(uipc.ins_cycs, sizeof(int)*uipc.ncins);
 			}
-			CmtReleaseLock(lock_uipc);
-			
+
 			// Update the controls
 			SetCtrlAttribute(pc.cinst[num], pc.cins_num, ATTR_FRAME_COLOR, 14737379);	// The default color, for whatever reason
 			SetCtrlAttribute(pc.cinst[num], pc.cins_num, ATTR_DISABLE_PANEL_THEME, 0);
@@ -4201,8 +4288,8 @@ void update_pc_state(int num, int state) {
 			// Populate the rings.
 			int nl;
 			GetNumListItems(panel, pc.pclevel, &nl);
-			int elements;
-			char **c;
+			int elements = 0;
+			char **c = NULL;
 			
 			if(uipc.nc > nl) {
 				c = generate_char_num_array(1, uipc.nc, &elements);
@@ -4210,11 +4297,7 @@ void update_pc_state(int num, int state) {
 				for(i = nl; i<uipc.nc; i++) 
 					InsertListItem(panel, pc.pclevel, -1, c[i], i); 	// Insert the cycles
 				
-				if(c != NULL) {
-					for(i = 0; i<elements; i++)
-						free(c[i]);
-					free(c);
-				}
+				c = free_string_array(c, elements);	// Null detection inherent.
 			} else if(uipc.nc < nl) 
 				DeleteListItem(panel, pc.pclevel, uipc.nc, -1);
 			
@@ -4230,29 +4313,16 @@ void update_pc_state(int num, int state) {
 				for(i = nl; i<uipc.cyc_steps[cyc]; i++) 
 					InsertListItem(panel, pc.pcstep, -1, c[i], i);	
 				
-				if(c != NULL) {
-					for(i = 0; i<elements; i++)
-						free(c[i]);	
-					free(c);
-				}
+				c = free_string_array(c, elements);  
 			}
 			
 			// Now we need to update the uipc var.
-			CmtGetLock(lock_uipc);
 			uipc.ncins++;
-			if(uipc.cyc_ins == NULL)
-				uipc.cyc_ins = malloc(uipc.ncins*sizeof(int));
-			else
-				uipc.cyc_ins = realloc(uipc.cyc_ins, uipc.ncins*sizeof(int));
-			
-			if(uipc.ins_cycs == NULL)
-				uipc.ins_cycs = malloc(uipc.ncins*sizeof(int));
-			else
-				uipc.ins_cycs = realloc(uipc.ins_cycs, uipc.ncins*sizeof(int));
+			uipc.cyc_ins = malloc_or_realloc(uipc.cyc_ins, uipc.ncins*sizeof(int));
+			uipc.ins_cycs = malloc_or_realloc(uipc.ins_cycs, uipc.ncins*sizeof(int));
 			
 			uipc.ins_cycs[uipc.ncins-1] = cyc;
 			uipc.cyc_ins[uipc.ncins-1] = num;
-			CmtReleaseLock(lock_uipc);
 		} else {
 			all = MC_DIMMED;
 		}
@@ -4282,7 +4352,7 @@ void update_pc_state(int num, int state) {
 		}
 	}
 	
-	GetCtrlAttribute(pc.nt[1], pc.nt[0], ATTR_INCR_VALUE, &oiv);
+	GetCtrlAttribute(pc.nt[1], pc.nt[0], ATTR_INCR_VALUE, &oiv); // There may be something wrong here.
 	SetCtrlAttribute(pc.nt[1], pc.nt[0], ATTR_INCR_VALUE, niv);
 	
 	int nt;
@@ -4291,6 +4361,12 @@ void update_pc_state(int num, int state) {
 	
 	change_visibility_mode(panel, all_ctrls, all_num, all);
 	SetCtrlVal(panel, pc.pcon, state);
+}
+
+void update_pc_state_safe(int num, int state) {
+	CmtGetLock(lock_uipc);
+	update_pc_state(num, state);
+	CmtReleaseLock(lock_uipc);
 }
 
 void change_num_cycles() {
@@ -4302,24 +4378,18 @@ void change_num_cycles() {
 		return;
 	
 	// Update the UI elements
-	if(uipc.ncins) {
-		char **c = NULL;	   
+	if(uipc.ncins) {														   	   
 		int elements = 0;
-		CmtGetLock(lock_uipc);
-		if(nc > uipc.nc) { 
-			c = generate_char_num_array(1, nc, &elements);
-		}
+		char **c = (nc>uipc.nc)?generate_char_num_array(1, nc, &elements):NULL;
 
 		// We are going to be updating uipc as we go, so we want a local copy so that as we
 		// iterate through it we don't end up skipping instructions and such
 		int ncins = uipc.ncins;
 		int *ins_cycs = malloc(sizeof(int)*ncins), *cyc_ins = malloc(sizeof(int)*ncins);
-		for(i=0; i<ncins; i++){
-			ins_cycs[i] = uipc.ins_cycs[i];
-			cyc_ins[i] = uipc.cyc_ins[i];
-		}
+		
+		memcpy(ins_cycs, uipc.ins_cycs, sizeof(int)*ncins);
+		memcpy(cyc_ins, uipc.cyc_ins, sizeof(int)*ncins);
 	
-		CmtReleaseLock(lock_uipc);
 		for(j = 0; j<ncins; j++) {
 			if(ins_cycs[j] >= nc) {
 				update_pc_state(cyc_ins[j], 0);
@@ -4329,30 +4399,21 @@ void change_num_cycles() {
 			if(nc < uipc.nc) {
 				DeleteListItem(pc.inst[cyc_ins[j]], pc.pclevel, nc, -1);	// Delete the rest of them	
 			} else {
-				for(i=uipc.nc; i<nc; i++) 
-					InsertListItem(pc.inst[cyc_ins[j]], pc.pclevel, -1, c[i], i);
+				for(i=uipc.nc; i<nc; i++)  { InsertListItem(pc.inst[cyc_ins[j]], pc.pclevel, -1, c[i], i); }
 			}
 		}
 	
 		free(cyc_ins);
 		free(ins_cycs);
 	
-		if(c != NULL) {
-			for(i = 0; i<elements; i++)
-				free(c[i]);
-			free(c);
-		}
+		if(c != NULL) { c = free_string_array(c, elements); }
 	}
 	
 	// Only if this has never been allocated - change_num_instructions will
 	// take care of reallocation otherwise.
 	if(uipc.c_instrs == NULL) {
-		uipc.c_instrs = malloc(sizeof(PINSTR**)*uipc.max_ni);
-		uipc.max_cinstrs = malloc(sizeof(int)*uipc.max_ni);
-		for(i = 0; i<uipc.max_ni; i++) {
-			uipc.c_instrs[i] = NULL;	// Null initialization
-			uipc.max_cinstrs[i] = 0;	// -1 initialization
-		}
+		uipc.c_instrs = calloc(uipc.max_ni, sizeof(PINSTR**));
+		uipc.max_cinstrs = calloc(uipc.max_ni, sizeof(int));
 	}
 	
 	// Update the uipc variable
@@ -4368,15 +4429,17 @@ void change_num_cycles() {
 
 		uipc.max_nc = nc;
 	}
-	CmtReleaseLock(lock_uipc);
 	
-	int dimmed = 0;
-	if(!uipc.nc && !uipc.nd) 
-		dimmed = 1;
+	int dimmed = (uipc.nc || uipc.nd)?0:1;
 	
 	SetCtrlAttribute(pc.skip[1], pc.skip[0], ATTR_DIMMED, dimmed);
 	SetCtrlAttribute(pc.skiptxt[1], pc.skiptxt[0], ATTR_DIMMED, dimmed);
-	
+}
+
+void change_num_cycles_safe() {
+	CmtGetLock(lock_uipc);
+	change_num_cycles();
+	CmtReleaseLock(lock_uipc);
 }
 
 void change_cycle(int num) {
@@ -4391,14 +4454,12 @@ void change_cycle(int num) {
 	// First we'll update the uipc.
 	GetCtrlVal(panel, pc.pclevel, &cyc);		// Should be 0-based index
 	int i;
-	CmtGetLock(lock_uipc);
 	for(i = 0; i<uipc.ncins; i++) {
 		if(uipc.cyc_ins[i] == num) {			// Find the place in the cyc_ins array
 			uipc.ins_cycs[i] = cyc;
 			break;
 		}
 	}
-	CmtReleaseLock(lock_uipc);
 	
 	// Update the number of steps control.
 	SetCtrlVal(panel, pc.pcsteps, uipc.cyc_steps[cyc]);
@@ -4429,6 +4490,12 @@ void change_cycle(int num) {
 		SetCtrlIndex(panel, pc.pcstep, 0);
 		SetCtrlAttribute(panel, pc.pcstep, ATTR_DFLT_INDEX, 0);
 	}
+}
+
+void change_cycle_safe(int num) {
+	CmtGetLock(lock_uipc);
+	change_cycle(num);
+	CmtReleaseLock(lock_uipc);
 }
 
 void change_cycle_step(int num) {
@@ -4481,6 +4548,12 @@ void change_cycle_step(int num) {
 	********************************/
 }
 
+void change_cycle_step_safe(int num) {
+	CmtGetLock(lock_uipc);
+	change_cycle_step(num);
+	CmtReleaseLock(lock_uipc);
+}
+
 void change_cycle_num_steps(int cyc, int steps) {
 	// Function for changing the number of steps in a phase cycle.
 	int i, j, nl, cp;
@@ -4488,15 +4561,11 @@ void change_cycle_num_steps(int cyc, int steps) {
 	if(steps == uipc.cyc_steps[cyc])
 		return;	// No change.
 	
-	CmtGetLock(lock_uipc);
 	int oldsteps = uipc.cyc_steps[cyc];
 	uipc.cyc_steps[cyc] = steps;
-	CmtReleaseLock(lock_uipc);
 	
-	int elements;
-	char **c = NULL;
-	if(steps > oldsteps)
-		c = generate_char_num_array(1, steps, &elements);
+	int elements = 0;
+	char **c = (steps > oldsteps)?generate_char_num_array(1, steps, &elements):NULL;
 	
 	for(i=0; i < uipc.ncins; i++) {
 		if(uipc.ins_cycs[i] != cyc)
@@ -4516,7 +4585,6 @@ void change_cycle_num_steps(int cyc, int steps) {
 		
 		// Now if something's expanded, we need to deal with that
 		if(uipc.n_cyc_pans > i) {
-			CmtGetLock(lock_uipc);
 			int num = uipc.cyc_ins[i];
 			if(uipc.cyc_pans[num] != NULL) {
 				if(steps > oldsteps) { 	// Adding steps
@@ -4531,17 +4599,12 @@ void change_cycle_num_steps(int cyc, int steps) {
 				
 				resize_expanded(num, steps);
 			}
-			CmtReleaseLock(lock_uipc);
 		}
 		
 		SetCtrlVal(cp, pc.pcsteps, steps);
 	}
 	
-	if(c != NULL) {
-		for(i = 0; i < elements; i++)
-			free(c[i]);
-		free(c);
-	}
+	c = free_string_array(c, elements);
 	
 	// Finally, we update the minimum possible value for increasing transients.
 	int nt, oiv, niv = 1;
@@ -4559,24 +4622,26 @@ void change_cycle_num_steps(int cyc, int steps) {
 	SetCtrlVal(pc.nt[1], pc.nt[0], nt);
 }
 
+void change_cycle_num_steps_safe(int cyc, int steps) {
+	CmtGetLock(lock_uipc);
+	change_cycle_num_steps(cyc, steps);
+	CmtReleaseLock(lock_uipc);
+}
+
 void update_cyc_instr(int num, PINSTR *instr, int step) {
 	// Updates the uipc variable for instruction number "num" at step "step"
 	// with the instruction you feed it. Make sure that max_cinstrs is set
 	// before you use this function. 
-	int i;
-   											  
+
 	// Make this array the right size.
-	CmtGetLock(lock_uipc);
 	if(uipc.c_instrs[num] == NULL) {
 		uipc.c_instrs[num] = malloc(sizeof(PINSTR*)*(step+1));
 	} else if (uipc.max_cinstrs[num] <= step) {
 		uipc.c_instrs[num] = realloc(uipc.c_instrs[num], sizeof(PINSTR*)*(step+1));
 	}
 	
-	if(step >= uipc.max_cinstrs[num]) {					// Matches exclusively both of
-		for(i = uipc.max_cinstrs[num]; i<=step; i++) { 	// the above conditions.
-			uipc.c_instrs[num][i] = NULL;
-		}
+	if(step >= uipc.max_cinstrs[num]) {					// Matches exclusively both of the above conditions
+		memset(&uipc.c_instrs[num], 0, sizeof(PINSTR*)*((step-uipc.max_cinstrs[num])+1));
 		uipc.max_cinstrs[num] = step+1;
 	}
 	
@@ -4587,6 +4652,11 @@ void update_cyc_instr(int num, PINSTR *instr, int step) {
 	
 	// Finally just copy the instr into the uipc array.
 	copy_pinstr(instr, uipc.c_instrs[num][step]);
+}
+
+void update_cyc_instr_safe(int num, PINSTR *instr, int step) {
+	CmtGetLock(lock_uipc);
+	update_cyc_instr(num, instr, step);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -4596,7 +4666,7 @@ void populate_cyc_points()
 	int j, on, nl, cyc;
 	
 	// A char array of labels
-	int elements;
+	int elements = 0;
 	char **c = generate_char_num_array(1, uipc.nc, &elements); 
 
 	int panel;
@@ -4606,8 +4676,7 @@ void populate_cyc_points()
 		// First make the number of dimensions per control correct
 		GetNumListItems(panel, pc.pclevel, &nl);
 		if(nl < uipc.nc) {
-			for(j=nl; j<uipc.nc; j++)
-				InsertListItem(panel, pc.pclevel, -1, c[j], j);
+			for(j=nl; j<uipc.nc; j++) { InsertListItem(panel, pc.pclevel, -1, c[j], j); }
 		} else if (nl > uipc.nc) {
 			DeleteListItem(panel, pc.pclevel, uipc.nc, -1);
 		}
@@ -4618,9 +4687,7 @@ void populate_cyc_points()
 		SetCtrlVal(panel, pc.pcsteps, uipc.cyc_steps[cyc]);
 	}
 	
-	for(j=0; j<elements; j++)
-		free(c[j]);
-	free(c);
+	c = free_string_array(c, elements);
 	
 	// Now update the number of cycles
 	int nc;
@@ -4634,6 +4701,13 @@ void populate_cyc_points()
 		change_num_cycles();
 	}
 }
+
+void populate_cyc_points_safe() {
+	CmtGetLock(lock_uipc);
+	populate_cyc_points();
+	CmtReleaseLock(lock_uipc);
+}
+
 
 /*************** Expanded Phase Cycle Functions ****************/ 
 void set_phase_cycle_expanded(int num, int state) {
@@ -4650,26 +4724,21 @@ void set_phase_cycle_expanded(int num, int state) {
 	GetCtrlVal(panel, pc.pcsteps, &steps);
 	
 	if(state) {
-		// Now we want to create the panels.
-		CmtGetLock(lock_uipc);
-		if(uipc.cyc_pans == NULL) {
-			uipc.cyc_pans = malloc(sizeof(int*)*(num+1));
-		} else if(uipc.n_cyc_pans <= num) {
-			uipc.cyc_pans = realloc(uipc.cyc_pans, sizeof(int*)*(num+1));
-		}
+		// Now we want to create the panels.								   
+		uipc.cyc_pans = malloc_or_realloc(uipc.cyc_pans, sizeof(int*)*(num+1));
 		
-		for(i = uipc.n_cyc_pans; i <= num; i++)
-			uipc.cyc_pans[i] = NULL;
+		int diff = (num-uipc.n_cyc_pans)+1;
+		if(diff > 0) { memset(&uipc.cyc_pans[uipc.n_cyc_pans], 0, diff*sizeof(int*)); }
 		
 		uipc.cyc_pans[num] = malloc(sizeof(int)*uipc.cyc_steps[cyc]);
 		uipc.n_cyc_pans = num+1;
 		
 		// Set up the new subpanels
 		uipc.cyc_pans[num][0] = pc.inst[num];
-		for(i = 1; i < uipc.cyc_steps[cyc]; i++)
+		for(i = 1; i < uipc.cyc_steps[cyc]; i++) {
 			uipc.cyc_pans[num][i] = setup_expanded_instr(num, i);
-		CmtReleaseLock(lock_uipc);
-		
+		}
+			
 		// Do the actual expansion.
 		SetPanelAttribute(panel, ATTR_FRAME_STYLE, VAL_OUTLINED_FRAME);
 		SetPanelAttribute(panel, ATTR_FRAME_THICKNESS, 1);
@@ -4691,13 +4760,12 @@ void set_phase_cycle_expanded(int num, int state) {
 		resize_expanded(num, 1);
 		save_expanded_instructions(ind);
 		
-		for(i = uipc.cyc_steps[cyc]-1; i > 0; i--)
+		for(i = uipc.cyc_steps[cyc]-1; i > 0; i--) {
 			DiscardPanel(uipc.cyc_pans[num][i]);
+		}
 		
-		CmtGetLock(lock_uipc);
 		free(uipc.cyc_pans[num]); 
 		uipc.cyc_pans[num] = NULL;
-		CmtReleaseLock(lock_uipc);
 		
 		// Change back the callback function for the step-changer
 		InstallCtrlCallback(panel, pc.pcstep, ChangePhaseCycleStep, NULL);
@@ -4705,6 +4773,12 @@ void set_phase_cycle_expanded(int num, int state) {
 	
 	SetCtrlAttribute(panel, pc.expandpc, ATTR_VISIBLE, !state);
 	SetCtrlAttribute(panel, pc.collapsepc, ATTR_VISIBLE, state);
+}
+
+void set_phase_cycle_expanded_safe(int num, int state) {
+	CmtGetLock(lock_uipc);
+	set_phase_cycle_expanded(num, state);
+	CmtReleaseLock(lock_uipc);
 }
 
 int setup_expanded_instr(int num, int step) {
@@ -4751,7 +4825,7 @@ int setup_expanded_instr(int num, int step) {
 	InstallCtrlCallback(subp, pc.instr_d, InstrDataCallbackExpanded, (void*)info); 
 
 	// Now populate the ring control
-	int elements, cyc;
+	int elements = 0, cyc;
 	GetCtrlIndex(pc.inst[num], pc.pclevel, &cyc);
 	char **c = generate_char_num_array(1, uipc.cyc_steps[cyc], &elements);
 	for(int i = 0; i < uipc.cyc_steps[cyc]; i++) 
@@ -4760,11 +4834,7 @@ int setup_expanded_instr(int num, int step) {
 	SetCtrlAttribute(subp, pc.pcstep, ATTR_DIMMED, 0);
 	SetCtrlIndex(subp, pc.pcstep, step);
 	
-	if(c != NULL) {
-		for(int i = 0; i < elements; i++)
-			free(c[i]);
-		free(c);
-	}
+	c = free_string_array(c, elements);
 	
 	// Now we want to check if there's an instruction waiting for us, and otherwise
 	// grab the most recent instruction and duplicate it.
@@ -4780,6 +4850,14 @@ int setup_expanded_instr(int num, int step) {
 	DisplayPanel(subp);
 	
 	return subp;
+}
+
+int setup_expanded_instr_safe(int num, int step) {
+	CmtGetLock(lock_uipc);
+	int rv = setup_expanded_instr(num, step);
+	CmtReleaseLock(lock_uipc);
+	
+	return rv;
 }
 
 void resize_expanded(int num, int steps) {
@@ -4804,9 +4882,16 @@ void save_all_expanded_instructions() {
 	
 	for(i = 0; i < uipc.ncins; i++) {
 		GetCtrlAttribute(pc.inst[uipc.cyc_ins[i]], pc.collapsepc, ATTR_VISIBLE, &expanded);
-		if(expanded)	// Save only if we need to.
+		if(expanded) {	// Save only if we need to.
 			save_expanded_instructions(i);
+		}
 	}
+}
+
+void save_all_expanded_instructions_safe() {
+	CmtGetLock(lock_uipc);
+	save_all_expanded_instructions();
+	CmtReleaseLock(lock_uipc);
 }
 
 void save_expanded_instructions(int ind) {
@@ -4814,34 +4899,37 @@ void save_expanded_instructions(int ind) {
 	// phase cycling arrays (cyc_ins, ins_cycs, etc)
 	
 	// Start at the end and move backwards, so you don't have to realloc every time.
-	for(int i = uipc.cyc_steps[uipc.ins_cycs[ind]]-1; i >= 0; i--)
+	for(int i = uipc.cyc_steps[uipc.ins_cycs[ind]]-1; i >= 0; i--) {
 		save_expanded_instruction(uipc.cyc_ins[ind], i);
+	}
+}
+
+void save_expanded_instructions_safe(int ind) {
+	CmtGetLock(lock_uipc);
+	save_expanded_instructions(ind);
+	CmtReleaseLock(lock_uipc);
 }
 
 void save_expanded_instruction(int num, int step) {
 	// Saves an expanded information to the uipc.c_instrs field.
 
 	// Array allocation stuff
-	CmtGetLock(lock_uipc);
-	if(uipc.c_instrs[num] == NULL) {
-		uipc.c_instrs[num] = malloc(sizeof(PINSTR*)*(step+1));
-		uipc.max_cinstrs[num] = 0;
-	} else if(uipc.max_cinstrs[num] < step+1) {
-		uipc.c_instrs[num] = realloc(uipc.c_instrs[num], sizeof(PINSTR*)*(step+1));
-	}
+	if(uipc.c_instrs[num] == NULL) { uipc.max_cinstrs[num] = 0; }
+	uipc.c_instrs[num] = malloc_or_realloc(uipc.c_instrs[num], sizeof(PINSTR*)*(step+1)); 
 	
-	if(uipc.max_cinstrs[num] < step+1){
-		for(int i = uipc.max_cinstrs[num]; i <= step; i++)
-			uipc.c_instrs[num][i] = NULL;
-
+	if(uipc.max_cinstrs[num] < step+1){ 
+		memset(uipc.c_instrs[num], 0, sizeof(PINSTR*)*((step+1)-uipc.max_cinstrs[num]));
 		uipc.max_cinstrs[num] = step+1;
 	}
 	
 	// Now we have a proper uipc variable, just add in the instruction.
-	if(uipc.c_instrs[num][step] == NULL)
-		uipc.c_instrs[num][step] = malloc(sizeof(PINSTR));
-	
+	if(uipc.c_instrs[num][step] == NULL) { uipc.c_instrs[num][step] = malloc(sizeof(PINSTR)); }
 	get_instr_panel(uipc.c_instrs[num][step], uipc.cyc_pans[num][step]);
+}
+
+void save_expanded_instruction_safe(int num, int step) {
+	CmtGetLock(lock_uipc);
+	save_expanded_instruction(num, step);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -4881,6 +4969,13 @@ void move_expanded_instruction(int num, int to, int from) {
 	free(inst_buff2);
 }
 
+void move_expanded_instruction_safe(int num, int to, int from) {
+	CmtGetLock(lock_uipc);
+	move_expanded_instruction(num, to, from);
+	CmtReleaseLock(lock_uipc);
+}
+
+
 void delete_expanded_instruction(int num, int step) {
 	int cyc, cn, i, j;
 	GetCtrlIndex(pc.inst[num], pc.pclevel, &cyc);
@@ -4899,7 +4994,6 @@ void delete_expanded_instruction(int num, int step) {
 			move_expanded_instruction(num, uipc.cyc_steps[cyc]-1, step);	// Move it to the end.
 		else if(uipc.max_cinstrs[num] > step) {
 			// Move our instruction to the end and move everything over.
-			CmtGetLock(lock_uipc);
 			if(uipc.max_cinstrs[num] < uipc.cyc_steps[cyc]) {
 				uipc.c_instrs[num] = realloc(uipc.c_instrs[num], sizeof(PINSTR*)*uipc.cyc_steps[cyc]);
 				uipc.max_cinstrs[num] = uipc.cyc_steps[cyc];
@@ -4910,12 +5004,17 @@ void delete_expanded_instruction(int num, int step) {
 				uipc.c_instrs[num][j] = uipc.c_instrs[num][j+1];	
 			}
 			uipc.c_instrs[num][j] = in_buff;
-			CmtReleaseLock(lock_uipc);
 		}
 	}
 	
 	// Now we just change the number of instructions in the cycle.
 	change_cycle_num_steps(cyc, uipc.cyc_steps[cyc]-1);
+}
+
+void delete_expanded_instruction_safe(int num, int step) {
+	CmtGetLock(lock_uipc);
+	delete_expanded_instruction(num, step);
+	CmtReleaseLock(lock_uipc);
 }
 
 /****************** Instruction Manipulation *******************/ 
@@ -4993,7 +5092,6 @@ int move_instruction(int to, int from)
 	int end = start+diff;
 
 	// ND Instructions
-	CmtGetLock(lock_uipc);
 	for(i = 0; i<uipc.ndins; i++) {
 		ins = uipc.dim_ins[i];
 		if(ins < start || ins > end)
@@ -5021,60 +5119,60 @@ int move_instruction(int to, int from)
 			uipc.cyc_ins[i]++;
 	}
 	
-	// Expanded panels need to be fiddled with.
-	int max_ind = uipc.n_cyc_pans-1;	// First find the new highest panel.
-	if((from <= max_ind && to > max_ind) /*1*/ || (from >= max_ind && to <= max_ind) /*2*/) { 
-		if(from < to) { // Case 1
-			if(uipc.cyc_pans[from] != NULL) {
-				max_ind = to;
-			} else {
-				for(i = max_ind; i > from; i--) {
-					if(uipc.cyc_pans[i] != NULL) { break; }	
-				}
+	// Expanded panels may need to be fiddled with.
+	if(uipc.n_cyc_pans > 0) { 
+		int max_ind = uipc.n_cyc_pans-1;	// First find the new highest panel.
+		if((from <= max_ind && to > max_ind) /*1*/ || (from >= max_ind && to <= max_ind) /*2*/) { 
+			if(from < to) { // Case 1
+				if(uipc.cyc_pans[from] != NULL) {
+					max_ind = to;
+				} else {
+					for(i = max_ind; i > from; i--) {
+						if(uipc.cyc_pans[i] != NULL) { break; }	
+					}
 				
-				max_ind = i-1; // It's going to move down one spot.
-			}
-		} else if(from > to) { // Case 2
-			if(from > max_ind) {
-				max_ind++; 		// It will just move up a spot.	
-			} else {
-				for(i = from-1; i > to; i--) {
-					if(uipc.cyc_pans[i] != NULL) { break; }
+					max_ind = i-1; // It's going to move down one spot.
 				}
-				max_ind = i+1;	// Whatever it is moves up a spot.
+			} else if(from > to) { // Case 2
+				if(from > max_ind) {
+					max_ind++; 		// It will just move up a spot.	
+				} else {
+					for(i = from-1; i > to; i--) {
+						if(uipc.cyc_pans[i] != NULL) { break; }
+					}
+					max_ind = i+1;	// Whatever it is moves up a spot.
+				}
 			}
 		}
+	
+		// Reallocate beforehand if necessary.
+		if(max_ind+1 > uipc.n_cyc_pans) {
+			// This will only happen if to > from and the new max_ind <= to.
+			uipc.cyc_pans = realloc(uipc.cyc_pans, (max_ind+1)*sizeof(int*));
+			memset(&uipc.cyc_pans[uipc.n_cyc_pans], 0, (max_ind+1)-uipc.n_cyc_pans);
+		}
+
+
+		start = (to > from)?from:to;
+		end = (to > from)?to:from;
+	
+		int le = (end>max_ind)?max_ind:end;
+		int *pan = uipc.cyc_pans[start];
+		for(i = start; i < le; i++) {
+			uipc.cyc_pans[i] = uipc.cyc_pans[i+1];	
+		}
+
+		if(end == max_ind) {
+			uipc.cyc_pans[end] = pan;	
+		}
+
+		if(++max_ind < uipc.n_cyc_pans) {
+			uipc.cyc_pans = realloc(uipc.cyc_pans, (max_ind)*sizeof(int*));
+		}
+	
+		uipc.n_cyc_pans = max_ind;
 	}
 	
-	// Reallocate beforehand if necessary.
-	if(max_ind+1 > uipc.n_cyc_pans) {
-		// This will only happen if to > from and the new max_ind <= to.
-		uipc.cyc_pans = realloc(uipc.cyc_pans, (max_ind+1)*sizeof(int*));
-		memset(&uipc.cyc_pans[uipc.n_cyc_pans], 0, (max_ind+1)-uipc.n_cyc_pans);
-	}
-
-
-	start = (to > from)?from:to;
-	end = (to > from)?to:from;
-	
-	int le = (end>max_ind)?max_ind:end;
-	int *pan = uipc.cyc_pans[start];
-	for(i = start; i < le; i++) {
-		uipc.cyc_pans[i] = uipc.cyc_pans[i+1];	
-	}
-
-	if(end == max_ind) {
-		uipc.cyc_pans[end] = pan;	
-	}
-
-	if(++max_ind < uipc.n_cyc_pans) {
-		uipc.cyc_pans = realloc(uipc.cyc_pans, (max_ind)*sizeof(int*));
-	}
-	
-	uipc.n_cyc_pans = max_ind;
-	
-	CmtReleaseLock(lock_uipc);
-
 	// Now the actual moving and updating of things.
 	GetPanelAttribute(pc.inst[start], ATTR_TOP, &inst_top);
 	
@@ -5116,6 +5214,14 @@ int move_instruction(int to, int from)
 	return 0; 
 }
 
+int move_instruction_safe(int to, int from) {
+	CmtGetLock(lock_uipc);
+	int rv = move_instruction(to, from);
+	CmtReleaseLock(lock_uipc);
+	
+	return rv;
+}
+
 void clear_instruction(int num) {
 	// Takes an instruction and restores it to defaults.
 	
@@ -5123,10 +5229,8 @@ void clear_instruction(int num) {
 	
 	// If this was a phase cycled instruction, this is the only time we want
 	// to clear that, so we're going to free up the memory and such.
-	if(get_pc_state(num))
-		update_pc_state(num, 0);
-	
-	CmtGetLock(lock_uipc);
+	if(get_pc_state(num)) { update_pc_state(num, 0); }
+
 	if(uipc.max_cinstrs != NULL)
 	{
 		if(uipc.c_instrs[num] != NULL) {
@@ -5140,13 +5244,11 @@ void clear_instruction(int num) {
 		}
 		uipc.max_cinstrs[num] = 0;
 	}
-	CmtReleaseLock(lock_uipc);
 	
 	SetCtrlVal(pc.inst[num], pc.pcsteps, 2);
 	
 	// We also want to clear stored ND information.
-	if(get_nd_state(num))
-		update_nd_state(num, 0);
+	if(get_nd_state(num)) { update_nd_state(num, 0); }
 	
 	// Clear the expression controls
 	char *def_val;
@@ -5180,16 +5282,19 @@ void clear_instruction(int num) {
 	// Clear out the ring controls
 	int nl;
 	GetNumListItems(pc.inst[num], pc.pcstep, &nl);
-	if(nl)							   
-		DeleteListItem(pc.inst[num], pc.pcstep, 0, -1);
+	if(nl) { DeleteListItem(pc.inst[num], pc.pcstep, 0, -1); }
 	
 	GetNumListItems(pc.inst[num], pc.pclevel, &nl);
-	if(nl)							   
-		DeleteListItem(pc.inst[num], pc.pclevel, 0, -1);
+	if(nl) { DeleteListItem(pc.inst[num], pc.pclevel, 0, -1); }
 	
 	GetNumListItems(pc.cinst[num], pc.dim, &nl);
-	if(nl)							   
-		DeleteListItem(pc.cinst[num], pc.dim, 0, -1);
+	if(nl) { DeleteListItem(pc.cinst[num], pc.dim, 0, -1); }
+}
+
+void clear_instruction_safe(int num) { 
+	CmtGetLock(lock_uipc);
+	clear_instruction(num);
+	CmtReleaseLock(lock_uipc);
 }
 
 void change_number_of_instructions() {
@@ -5209,9 +5314,7 @@ void change_number_of_instructions() {
 			HidePanel(pc.inst[i]);
 			HidePanel(pc.cinst[i]);
 		}
-		CmtGetLock(lock_uipc);
 		uipc.ni = num;
-		CmtReleaseLock(lock_uipc);
 		return;
 	}
 	
@@ -5256,7 +5359,6 @@ void change_number_of_instructions() {
 			set_ttl_trigger(pc.inst[i], -1, 1);
 		}
 
-		CmtGetLock(lock_uipc);
 		if(uipc.c_instrs != NULL) {
 			uipc.c_instrs = realloc(uipc.c_instrs, sizeof(PINSTR**)*num);
 			uipc.max_cinstrs = realloc(uipc.max_cinstrs, sizeof(int)*num);
@@ -5267,7 +5369,6 @@ void change_number_of_instructions() {
 		}
 
 		uipc.max_ni = num;		// We've increased the max number of instructions, so increment it.
-		CmtReleaseLock(lock_uipc);
 		setup_broken_ttls();
 	}
 	
@@ -5280,8 +5381,12 @@ void change_number_of_instructions() {
 		SetPanelAttribute(pc.cinst[i], ATTR_DIMMED, !ndon);
 	}
 	
-	CmtGetLock(lock_uipc);
 	uipc.ni = num;	// And update the uipc value.
+}
+
+void change_number_of_instructions_safe() {
+	CmtGetLock(lock_uipc);
+	change_number_of_instructions();
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -5299,6 +5404,12 @@ void delete_instruction(int num) {
 	change_number_of_instructions();
 }
 
+void delete_instruction_safe(int num) {
+	CmtGetLock(lock_uipc);
+	delete_instruction(num);
+	CmtReleaseLock(lock_uipc);
+}
+
 /****************** Analog Output Manipulation *******************/ 
 void change_ao_device(int num) {
 	// Change which device a given instruction uses.
@@ -5314,6 +5425,12 @@ void change_ao_device(int num) {
 	populate_ao_chan(num);
 }
 
+void change_ao_device_safe(int num) {
+	CmtGetLock(lock_uipc);
+	change_ao_device(num);
+	CmtReleaseLock(lock_uipc);
+}
+
 void change_ao_chan(int num) { 
 	// Change the channel a given instruction uses.
 	int pan = pc.ainst[num], ctrl = pc.aochan, dev = uipc.ao_devs[num];
@@ -5326,7 +5443,6 @@ void change_ao_chan(int num) {
 	GetNumListItems(pan, ctrl, &nl);
 	if(nl >= 2) {
 		GetCtrlVal(pan, ctrl, &ind);
-		CmtGetLock(lock_uipc);
 		if(ind == uipc.ao_chans[num])
 			return; 	// No change.
 		
@@ -5340,23 +5456,26 @@ void change_ao_chan(int num) {
 			remove_array_item(uipc.ao_avail_chans[dev], spot, uipc.anum_avail_chans[dev]--);
 			uipc.ao_avail_chans[dev] = realloc(uipc.ao_avail_chans[dev], sizeof(int)*uipc.anum_avail_chans[dev]);
 		}
-		CmtReleaseLock(lock_uipc); 
 	}
 	
 	// If it was unavailable before, we need to add it back in.
-	CmtGetLock(lock_uipc);
 	if(uipc.ao_chans[num] >= 0) {
 		uipc.ao_avail_chans[dev] = add_item_to_sorted_array(uipc.ao_avail_chans[dev], uipc.ao_chans[num], uipc.anum_avail_chans[dev]++);
 	}
 	
 	uipc.ao_chans[num] = ind;
 	int max_anum = uipc.max_anum;
-	CmtReleaseLock(lock_uipc);
 	
 	//  Go through and re-populate the controls 
 	for(int i = 0; i < max_anum; i++) {
 		populate_ao_chan(i);
 	}
+}
+
+void change_ao_chan_safe(int num) {
+	CmtGetLock(lock_uipc);
+	change_ao_chan(num);
+	CmtReleaseLock(lock_uipc);
 }
 
 void populate_ao_dev(int num) {
@@ -5367,7 +5486,6 @@ void populate_ao_dev(int num) {
 	
 	InsertListItem(pan, ctrl, -1, "None", -1);
 	
-	CmtGetLock(lock_uipc);
 	for(int i = 0; i < uipc.anum_devs; i++) {
 		InsertListItem(pan, ctrl, -1, uipc.adev_display[i], i);	
 	}
@@ -5376,6 +5494,11 @@ void populate_ao_dev(int num) {
 	
 	SetCtrlVal(pan, ctrl, dev);
 	SetCtrlAttribute(pan, ctrl, ATTR_DFLT_VALUE, uipc.default_adev);
+}
+
+void populate_ao_dev_safe(int num) {
+	CmtGetLock(lock_uipc);
+	populate_ao_dev(num);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -5383,10 +5506,8 @@ void populate_ao_chan(int num) {
 	// Populate the selected channel ring control as appropriate.
 	int dev, ind, pan = pc.ainst[num], ctrl = pc.aochan, cind, nl, i;
 	
-	CmtGetLock(lock_uipc);
 	dev = uipc.ao_devs[num];
 	ind = uipc.ao_chans[num];
-	CmtReleaseLock(lock_uipc);
 	
 	// Clear the old list
 	GetNumListItems(pan, ctrl, &nl);
@@ -5397,7 +5518,6 @@ void populate_ao_chan(int num) {
 	if(dev < 0)
 		return;
 	
-	CmtGetLock(lock_uipc);
 	if(uipc.anum_avail_chans[dev] > 0) {
 		for(i = 0; i < uipc.anum_avail_chans[dev]; i++) {
 			cind = uipc.ao_avail_chans[dev][i];
@@ -5417,9 +5537,13 @@ void populate_ao_chan(int num) {
 		InsertListItem(pan, ctrl, -1, uipc.ao_all_chans[dev][ind], ind); 		
 	}
 	
-	CmtReleaseLock(lock_uipc);
-	
 	SetCtrlVal(pan, ctrl, ind);
+}
+
+void populate_ao_chan_safe(int num) {
+	CmtGetLock(lock_uipc);
+	populate_ao_chan(num);
+	CmtReleaseLock(lock_uipc);
 }
 
 void change_num_aouts() {
@@ -5431,7 +5555,6 @@ void change_num_aouts() {
 	if(num == uipc.anum)
 		return;		// We're done.
 	
-	
 	int ndon;
 	GetCtrlVal(pc.ndon[1], pc.ndon[0], &ndon);
 												
@@ -5441,7 +5564,6 @@ void change_num_aouts() {
 		int dev, ind, s;
 		
 		//Hide the panels.
-		CmtGetLock(lock_uipc);
 		for(i = num+((num==0)?1:0); i<uipc.max_anum; i++) {
 			HidePanel(pc.ainst[i]);
 			
@@ -5455,16 +5577,13 @@ void change_num_aouts() {
 				uipc.ao_avail_chans[dev][s] = ind;
 			}
 		}
-		CmtReleaseLock(lock_uipc);  
 		
 		// Refresh the views.
 		for(i = 0; i < uipc.max_anum; i++) {
 			populate_ao_chan(i);	
 		}
 		
-		CmtGetLock(lock_uipc);
 		uipc.anum = num;
-		CmtReleaseLock(lock_uipc);
 		return;
 	}
 
@@ -5478,9 +5597,8 @@ void change_num_aouts() {
 		pc.ainst = realloc(pc.ainst, sizeof(int)*num);
 	
 		// Make some entries in the uipc var for the new instructions.
-		CmtGetLock(lock_uipc);
-		
 		uipc.ac_varied = malloc_or_realloc(uipc.ac_varied, sizeof(int)*num);
+		uipc.ac_dim = malloc_or_realloc(uipc.ac_dim, sizeof(int)*num);
 		uipc.ao_devs = malloc_or_realloc(uipc.ao_devs, sizeof(int)*num);
 		uipc.ao_chans = malloc_or_realloc(uipc.ao_chans, sizeof(int)*num);
 		uipc.ao_vals = malloc_or_realloc(uipc.ao_vals, sizeof(double*)*num);
@@ -5494,6 +5612,7 @@ void change_num_aouts() {
 		// isn't constrained.
 		int diff = num-uipc.max_anum;
 		memset(uipc.ac_varied+uipc.max_anum, 0, sizeof(int)*diff);
+		memset(uipc.ac_dim+uipc.max_anum, -1, sizeof(int)*diff);
 		memset(uipc.ao_chans+uipc.max_anum, -1, sizeof(int)*diff);
 		memset(uipc.ao_exprs+uipc.max_anum, 0, sizeof(char*)*diff);
 		
@@ -5525,26 +5644,32 @@ void change_num_aouts() {
 
 		
 		uipc.max_anum = num;
-		CmtReleaseLock(lock_uipc);
 	}
-	
-	CmtGetLock(lock_uipc);
 	for(i = uipc.anum; i<num; i++) {
 		DisplayPanel(pc.ainst[i]);
 		
 		set_aout_nd_dimmed(i, !ndon);
 	}
-	CmtReleaseLock(lock_uipc);
-
-	// Finally update uipc for later.
-	CmtGetLock(lock_uipc);
-	uipc.anum = num;
-	CmtReleaseLock(lock_uipc);
 	
+	// Finally update uipc for later.
+	uipc.anum = num;
+}
+
+void change_num_aouts_safe() { 
+	CmtGetLock(lock_uipc);
+	change_num_aouts();
+	CmtReleaseLock(lock_uipc);
 }
 
 void delete_aout(int num) {
 	clear_aout(num);		// Clear the values.
+	
+	SetCtrlVal(pc.anum[1], pc.anum[0], uipc.anum-1);
+	
+	if(uipc.anum == 1) {
+		change_num_aouts();
+		return;
+	}
 	
 	// Move it to the end.
 	int instr = pc.ainst[num];
@@ -5560,9 +5685,14 @@ void delete_aout(int num) {
 	
 	SetPanelAttribute(instr, ATTR_TOP, top);
 	pc.ainst[uipc.max_anum-1]= instr;
-	
-	SetCtrlVal(pc.anum[1], pc.anum[0], uipc.anum-1);
+
 	change_num_aouts();
+}
+
+void delete_aout_safe(int num) {
+	CmtGetLock(lock_uipc);
+	delete_aout(num);
+	CmtReleaseLock(lock_uipc);
 }
 
 void clear_aout(int num) {
@@ -5589,8 +5719,7 @@ void clear_aout(int num) {
 	
 	GetNumListItems(pc.ainst[num], pc.aochan, &nchans);
 	if(nchans) {
-		GetCtrlAttribute(pc.ainst[num], pc.aochan, ATTR_DFLT_VALUE, &val);  
-		SetCtrlVal(pc.ainst[num], pc.aochan, val);
+		SetCtrlIndex(pc.ainst[num], pc.aochan, 0);
 	}
 }
 
@@ -5599,12 +5728,18 @@ void set_aout_dimmed(int num, int dimmed, int nd) {
 	// nd tells you whether or not to undim the multidimensional bit.
 	int pan = pc.ainst[num];
 	
-	set_aout_nd_dimmed_safe(num, dimmed || !nd);
+	set_aout_nd_dimmed(num, dimmed || !nd);
 	
 	SetCtrlAttribute(pan, pc.ainitval, ATTR_DIMMED, dimmed);
 	SetCtrlAttribute(pan, pc.aodev, ATTR_DIMMED, dimmed);
 	SetCtrlAttribute(pan, pc.aochan, ATTR_DIMMED, dimmed);
 	SetCtrlAttribute(pan, pc.axbutton, ATTR_DIMMED, dimmed);
+}
+
+void set_aout_dimmed_safe(int num, int dimmed, int nd) {
+	CmtGetLock(lock_uipc);
+	set_aout_dimmed(num, dimmed, nd);
+	CmtReleaseLock(lock_uipc);
 }
 
 void set_aout_nd_dimmed(int num, int dimmed) {
@@ -5623,7 +5758,7 @@ void set_aout_nd_dimmed(int num, int dimmed) {
 	}
 	
 	if(uipc.ac_varied != NULL) {
-		uipc.ac_varied[num] = state;
+		uipc.ac_varied[num] = (state && !dimmed); // Is this actually necessary?
 	}
 }
 
@@ -5636,11 +5771,18 @@ void set_aout_nd_dimmed_safe(int num, int dimmed) {
 void change_ao_val(int num) {
 	// Function called to change the analog output value on channel "num"
 	// Only call this for non-varying channels.
-	int val, pan = pc.ainst[num];
+	int pan = pc.ainst[num];
+	double val;
 	
 	GetCtrlVal(pan, pc.ainitval, &val);
 	
 	uipc.ao_vals[num][0] = val;		
+}
+
+void change_ao_val_safe(int num) {
+	CmtGetLock(lock_uipc);
+	change_ao_val(num);
+	CmtReleaseLock(lock_uipc);
 }
 
 void set_ao_nd_state(int num, int state) {
@@ -5658,11 +5800,10 @@ void set_ao_nd_state(int num, int state) {
 	}
 	
 	// Update the controls if appropriate
-	int nl, dim, dims, steps;
+	int nl, dim = -1, dims, steps;
 	if(state) {
 		GetNumListItems(pan, pc.adim, &nl);
-		CmtGetLock(lock_uipc);
-		
+
 		if(nl < uipc.nd) {
 			for(int i = nl; i < uipc.nd; i++) {
 				int elements;
@@ -5685,8 +5826,6 @@ void set_ao_nd_state(int num, int state) {
 		
 		dimmed = 0;
 		
-		CmtReleaseLock(lock_uipc);
-		
 		if(state == 2) {
 			expr_visible = 1;
 		} else {
@@ -5695,8 +5834,12 @@ void set_ao_nd_state(int num, int state) {
 		}
 	}
 	
-	CmtGetLock(lock_uipc);
-	if(uipc.ac_varied != NULL) { uipc.ac_varied[num] = state; } 
+	if(uipc.ac_varied != NULL) { 
+		uipc.ac_varied[num] = state;
+		if(uipc.ac_dim != NULL) {
+			uipc.ac_dim[num] = dim;
+		}
+	}
 	
 	SetCtrlAttribute(pan, pc.asteps, ATTR_DIMMED, dimmed);
 	SetCtrlAttribute(pan, pc.aincexpr, ATTR_DIMMED, dimmed);
@@ -5707,6 +5850,11 @@ void set_ao_nd_state(int num, int state) {
 	SetCtrlAttribute(pan, pc.aincexpr, ATTR_VISIBLE, expr_visible);
 	SetCtrlAttribute(pan, pc.aincval, ATTR_VISIBLE, !expr_visible);
 
+}
+
+void set_ao_nd_state_safe(int num, int state) {
+	CmtGetLock(lock_uipc);
+	set_ao_nd_state(num, state);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -5788,15 +5936,45 @@ void update_ao_increment(int num, int mode) {
 	inc = (fin-init)/steps;	// This must always be true anyway.
 	
 	// Update the uipc variable
-	CmtGetLock(lock_uipc);
 	for(int i = 0; i < steps; i++) {
 		uipc.ao_vals[num][i] = init + inc*i;
 	}
-	CmtReleaseLock(lock_uipc);
 	
 	SetCtrlVal(panel, pc.ainitval, init);
 	SetCtrlVal(panel, pc.aincval, inc);
 	SetCtrlVal(panel, pc.afinval, fin);
+}
+
+void update_ao_increment_safe(int num, int mode) {
+	CmtGetLock(lock_uipc);
+	update_ao_increment(num, mode);
+	CmtReleaseLock(lock_uipc);
+}
+	
+
+void change_ao_dim(int num) {
+	int dim, pan = pc.ainst[num];
+	
+	GetCtrlVal(pan, pc.adim, &dim);
+	
+	// Hopefully dim isn't malformed!
+	SetCtrlVal(pan, pc.asteps, uipc.dim_steps[dim]);
+	
+	uipc.ac_dim[num] = dim;
+	
+	int state = uipc.ac_varied[num];
+	
+	if(state == 2) {
+		update_ao_increment(num, MC_INC);
+	} else {
+		//update_ao_increment_from_exprs(num);	
+	}
+}
+
+void change_ao_dim_safe(int num) {
+	CmtGetLock(lock_uipc);
+	change_ao_dim(num);
+	CmtReleaseLock(lock_uipc);
 }
 
 

@@ -59,6 +59,7 @@
 // UI Manipulation
 extern int load_ui(char *uifname);
 extern void setup_broken_ttls(void);
+extern void setup_broken_ttls_safe(void);
 
 extern void ppconfig_popout(void);
 extern int CVICALLBACK ppconfig_popin(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);

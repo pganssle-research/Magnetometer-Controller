@@ -327,7 +327,8 @@ struct {
 	int**ao_avail_chans;		// Unused output chans.			Size = [anum_devs][anum_avail_chans[i]]
 	char ***ao_all_chans;		// List of all channels.		Size = [anum_devs][anum_all_chans[i]]
 	
-	int *ac_varied;				// Is the channel varied		Suze = [max_anum]
+	int *ac_varied;				// Is the channel varied		Size = [max_anum]
+	int *ac_dim;				// Dimension of variation		Size = [max_anum]
 	int *ao_devs;				// The device for each chan.	Size = [max_anum]
 	int *ao_chans;				// Physical channel on dev.		Size = [max_anum]
 	double **ao_vals;			// Array of vals per channel	Size = [max_anum][nsteps[dim]:1]

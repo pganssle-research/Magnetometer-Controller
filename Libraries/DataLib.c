@@ -48,7 +48,7 @@ int CVICALLBACK IdleAndGetData (void *functionData) {
 	// Main function running in an asynchronous thread for data acquisition, etc.
 	
 	// Start by getting the current program.
-	PPROGRAM *p = get_current_program();
+	PPROGRAM *p = get_current_program_safe();
 	
 	// Run the experiment
 	int rv = run_experiment(p);
@@ -101,7 +101,7 @@ int CVICALLBACK UpdateStatus (void *functiondata)
 	int rv;
 	while(!GetQuitUpdateStatus())
 	{
-		rv = update_status(1);
+		rv = update_status_safe(1);
 		if(rv < 0 || rv > 32 || rv & PB_STOPPED) 
 			break;
 
@@ -217,11 +217,11 @@ int run_experiment(PPROGRAM *p) {
 			}
 
 			//  Program and start the pulseblaster.
-			if(program_pulses(ce.ilist, ce.ninst, 1) < 0) { goto error; }
+			if(program_pulses_safe(ce.ilist, ce.ninst, 1) < 0) { goto error; }
 			if(pb_start_safe(1) < 0) { goto error; }
 			
 			// Check the status once now.
-			update_status(0);
+			update_status_safe(0);
 			
 			// Start checking for updates in another thread.
 			CmtGetLock(lock_ce);
@@ -2393,9 +2393,7 @@ int get_devices () {
 	int rv = 0;
 	char *devices = NULL, *device_name = NULL, *old_dev = NULL, **old_aodevs = NULL;
 	
-	CmtGetLock(lock_DAQ);	// For multithreading reasons, we need to lock all DAQ functions
 	bs = DAQmxGetSystemInfoAttribute(DAQmx_Sys_DevNames, "", NULL); // Returns max char size.
-	CmtReleaseLock(lock_DAQ);
 	
 	// Store the old device name and index
 	// First do the input devices
@@ -2406,14 +2404,11 @@ int get_devices () {
 		old_dev = malloc(len+1);
 		GetCtrlVal(pc.dev[1], pc.dev[0], old_dev);
 		
-		CmtGetLock(lock_uidc);
 		GetCtrlIndex(pc.dev[1], pc.dev[0], &uidc.devindex);
-		CmtReleaseLock(lock_uidc);
 	}
 	
 	DeleteListItem(pc.dev[1], pc.dev[0], 0, -1);	// Delete devices if they exist.
-	
-	
+
 	// Now the output devices.
 	if(anc && uipc.ao_devs != NULL && uipc.adev_true != NULL) {
 		int ind;
@@ -2444,15 +2439,12 @@ int get_devices () {
 	devices = malloc(bs);
 	int *output = calloc(3, sizeof(int)), aoind;
 	
-
-	CmtGetLock(lock_DAQ);
 	DAQmxGetSystemInfoAttribute(DAQmx_Sys_DevNames, devices, bs);
 
 	// Figure out how many devices are available while populating the ring
 	char *p = devices, *p2 = p;	// Pointer for searching.
 	device_name = malloc(bs);
 	
-	CmtGetLock(lock_uipc);
 	while(p != NULL) { 
 		nd++;			// There's 1 more than there are commas.
 		p2 = strchr(p, ',');
@@ -2488,16 +2480,12 @@ int get_devices () {
 		p = (p2 == NULL)?NULL:p2+2; // Increment, making sure we don't go past the end.
 	}
 	
-	CmtReleaseLock(lock_uipc);  	
-	CmtReleaseLock(lock_DAQ);
-	
 	free(device_name);
 	
 	// Get the index as close to what it used to be as we can.
 	int default_adev = (uipc.anum_devs >0)?0:-1;
 	
 	if(nd >= 1) {
-		CmtGetLock(lock_uidc);
 		if(old_dev != NULL) {
 			int ind;
 			GetIndexFromValue(pc.dev[1], pc.dev[0], &ind, old_dev);
@@ -2519,15 +2507,12 @@ int get_devices () {
 			int ind = string_in_array(uipc.adev_true, cdev, uipc.anum_devs);
 			if(ind >= 0) { default_adev = ind; }
 		}
-		
-		CmtReleaseLock(lock_uidc);    
 	} else {
 		MessagePopup("Error", "No devices available!\n");
 		rv = -1;
 	}
 	
 	// At the moment, true and display are the same, so we'll just copy it over.
-	CmtGetLock(lock_uipc);
 	if(uipc.anum_devs > 0) {
 		uipc.adev_display = malloc(sizeof(char*)*uipc.anum_devs);
 		for(i = 0; i < uipc.anum_devs; i++) {
@@ -2579,15 +2564,10 @@ int get_devices () {
 	}
 	
 	if(old_aoinds != NULL) { free(old_aoinds); }
-	
-	CmtReleaseLock(lock_uipc);
-	
-	error:
-	if(devices != NULL)
-		free(devices);
 
-	if(old_dev != NULL)
-		free(old_dev);
+	error:
+	if(devices != NULL) { free(devices); }
+	if(old_dev != NULL) { free(old_dev); }
 	
 	if(old_aodevs != NULL) { free_string_array(old_aodevs, anc); }
 	
@@ -2595,6 +2575,20 @@ int get_devices () {
 	
 	return rv;
 }
+
+int get_devices_safe() {
+	CmtGetLock(lock_uidc);
+	CmtGetLock(lock_uipc);
+	CmtGetLock(lock_DAQ);
+	int rv = get_devices();
+	CmtReleaseLock(lock_DAQ);
+	CmtReleaseLock(lock_uipc);
+	CmtReleaseLock(lock_uidc);
+	
+	return rv;
+}
+
+
 
 int load_AO_info() {
 	// Populates the uipc with information from the DAQs and such.
@@ -2625,8 +2619,6 @@ int load_AO_info() {
 	}
 	
 	// Clear old values (will refresh later)
-	CmtGetLock(lock_uipc);
-	
 	uipc.ao_avail_chans = free_ints_array(uipc.ao_avail_chans, uipc.anum_devs);
 	
 	if(uipc.ao_all_chans != NULL) {
@@ -2647,17 +2639,11 @@ int load_AO_info() {
 		free(uipc.anum_avail_chans);
 		uipc.anum_avail_chans = NULL;
 	}
-	CmtReleaseLock(lock_uipc);
-	
+
 	if(uipc.anum_devs < 1)
 		goto error;
 	
-
-	
 	// Build the arrays uipc.ao_all_chans and uipc.ao_avail_chans. 
-	CmtGetLock(lock_DAQ);
-	CmtGetLock(lock_uipc);
-
 	// Null initialize some new arrays.
 	uipc.ao_all_chans = calloc(uipc.anum_devs, sizeof(char*));
 	uipc.ao_avail_chans = calloc(uipc.anum_devs, sizeof(int*));
@@ -2711,8 +2697,6 @@ int load_AO_info() {
 		
 		uipc.anum_all_chans[i] = nc;
 	}
-	
-	CmtReleaseLock(lock_DAQ);
 	
 	// Now we want to start allocating channels to the existing channels.
 	uipc.anum_avail_chans = memcpy(uipc.anum_avail_chans, uipc.anum_all_chans, sizeof(int)*uipc.anum_devs);
@@ -2776,8 +2760,6 @@ int load_AO_info() {
 		}
 	}
 	
-	CmtReleaseLock(lock_uipc);
-	
 	// Finally, let's refresh the analog outputs.
 	int ind, dev, cind;
 	for(i = 0; i < anc; i++) {
@@ -2791,6 +2773,16 @@ int load_AO_info() {
 	
 	return rv;
 }
+
+int load_AO_info_safe(void) {
+	CmtGetLock(lock_DAQ);
+	CmtGetLock(lock_uipc);
+	int rv = load_AO_info();
+	CmtReleaseLock(lock_uipc);
+	CmtReleaseLock(lock_DAQ);
+
+	return rv;
+ }
 
 int load_DAQ_info() {
 	// Loads information about the DAQ to the UI controls.
@@ -2829,7 +2821,7 @@ int load_DAQ_info() {
 
 	
 	// Load devices.
-	if(get_devices() < 0) {
+	if(get_devices_safe() < 0) {
 		rv = -1;
 		goto err1;
 	}

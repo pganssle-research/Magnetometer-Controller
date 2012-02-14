@@ -28,11 +28,13 @@ extern int **free_ints_array(int **array, int size);
 extern void *malloc_or_realloc(void *pointer, size_t size);
 
 /************** Safe Pulseblaster Functions *************/
+extern int pb_initialize(int verbose);
 extern int pb_init_safe(int verbose);
 extern int pb_start_programming_safe(int verbose, int device);
 extern int pb_stop_programming_safe(int verbose);
 extern int pb_inst_pbonly_safe(int verbose, unsigned int flags, int inst, int inst_data, double length);
 extern int pb_close_safe(int verbose);
+extern int pb_read_status_or_error(int verbose);
 extern int pb_read_status_safe(int verbose);
 extern int pb_start_safe(int verbose);
 extern int pb_stop_safe(int verbose);
