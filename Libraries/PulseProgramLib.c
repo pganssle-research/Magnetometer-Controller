@@ -1736,10 +1736,16 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 			}
 			
 			SetCtrlVal(pc.ainst[i], pc.aochan, chan);
+			change_ao_chan_uipc(i);
 		}
 		
 		free(ac_varied);
+		
+		for(i = 0; i < uipc.anum; i++) {
+			populate_ao_chan(i);	
+		}
 	}
+
 
 	if(cstep != NULL)
 		free(cstep);
@@ -1917,15 +1923,23 @@ int ui_cleanup(int verbose) {
 	
 	int change = 0;		// Flag if there's a change
 	int i, j, state, steps, dim, cyc, ind, step;
-	int data_on, delay_on, ao_on = 0;
+	int data_on, delay_on, ao_on, ao_on_disabled = 0;
 	double time;
 	
 	// First go through and find any problems within the multidimensional acquisition, if applicable.
 	if(uipc.nd) {
 		if(uipc.ac_varied != NULL) {
 			for(i = 0; i < uipc.anum; i++) {
-				if(uipc.ao_devs[i] >= 0 && uipc.ao_chans[i] >= 0 && uipc.ac_varied[i]) {
-					ao_on = 1;	
+				if(uipc.ac_varied[i]) {
+					ao_on = 1;
+					
+					// We may want to notify if it's only in a disabled channel.
+					if(uipc.ao_devs[i] < 0 || uipc.ao_chans[i] < 0) {
+						ao_on_disabled = 2;		// Always 2, for bit encoding reasons.
+					} else {
+						ao_on_disabled = 0;
+						break;
+					}
 				}
 			}
 		}
@@ -1973,8 +1987,7 @@ int ui_cleanup(int verbose) {
 		
 		// Iterate through the analog outputs now and turn them off if they don't really.
 		for(i = 0; i < uipc.anum; i++) {
-			// Skip any non-varying or disabled ones
-			if(!uipc.ac_varied[i] || uipc.ao_devs[i] < 0 || uipc.ao_chans[i] < 0) { continue; }
+			if(!uipc.ac_varied[i]) { continue; }
 			
 			if(uipc.ac_dim[i] < 0 || constant_array_double(uipc.ao_vals[i], uipc.dim_steps[uipc.ac_dim[i]])) {
 				set_ao_nd_state(i, 0);
@@ -1993,8 +2006,8 @@ int ui_cleanup(int verbose) {
 			
 			// Now check analog outputs
 			for(j = 0; j < uipc.anum; j++) {
-				// Skip anything disabled or not varying
-				if(!uipc.ac_varied[j] || uipc.ao_devs[j] < 0 || uipc.ao_chans[j] < 0) {
+				// Skip anything not varying
+				if(!uipc.ac_varied[j]) {
 					continue;
 				}
 				
@@ -2107,17 +2120,16 @@ int ui_cleanup(int verbose) {
 		}
 	}
 
-	// Finally, if we're in verbose mode, give us a popup.
-	if(verbose && change) {
-		return change;
+	// Finally, if we're in verbose mode, give us a popup. - Not implemented
+	if(verbose) {
+		return change|ao_on_disabled;
 	}
 	
 	// Return this anyway. This allows for two different non-verbose modes, based on what you
 	// do with the return value. You can either ignore it or cancel the operation even without
 	// the user's input. We can implement a user-defined preference to decide on a case-by-case
 	// basis what to do in the various situations that ui_cleanup() is called.
-	
-	return change;
+	return change|ao_on_disabled;
 } 
 
 int ui_cleanup_safe(int verbose) {
@@ -5769,7 +5781,7 @@ void update_ao_increment(int num, int mode) {
 	inc = (fin-init)/steps;	// This must always be true anyway.
 	
 	// Update the uipc variable
-	for(int i = 0; i < steps; i++) {
+	for(int i = 0; i <= steps; i++) {
 		uipc.ao_vals[num][i] = init + inc*i;
 	}
 	
