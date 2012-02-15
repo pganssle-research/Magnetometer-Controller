@@ -98,18 +98,21 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 			rv = -247;
 			goto error;
 		}
-	} else
+	} else {
 		p = ip;
+	}
 								
 	// Make sure that it has a .tdm ending.
 	int i;
 		
 	if(strcmp(".tdm", &filename[strlen(filename)-4]) != 0) { 
-				fnbuff = malloc(strlen(filename)+strlen(".tdm")+1);
+		// Add the TDM if it's not there.
+		fnbuff = malloc(strlen(filename)+strlen(".tdm")+1);
 		sprintf(fnbuff, "%s%s", filename, ".tdm");
 		fname = fnbuff;
-	} else
+	} else {
 		fname = filename;
+	}
 	
 	int type = MCTD_TDM;
 	
@@ -117,8 +120,9 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 	title = malloc(MAX_FILENAME_LEN);
 	get_name(filename, title, ".tdm");
 	
-	if(FileExists(filename, 0)) 	  // Create seems to freak out if the file already exists.
-		DeleteFile(filename);
+	CmtGetLock(lock_tdm);    
+	// Create seems to freak out if the file already exists. 
+	if(FileExists(filename, 0))   { DeleteFile(filename); }
 	
 	char *index = malloc(strlen(filename)+7);
 	if(type == MCTD_TDMS) {
@@ -128,24 +132,21 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 	} else if (type == MCTD_TDM) {
 		strcpy(index, filename);
 		index[strlen(index)-1] = 'x';
-		if(FileExists(index, NULL))
-			DeleteFile(index);
+		if(FileExists(index, NULL)) { DeleteFile(index); }
 	}
 	
 	free(index);
 
 	DDCFileHandle p_file;
 	DDCChannelGroupHandle pcg;
-	CmtGetLock(lock_tdm);
-	if(rv = DDC_CreateFile(fname, NULL, title, "", title, "Magnetometer Controller v1.0", &p_file))
-		return rv;
+	
+	if(rv = DDC_CreateFile(fname, NULL, title, "", title, MC_VERSION_STRING, &p_file)) { goto error; }
 	
 	if(rv = DDC_AddChannelGroup(p_file, MCTD_PGNAME, "The group containing the program", &pcg))
 		goto error;
 	
 	CmtGetLock(lock_pb);
-	if(rv = save_program(pcg, p))
-		goto error;
+	if(rv = save_program(pcg, p)) { goto error; }
 	CmtReleaseLock(lock_pb);
 	
 	 if(rv = DDC_SaveFile(p_file))
@@ -153,7 +154,6 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 	
 	error:
 	DDC_CloseFile(p_file);
-	CmtReleaseLock(lock_tdm);
 	
 	if(ip == NULL && p != NULL) { free_pprog(p); }
 	if(title != NULL) { free(title); }
@@ -172,7 +172,8 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 		free(buff);
 	}
 	
-	
+	CmtReleaseLock(lock_tdm);  
+
 	return rv;
 }
 
@@ -388,132 +389,6 @@ int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p) {
 				
 				DDC_AppendDataValues(skip_locs_c, skip_locs, p->max_n_steps);
 				free(skip_locs);
-			} else 
-				p->skip -= p->skip & 1;
-		}
-	
-
-	}
-	
-	return 0;	
-}
-
-int tdms_save_program(TDMSChannelGroupHandle pcg, PPROGRAM *p) {
-	// Writes the values of the PPPROGRAM to the specified channel group.
-	// There will be a few channels within this.
-	int i;
-	int *idata = NULL;
-	double *ddata = NULL;
-	char *data_exprs = NULL, *delay_exprs = NULL;
-	
-	// We're going to start out with a bunch of properties										
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PNP, TDMS_Int32, p->np);							// Number of points
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PSR, TDMS_Double, p->sr);						// Sampling Rate
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PNT, TDMS_Int32, p->nt);							// Number of transients
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PTMODE, TDMS_Int32, (p->tmode>=0)?p->tmode:-1);	// Transient acquisition mode.
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PSCAN, TDMS_Int32, p->scan);						// Whether or not there's a scan
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PTRIGTTL, TDMS_Int32, p->trigger_ttl);    		// Trigger TTL
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PTOTTIME, TDMS_Double, p->total_time);			// Total time
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PNINSTRS, TDMS_Int32, p->n_inst);    			// Base number of instructions
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PNUINSTRS, TDMS_Int32, p->nUniqueInstrs);  		// Total number of unique instructions
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PVAR, TDMS_Int32, p->varied);					// Whether or not it's varied
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PNVAR, TDMS_Int32, p->nVaried);					// Number of varied instructions
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PNDIMS, TDMS_Int32, p->nDims);					// Number of dimensions
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PNCYCS, TDMS_Int32, p->nCycles);					// Number of phase cycles
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PSKIP, TDMS_Int32, p->skip);						// Whether or not there are skips
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PMAX_N_STEPS, TDMS_Int32, p->max_n_steps);		// Total number of steps in the experiment
-	TDMS_SetChannelGroupProperty(pcg, MCTD_PREAL_N_STEPS, TDMS_Int32, p->real_n_steps);		// Total number of steps - those skipped
-	TDMS_SetChannelGroupProperty(pcg, MCTD_NFUNCS, TDMS_Int32, p->nFuncs);					// Number of functions actually used
-	TDMS_SetChannelGroupProperty(pcg, MCTD_TFUNCS, TDMS_Int32, p->tFuncs);					// Total number of functions available
-	
-	// Now we'll save the main instructions
-	TDMSChannelHandle flags_c, time_c, ins_c, insd_c, us_c ; // Instruction channels.
-
-	// Now create and populate the channels for the instructions.
-	int nui = p->nUniqueInstrs;
-	idata = malloc(sizeof(int)*nui);
-	ddata = malloc(sizeof(double)*nui);
-	
-	// Flags
-	TDMS_AddChannel(pcg, TDMS_Int32, MCTD_PROGFLAG, "Binary flags for each unique instruction", "", &flags_c);
-	for(i = 0 ; i < nui; i++)
-		idata[i] = p->instrs[i]->flags;	// Get the flags as an array of ints.
-	TDMS_AppendDataValues(flags_c, idata, nui, 0); // Save the flags
-	
-	// Instruction delay
-	TDMS_AddChannel(pcg, TDMS_Double, MCTD_PROGTIME, "Instruction delay times for each instruction", "ns", &time_c);
-	for(i = 0 ; i < nui; i++)
-		ddata[i] = p->instrs[i]->instr_time;	
-	TDMS_AppendDataValues(time_c, ddata, nui, 0);
-	
-	// Instruction
-	TDMS_AddChannel(pcg, TDMS_Int32, MCTD_PROGINSTR, "The instruction value for each unique instruction", "", &ins_c);
-	for(i = 0; i < nui; i++)
-		idata[i] = p->instrs[i]->instr;
-	TDMS_AppendDataValues(ins_c, idata, nui, 0);
-	
-	// Instruction Data
-	TDMS_AddChannel(pcg, TDMS_Int32, MCTD_PROGID, "Instruction data for each unique instruction", "", &insd_c);
-	for(i = 0; i < nui; i++)
-		idata[i] = p->instrs[i]->instr_data;
-	TDMS_AppendDataValues(insd_c, idata, nui, 0);
-	
-	// Units and scan
-	TDMS_AddChannel(pcg, TDMS_Int32, MCTD_PROGUS, "Bit 0 is whether or not to scan, the remaining bits are units for each instr", "", &us_c);
-	for(i = 0; i < nui; i++)
-		idata[i] = p->instrs[i]->trigger_scan + 2*(p->instrs[i]->time_units);
-	TDMS_AppendDataValues(us_c, idata, nui, 0);
-	
-	free(idata);
-	free(ddata);
-	
-	// The next bit only has to happen if this is a varied experiment
-	if(p->nVaried) {
-		// All the channel handles
-		TDMSChannelHandle msteps_c, v_ins_c, v_ins_dims_c, v_ins_mode_c; 
-		TDMSChannelHandle v_ins_locs_c = NULL, delay_exprs_c, data_exprs_c;
-		
-		// Again, we create a bunch of channels here and populate them as necessary
-		// Maxsteps
-		TDMS_AddChannel(pcg, TDMS_Int32, MCTD_PMAXSTEPS, "Size of the acquisition space", "", &msteps_c);
-		TDMS_AppendDataValues(msteps_c, p->maxsteps, (p->nDims+p->nCycles), 0);
-		
-		// Varied instructions, dims and modes
-		TDMS_AddChannel(pcg, TDMS_Int32, MCTD_PVINS, "List of the varied instructions", "", &v_ins_c);
-		TDMS_AddChannel(pcg, TDMS_Int32, MCTD_PVINSDIM, "What dimension(s) the instrs vary along", "", &v_ins_dims_c);
-		TDMS_AddChannel(pcg, TDMS_Int32, MCTD_PVINSMODE, "Variation mode", "", &v_ins_mode_c);
-		
-		TDMS_AppendDataValues(v_ins_c, p->v_ins, p->nVaried, 0);
-		TDMS_AppendDataValues(v_ins_dims_c, p->v_ins_dim, p->nVaried, 0);
-		TDMS_AppendDataValues(v_ins_mode_c, p->v_ins_mode, p->nVaried, 0);
-		
-		// Save the delay and data expressions as a single string property on the v_ins channel.
-		delay_exprs = generate_nc_string(p->delay_exprs, p->nVaried, NULL);
-		data_exprs = generate_nc_string(p->data_exprs, p->nVaried, NULL);
-	  
-		TDMS_SetChannelProperty(v_ins_c, MCTD_PDELEXPRS, TDMS_String, delay_exprs);
-		TDMS_SetChannelProperty(v_ins_c, MCTD_PDATEXPRS, TDMS_String, data_exprs);
-		
-		free(delay_exprs);
-		free(data_exprs);
-		
-		// This is a bit trickier - TDMS doesn't seem to support multi-dimensional arrays, so we're going to
-		// do this in a linear-indexed fashion.
-		TDMS_AddChannel(pcg, TDMS_Int32, MCTD_PVINSLOCS, "Instruction indexes, multidimensional linear-indexed array", "", &v_ins_locs_c);
-	
-		for(i = 0; i < p->nVaried; i++) 
-			TDMS_AppendDataValues(v_ins_locs_c, p->v_ins_locs[i], p->max_n_steps, 0); 
-		
-		// Now we can save the skip stuff, if necessary.
-		if(p->skip & 2) {
-			// First we add the property, because at this point we just know that we saved a skip expression
-			TDMS_SetChannelGroupProperty(pcg, MCTD_PSKIPEXPR, TDMS_String, p->skip_expr);
-			
-			// Now generate the skip locs array.
-			if(p->skip & 1 && (p->skip_locs != NULL)) {
-				TDMSChannelHandle skip_locs_c;
-				TDMS_AddChannel(pcg, TDMS_Boolean, MCTD_PSKIPLOCS, "An array of where the skips occur", "", &skip_locs_c);
-				TDMS_AppendDataValues(skip_locs_c, p->skip_locs, p->max_n_steps, 0);
 			} else 
 				p->skip -= p->skip & 1;
 		}

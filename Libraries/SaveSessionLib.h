@@ -1,6 +1,7 @@
  /**************************** Preprocessing *****************************/
 // General info about the program
-#define MC_VERSION 1.0						// The current version
+#define MC_VERSION 1.1						// The current version
+#define MC_VERSION_STRING "Magnetometer Controller v1.1"
 
 //// Root
 // Elements

@@ -54,22 +54,37 @@
 		   by any program. This will be useful for things like defining a 
 		   function such as "90x", which can be calibrated and changed without
 		   fucking up all your saved programs that involve 90s.
+		   
+1.1		From here on out we'll be using git and/or Trello for issue tracking, 
+		so these changelogs can be more accurate.
+		
+		Changes:
+		---------
+		-Thread lock changes:
+		--	In previous versions thread locking was done in-place in functions,
+			leading to some issues. Now each function that actually calls a
+			global variable has a thread-safe and thread-unsafe version, where
+			the thread-safe version simply gets the relevant locks for the entire
+			duration of the function execution. Only top-level calls (essentially
+			calls from UI interaction or other types of always-unlocked functions)
+			will make direct calls to the thread-safe versions.
+			
+			When writing new functions or changing functions, it's important to
+			follow a function tree up and down to make sure that all relevant
+			thread locks are in place at each level above the point where they
+			are introduced.
+		
+		-Analog outputs:
+		--	It is now possible to use analog outputs as part of the pulse programming
+			interface. The DC level can be varied between transients, but currently
+			only DC levels on NI-DAQ boards are supported. Future versions should
+			include support for other devices and function specification.
+			
+	
 		 
 *****************************************************************************/
 		
 /***************************         To Do       ****************************
-Project	: Updated Pulse Programming
-Prior.	: High
-Progress: 60%
-Descrip	: Need to update how pulses are saved and loaded, as well as implement
-		the numerous changes to the user interface, function building, etc.
-		
-		Milestones:
-		
-		Implement new Save/Load Protocol  				Progress: 90%
-		Implement user-defined functions  				Progress: 10%
-		Implement expanded ND programs	  				Progress: 30%
-		Implement phase cycling			  				Progress: 90%
 
 Project	: Implement new user interface controls
 Progress: 20%
@@ -80,42 +95,16 @@ Descrip	: Since changing over to this new system, you've broken all the
 	Milestones:
 	Phase Cycling UI				  				Progress:100%
 	
-	ND UI											Progress: 60%
+	ND UI											Progress: 100%
 		ND On/Off									 Progress:100%
-		Change number of dims						 Progress: 80%
-		Change number of steps						 Progress: 75%
-		update_nd_state()							 Progress: 95%
-		Setup skip condition						 Progress:  0%
+		Change number of dims						 Progress: 100%
+		Change number of steps						 Progress: 100%
+		update_nd_state()							 Progress: 100%
+		Setup skip condition						 Progress:  100%
 		
 	User Defined Functions UI						Progress:  5%
 		Setup main UI								 Progress:  5%
 
-
-Project	: Update new data saving
-Prior.	: High
-Progress: 0%
-Descrip	: Use the netCDF serialization format to read and write data to files.
-		
-		Milestones:
-		Implement save									Progress: 0%
-		Implement load									Progress: 0%
-		
-
-Project	: Update User Preference Files
-Prior.	: Moderate/High
-Progress: 2%
-Descrip	: Use the netCDF serialization format to save user preferences as well
-		as the configuration of the user interface when the program was last
-		closed. I'll also include in this that we should probably add a load
-		screen to the program. Should be easy.
-		
-		Milestones:
-		Implement user-defined preferences				Progress: 0%
-		Implement new save/load of configuration		Progress: 0%
-			Save programs to config file				 Progress: 0%
-			Load programs from config file				 Progress: 0%
-			Save settings to config file				 Progress: 0%
-			Load settings to config file				 Progress: 0%
 
 ***************************************************************************/
 
@@ -633,15 +622,16 @@ int CVICALLBACK MoveInstButton (int panel, int control, int event,
 			GetCtrlVal(panel, pc.ins_num, &num);
 			
 			// How far apart are the instructions - they're evenly spaced, so pick the first two.
+			CmtGetLock(lock_uipc);
 			if (uipc.ni > 1) {
 				int top1, top2;	 // We need to know how much we moved to know how much to move the cursor
 				GetCtrlAttribute(panel, control, ATTR_TOP, &top1);
 				
 				// Now we just decide if it was called by the up button or the down button and move the instruction.
 				if(control == pc.uparrow && num >= 1)
-					move_instruction_safe(num-1, num);
+					move_instruction(num-1, num);
 				else if(control == pc.downarrow && num < (uipc.ni-1)) 
-					move_instruction_safe(num+1, num);
+					move_instruction(num+1, num);
 				else
 					break;
 				
@@ -649,6 +639,7 @@ int CVICALLBACK MoveInstButton (int panel, int control, int event,
 				GetCtrlAttribute(panel, control, ATTR_TOP, &top2);
 				SetCursorPos(pos.x, pos.y+(top2-top1));
 			}
+			CmtReleaseLock(lock_uipc);
 			break;
 	}
 	return 0;
@@ -961,7 +952,6 @@ int CVICALLBACK MoveInstButtonExpanded (int panel, int control, int event, void 
 			}
 			
 			move_expanded_instruction(num, nstep, step);	// Move the instruction
-			CmtReleaseLock(lock_uipc);
 			
 			// Move the cursor if you need to.
 			if(nstep > 0) {
@@ -982,6 +972,8 @@ int CVICALLBACK MoveInstButtonExpanded (int panel, int control, int event, void 
 				
 				SetCursorPos(pos.x+(left2-left1), pos.y+(top2-(ptop1+top1)));
 			}
+			
+			CmtReleaseLock(lock_uipc);  
 		
 			break;
 	}
@@ -1412,6 +1404,7 @@ int CVICALLBACK EditExpression (int panel, int control, int event,
 			else if(control == pc.cexpr_delay)
 				del = 1;
 			
+			CmtGetLock(lock_uipc);
 			if((del && uipc.err_del) || (dat && uipc.err_dat)) {
 				char *err_message;
 				int size, i, *pos, err;
@@ -1432,7 +1425,7 @@ int CVICALLBACK EditExpression (int panel, int control, int event,
 					for(i=0; i<size; i++)
 						pos[i] = uipc.err_del_pos[i];
 				}
-				
+			
 				// Get the error message
 				len = get_update_error(err, NULL);
 				err_message = malloc(len);
@@ -1445,7 +1438,9 @@ int CVICALLBACK EditExpression (int panel, int control, int event,
 				free(err_message);
 				free(pos);
 				free(output);
+				
 			}
+			CmtReleaseLock(lock_uipc); 
 			break;
 	}
 	return 0;
@@ -1482,6 +1477,7 @@ int CVICALLBACK EditSkipCondition (int panel, int control, int event,
 			break;
 		case EVENT_RIGHT_CLICK:
 			// If there's an error, right click here to get a popup with details.
+			CmtGetLock(lock_uipc);
 			if(uipc.skip_err) {
 				int len = get_parse_error(uipc.skip_err, NULL);	// Length of the message
 				char *err_message = malloc(len+1);					// Allocate space for the message
@@ -1495,6 +1491,7 @@ int CVICALLBACK EditSkipCondition (int panel, int control, int event,
 				free(err_message);
 				free(output);
 			}
+			CmtReleaseLock(lock_uipc);
 	}
 	return 0;
 }
@@ -1594,10 +1591,12 @@ void CVICALLBACK BrokenTTLsMenu (int menuBar, int menuItem, void *callbackData,
 	// Set up the TTLs.
 	int *TTLs = get_broken_ttl_ctrls();
 	
+	CmtGetLock(lock_uipc);
 	for(int i = 0; i < 24; i++) {
 		InstallCtrlCallback(bt, TTLs[i], ToggleBrokenTTL, (void *)i);
 		SetCtrlVal(bt, TTLs[i], (uipc.broken_ttls & (1<<i)?1:0));
 	}
+	CmtReleaseLock(lock_uipc);
 	
 	free(TTLs);
 	
@@ -2281,10 +2280,8 @@ int CVICALLBACK ChangeAOChanDim (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-				CmtGetLock(lock_uipc);
-				int num = int_in_array(pc.ainst, panel, uipc.max_anum); 
-				CmtReleaseLock(lock_uipc);
-			
+				int num = int_in_array(pc.ainst, panel, uipc.max_anum);  // Pass by value, should be fine.
+
 				if(num >= 0) { 
 					change_ao_dim_safe(num); 
 				}
@@ -2363,13 +2360,16 @@ int CVICALLBACK NDToggleAO (int panel, int control, int event,
 			if(num < 0)
 				break;
 			
+			CmtGetLock(lock_uipc);
+			
 			int state = get_ao_nd_state(num);
 			
 			state+=up;
-			state = (state+3)%3; 	// In C, mod is signed, so we need to add 3 first here
+			state = (state+3)%3; 			// In C, mod is signed, so we need to add 3 first here
 	
-			set_ao_nd_state_safe(num, state);	// Finally we can update the state.
+			set_ao_nd_state(num, state);	// Finally we can update the state.
 
+			CmtReleaseLock(lock_uipc);
 			break;
 	}
 	return 0;
@@ -2404,10 +2404,8 @@ int CVICALLBACK ChangeAOIncVal (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-			CmtGetLock(lock_uipc);
 			int num = int_in_array(pc.ainst, panel, uipc.max_anum);
-			CmtReleaseLock(lock_uipc);
-			
+
 			if(num < 0)
 				break;
 			
