@@ -337,7 +337,7 @@ int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p) {
 	free(ddata);
 	
 	// The next bit only has to happen if this is a varied experiment
-	if(p->varied) {
+	if(p->nVaried) {
 		// All the channel handles
 		DDCChannelHandle msteps_c, v_ins_c, v_ins_dims_c, v_ins_mode_c; 
 		DDCChannelHandle v_ins_locs_c = NULL, delay_exprs_c, data_exprs_c;
@@ -468,7 +468,7 @@ int tdms_save_program(TDMSChannelGroupHandle pcg, PPROGRAM *p) {
 	free(ddata);
 	
 	// The next bit only has to happen if this is a varied experiment
-	if(p->varied) {
+	if(p->nVaried) {
 		// All the channel handles
 		TDMSChannelHandle msteps_c, v_ins_c, v_ins_dims_c, v_ins_mode_c; 
 		TDMSChannelHandle v_ins_locs_c = NULL, delay_exprs_c, data_exprs_c;
@@ -667,7 +667,7 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 	}
 	
 	// Now if we need to, to through all the variation bits
-	if(!p->varied)
+	if(!p->nVaried)
 		nvchan_names = 0;
 	
 	k = 0;
@@ -710,6 +710,8 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 	name_buff = NULL;
 	
 	// At this point, we should have more than enough to complete the allocation of the p file.
+	p->nAout = 0;	// Placeholder.
+	
 	create_pprogram(p);
 	on = 1;
 	
@@ -757,7 +759,7 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 	
 	// Now go through and get the varied instructions
 	nvi = p->nVaried;
-	if(p->varied) {
+	if(nvi) {
 		// MaxSteps
 		if(ev = DDC_GetDataValues(msteps_c, 0, p->nCycles+p->nDims, p->maxsteps))
 			goto error;
@@ -1110,7 +1112,7 @@ PPROGRAM *tdms_load_program(TDMSChannelGroupHandle pcg, int *err_val) {
 	
 	// Now go through and get the varied instructions
 	nvi = p->nVaried;
-	if(p->varied) {
+	if(nvi) {
 		// MaxSteps
 		if(ev = TDMS_GetDataValuesEx(msteps_c, 0, p->nCycles+p->nDims, p->maxsteps))
 			goto error;
@@ -1517,25 +1519,31 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	p->n_inst = uipc.ni;								// Number of instructions
 	p->nCycles = uipc.nc;								// Number of cycles
 	p->nDims = uipc.nd;									// Number of indirect dimensions
+	p->nAout = uipc.anum;
 	
-	if(p->nDims || p->nCycles) {		   					// If either of these is true, it's a varied experiment
+	int n_ao_var = 0, i;
+	for(i = 0; i < uipc.anum; i++) {
+		if(uipc.ac_varied[i]) { n_ao_var++; }	
+	}
+	
+	if(p->nDims || p->nCycles) {				// If either of these is true, it's a varied experiment
 		p->varied = 1;
 		p->nVaried = (p->nDims?uipc.ndins:0) + uipc.ncins;	// Number of instructions that are varied.
 	} else {
-		p->varied = 0;
+		p->varied = 0;				// It's still varied if you have analog outputs
 		p->nVaried = 0;
 	}
 	
 	GetCtrlVal(pc.skip[1], pc.skip[0], &p->skip);			// Whether or not skip is on
 	GetCtrlVal(pc.nt[1], pc.nt[0], &p->nt);
-	GetCtrlVal(pc.tfirst[1], pc.tfirst[0], &p->tmode);	// Transient acquisition mode
+	GetCtrlVal(pc.tfirst[1], pc.tfirst[0], &p->tmode);		// Transient acquisition mode
 	
 	GetNumListItems(pc.inst[0], pc.instr, &p->tFuncs);// Number of items in the instruction rings
 	p->tFuncs -= 9; // Subtract off atomic functions	// Eventually we'll get this from all_funcs
 
 	// Convenience variables
 	int nFuncs = 0, tFuncs = p->tFuncs, nDims=p->nDims, nCycles=p->nCycles;
-	int nInst = p->n_inst, nVaried = p->nVaried, i, j;
+	int nInst = p->n_inst, nVaried = p->nVaried, j;
 
 	// Now we just need max_n_steps , p->nUniqueInstrs and nFuncs before we can create the pprogram.
 	int *maxsteps = malloc(sizeof(int)*(nDims+nCycles));
@@ -1545,7 +1553,7 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	
 	// For a varied experiment, we need to update nUniqueInstrs. We'll get some other info as we do that. 
 	int *v_ins, *v_ins_dim, *v_ins_mode;
-	if(p->varied) {
+	if(p->nVaried) {
 		// Sort the varying arrays by instruction number so we can more easily merge them.
 		int **dim_array = malloc(sizeof(int*)*4);
 		int **cyc_array = malloc(sizeof(int*)*2);
@@ -1669,7 +1677,6 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	
 	p->nFuncs = nFuncs;
 	
-	
 	// Now before we allocate the arrays, just the other statics we know.
 	if(p->skip)									
 		p->real_n_steps = uipc.real_n_steps;
@@ -1696,11 +1703,36 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	for(i=0; i<nDims+nCycles; i++) 
 		p->maxsteps[i] = maxsteps[i];
 	
+	// Add in the analog outputs
+	if(p->nAout) {
+		int size, len;
+		memcpy(p->ao_varied, uipc.ac_varied, sizeof(int)*uipc.anum);
+		memcpy(p->ao_dim, uipc.ac_dim, sizeof(int)*uipc.anum);
+		
+		for(i = 0; i < uipc.anum; i++) {
+			// First the values
+			size = uipc.ac_varied[i]?uipc.dim_steps[uipc.ac_dim[i]]:1;
+			size *= sizeof(double);
+			p->ao_vals[i] = malloc_or_realloc(p->ao_vals[i], size);
+			memcpy(p->ao_vals[i], uipc.ao_vals[i], size);
+			
+			// Save the channel -> This is NULL for disabled chans.
+			p->ao_chans[i] = get_ao_full_chan_name(uipc.ao_devs[i], uipc.ao_chans[i]);
+			
+			// Save the expression if necessary
+			if(uipc.ac_varied[i] == 2) {
+				GetCtrlValStringLength(pc.ainst[i], pc.aincexpr, &len);
+				p->ao_exprs[i] = malloc_or_realloc(p->ao_exprs[i], len+1);
+				GetCtrlVal(pc.ainst[i], pc.aincexpr, p->ao_exprs[i]);
+			}
+		}
+	}
+	
 	// Grab the instructions from the UI.
 	for(i=0; i<nInst; i++)
 		get_instr(p->instrs[i], i);
 	
-	if(p->varied) {
+	if(p->nVaried) {
 		// First what we've already gotten when we were getting nUniqueInstrs.
 		for(i=0; i<p->nVaried; i++) {
 			p->v_ins[i] = v_ins[i];
@@ -1729,7 +1761,7 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 		
 		// Now we're going to go instruction-by-instruction and generate all the unique instructions 
 		// stemming from that varied instruction. While we're at it, we'll also generate the index. 
-		for(i=0; i<nVaried; i++) {
+		for(i=0; i < nVaried; i++) {
 			num = p->v_ins[i];
 			dind = -1;
 			cind = -1;
@@ -1903,6 +1935,10 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 		set_instr(i, p->instrs[i]);
 	}
 	
+	// Create the analog outputs
+	SetCtrlVal(pc.anum[1], pc.anum[0], p->nAout);
+	change_num_aouts();
+
 	// Now update the varied instructions
 	if(p->nDims) {
 		change_num_dims(p->nDims+1);
@@ -2101,6 +2137,43 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 		}
 	}
 	
+	// Now the analog outs if they exist.
+	if(p->nAout) {
+		int size, len, dim, steps, dev = -1, chan = -1;
+		memcpy(uipc.ac_varied, p->ao_varied, sizeof(int)*p->nAout);
+		memcpy(uipc.ac_dim, p->ao_dim, sizeof(int)*p->nAout);
+		
+		for(i = 0; i < p->nAout; i++) {
+			// Generate the values ourselves from the start and finish.
+			SetCtrlVal(pc.ainst[i], pc.ainitval, p->ao_vals[i][0]); 
+			if(uipc.ac_varied[i]) {
+				dim = p->ao_dim[i];
+				steps = p->maxsteps[dim+p->nCycles];
+				
+				SetCtrlVal(pc.ainst[i], pc.afinval, p->ao_vals[i][steps-1]);
+				
+				if(uipc.ac_varied[i] == 1) {
+					update_ao_increment(i, MC_INC);	
+				} else if(uipc.ac_varied[i] == 2) {
+					// Need to get the expression first
+					SetCtrlVal(pc.ainst[i], pc.aincexpr, p->ao_exprs[i]);
+					
+					//update_ao_increment_from_exprs(i);
+				}
+			}
+			
+			// Now we want to get the channel.
+			get_ao_dev_chan(p->ao_chans[i], &dev, &chan);
+			if(dev < 0) {
+				SetCtrlVal(pc.ainst[i], pc.aodev, uipc.default_adev);
+			} else {
+				SetCtrlVal(pc.ainst[i], pc.aodev, dev);
+			}
+			
+			SetCtrlVal(pc.ainst[i], pc.aochan, chan);
+		}
+	}
+
 	if(cstep != NULL)
 		free(cstep);
 }
@@ -2192,10 +2265,14 @@ void clear_program() {
 	
 	// Clear all the instructions
 	for(int i = 0; i < uipc.max_ni; i++) { clear_instruction(i); }
+	for(int i = 0; i < uipc.max_anum; i++) { clear_aout(i); }
 	
-	// Update the number of instructions
+	// Update the number of instructions and analog outputs
 	SetCtrlVal(pc.ninst[1], pc.ninst[0], 1);
 	change_number_of_instructions();
+	
+	SetCtrlVal(pc.anum[1], pc.anum[0], 0);
+	change_num_aouts();
 	
 	// Update the ND information
 	SetCtrlVal(pc.numcycles[1], pc.numcycles[0], 0);
@@ -2877,6 +2954,12 @@ void swap_ttl(int to, int from) {
 	}
 }
 
+void swap_ttl_safe(int to, int from) {
+	CmtGetLock(lock_uipc);
+	swap_ttl(to, from);
+	CmtReleaseLock(lock_uipc);
+}
+
 void move_ttl(int num, int to, int from) {
 	// Move a TTL from "from" to "to", and shift all the others in response.
 	// This is a "safe" function, and will skip broken ttls. If the initial or
@@ -2884,6 +2967,12 @@ void move_ttl(int num, int to, int from) {
 	int panel = pc.inst[num];
 	
 	move_ttl_panel(panel, to, from);
+}
+
+void move_ttl_safe(int num, int to, int from) {
+	CmtGetLock(lock_uipc);
+	move_ttl(num, to, from);
+	CmtReleaseLock(lock_uipc);
 }
 
 void move_ttl_panel(int panel, int to, int from) {
@@ -2930,6 +3019,12 @@ void move_ttl_panel(int panel, int to, int from) {
 	}
 	
 	SetCtrlVal(panel, pc.TTLs[to], buff1);
+}
+
+void move_ttl_panel_safe(int panel, int to, int from) {
+	CmtGetLock(lock_uipc);
+	move_ttl_panel(panel, to, from);
+	CmtReleaseLock(lock_uipc);
 }
 
 void change_trigger_ttl() {
@@ -3659,12 +3754,6 @@ void populate_dim_points_safe() {
 	CmtReleaseLock(lock_uipc);
 }
 
-void update_nd_increment_safe(int num, int mode) {
-	CmtGetLock(lock_uipc);
-	update_nd_increment(num, mode);
-	CmtReleaseLock(lock_uipc);
-}
-
 void update_nd_increment(int num, int mode) { // Updates Initial, Increment and Final controls
 	// Modes:
 	// MC_INIT = Change initial, leave the other two
@@ -3829,9 +3918,9 @@ void update_nd_increment(int num, int mode) { // Updates Initial, Increment and 
 	SetCtrlVal(pc.inst[num], pc.instr_d, dat);
 }
 
-void update_nd_from_exprs_safe(int num) {
+void update_nd_increment_safe(int num, int mode) {
 	CmtGetLock(lock_uipc);
-	update_nd_from_exprs(num);
+	update_nd_increment(num, mode);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -4064,6 +4153,12 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 	SetCtrlVal(pc.inst[num], pc.instr_d, dat);
 	
 	return;
+}
+
+void update_nd_from_exprs_safe(int num) {
+	CmtGetLock(lock_uipc);
+	update_nd_from_exprs(num);
+	CmtReleaseLock(lock_uipc);
 }
 
 void update_skip_condition() { 		// Generate uipc.skip_locs from the UI.
@@ -4863,7 +4958,6 @@ int setup_expanded_instr_safe(int num, int step) {
 void resize_expanded(int num, int steps) {
 	// Changes the size of a panel to the appropriate size and moves all the
 	// other panels around to accomodate.
-	
 	if(steps < 1)
 		return;
 	
@@ -4874,6 +4968,12 @@ void resize_expanded(int num, int steps) {
 	
 	for(int i = num+1; i < uipc.max_ni; i++)
 		SetPanelAttribute(pc.inst[i], ATTR_TOP, top+((INSTR_HEIGHT+INSTR_GAP)*(steps+i-num-1)));
+}
+
+void resize_expanded_safe(int num, int steps) {
+	CmtGetLock(lock_uipc);
+	resize_expanded(num, steps);
+	CmtReleaseLock(lock_uipc);
 }
 
 void save_all_expanded_instructions() {
@@ -4974,7 +5074,6 @@ void move_expanded_instruction_safe(int num, int to, int from) {
 	move_expanded_instruction(num, to, from);
 	CmtReleaseLock(lock_uipc);
 }
-
 
 void delete_expanded_instruction(int num, int step) {
 	int cyc, cn, i, j;
@@ -5431,7 +5530,22 @@ void change_ao_device_safe(int num) {
 	CmtReleaseLock(lock_uipc);
 }
 
-void change_ao_chan(int num) { 
+void change_ao_chan(int num) {
+	change_ao_chan_uipc(num);
+	
+	//  Go through and re-populate the controls 
+	for(int i = 0; i < uipc.max_anum; i++) {
+		populate_ao_chan(i);
+	}
+}
+
+void change_ao_chan_safe(int num) {
+	CmtGetLock(lock_uipc);
+	change_ao_chan(num);
+	CmtReleaseLock(lock_uipc);
+}
+
+void change_ao_chan_uipc(int num) { 
 	// Change the channel a given instruction uses.
 	int pan = pc.ainst[num], ctrl = pc.aochan, dev = uipc.ao_devs[num];
 	int nl, ind = -1;
@@ -5464,17 +5578,11 @@ void change_ao_chan(int num) {
 	}
 	
 	uipc.ao_chans[num] = ind;
-	int max_anum = uipc.max_anum;
-	
-	//  Go through and re-populate the controls 
-	for(int i = 0; i < max_anum; i++) {
-		populate_ao_chan(i);
-	}
 }
 
-void change_ao_chan_safe(int num) {
+void change_ao_chan_uipc_safe(int num) {
 	CmtGetLock(lock_uipc);
-	change_ao_chan(num);
+	change_ao_chan_uipc(num);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -5528,11 +5636,16 @@ void populate_ao_chan(int num) {
 	
 			InsertListItem(pan, ctrl, -1, uipc.ao_all_chans[dev][cind], cind);
 		}
-
+		
+		if(ind >= 0 && i == uipc.anum_avail_chans[dev]) {
+			InsertListItem(pan, ctrl, -1, uipc.ao_all_chans[dev][ind], ind);
+		}
+		
 		for(i = i; i < uipc.anum_avail_chans[dev]; i++) {
 			cind = uipc.ao_avail_chans[dev][i];
 			InsertListItem(pan, ctrl, -1, uipc.ao_all_chans[dev][cind], cind);		
 		}
+
 	} else if(ind >= 0) {
 		InsertListItem(pan, ctrl, -1, uipc.ao_all_chans[dev][ind], ind); 		
 	}
@@ -5666,26 +5779,11 @@ void delete_aout(int num) {
 	
 	SetCtrlVal(pc.anum[1], pc.anum[0], uipc.anum-1);
 	
-	if(uipc.anum == 1) {
-		change_num_aouts();
-		return;
+	// Move it to the end if necessary.
+	if(uipc.anum > 1) {
+		move_aout(uipc.max_anum-1, num);
 	}
 	
-	// Move it to the end.
-	int instr = pc.ainst[num];
-	int top, btop;
-	GetPanelAttribute(pc.ainst[num], ATTR_TOP, &top);
-	for(int i = num; i < uipc.max_anum-1; i++) {
-		GetPanelAttribute(pc.ainst[i+1], ATTR_TOP, &btop);	// Move it.
-		SetPanelAttribute(pc.ainst[i+1], ATTR_TOP, top);
-		top = btop;
-		
-		pc.ainst[i] = pc.ainst[i+1];
-	}
-	
-	SetPanelAttribute(instr, ATTR_TOP, top);
-	pc.ainst[uipc.max_anum-1]= instr;
-
 	change_num_aouts();
 }
 
@@ -5695,32 +5793,112 @@ void delete_aout_safe(int num) {
 	CmtReleaseLock(lock_uipc);
 }
 
+void move_aout(int to, int from) {
+	// Moves Analog Out channels around.   
+	int diff = to-from;
+	
+	if(diff == 0)
+		return;				// No change
+	
+	int start, end;
+	if(diff > 0) {
+		start = from;
+		end = to;
+	} else {
+		start = to;
+		end = from;
+	}
+	
+	// Save the one we're moving to a buffer.
+	int var, dim, dev, chan, instr, btop, top;
+	double *vals;
+	char *exprs;
+	GetPanelAttribute(pc.ainst[start], ATTR_TOP, &btop);
+	
+	instr = pc.ainst[start];     
+	
+	var = uipc.ac_varied[start];
+	dim = uipc.ac_dim[start];
+	dev = uipc.ao_devs[start];
+	chan = uipc.ao_chans[start];
+	vals = uipc.ao_vals[start];
+	exprs = uipc.ao_exprs[start];
+
+	// Now move each one back one.
+	for(int i = start; i < end; i++) {
+		GetPanelAttribute(pc.ainst[i+1], ATTR_TOP, &top);	// Move it.
+		SetPanelAttribute(pc.ainst[i+1], ATTR_TOP, btop);
+		btop = top;
+		
+		pc.ainst[i] = pc.ainst[i+1];
+		
+		uipc.ac_varied[i] = uipc.ac_varied[i+1];
+		uipc.ac_dim[i] = uipc.ac_dim[i+1];
+		uipc.ao_devs[i] = uipc.ao_devs[i+1];
+		uipc.ao_chans[i] = uipc.ao_chans[i+1];
+		uipc.ao_vals[i] = uipc.ao_vals[i+1];
+		uipc.ao_exprs[i] = uipc.ao_exprs[i+1];
+	}
+	
+	// Now move from buffer to the last stop.
+	SetPanelAttribute(instr, ATTR_TOP, top);
+	pc.ainst[end] = instr;
+	
+	uipc.ac_varied[end] = var;
+	uipc.ac_dim[end] = dim;
+	uipc.ao_devs[end] = dev;
+	uipc.ao_chans[end] = chan;
+	uipc.ao_vals[end] = vals;
+	uipc.ao_exprs[end] = exprs;
+}
+
+void move_aout_safe(int to, int from) {
+	CmtGetLock(lock_uipc);
+	move_aout(to, from);
+	CmtReleaseLock(lock_uipc);
+}
+
 void clear_aout(int num) {
-																		   
+	int	val, nl; 
+	
 	// Set values to 0.
 	SetCtrlVal(pc.ainst[num], pc.ainitval, 0.0);
 	SetCtrlVal(pc.ainst[num], pc.aincval, 0.0);
 	SetCtrlVal(pc.ainst[num], pc.afinval, 0.0);
-	SetCtrlVal(pc.ainst[num], pc.aindon, 0);	// Don't forget to actually toggle this later.
+	
+	set_ao_nd_state(num, 0);
 	
 	// Clear the expression control
 	SetCtrlVal(pc.ainst[num], pc.aincexpr, "");
 	SetCtrlAttribute(pc.ainst[num], pc.aincexpr, ATTR_VISIBLE, 0);
 	SetCtrlAttribute(pc.ainst[num], pc.aincexpr, ATTR_TEXT_BGCOLOR, VAL_WHITE);
 	
-	// Set channel, dev to default value.
-	int	val, nchans;
+	// Set channel to default value.
+	GetNumListItems(pc.ainst[num], pc.aochan, &nl);
+	if(nl) {
+		SetCtrlIndex(pc.ainst[num], pc.aochan, 0);
+		change_ao_chan_uipc(num);
+	}
 	
-	GetNumListItems(pc.ainst[num], pc.aodev, &nchans);
-	if(nchans > 0) {
+	// Set device to default value.
+	GetNumListItems(pc.ainst[num], pc.aodev, &nl);
+	if(nl > 0) {
 		GetCtrlAttribute(pc.ainst[num], pc.aodev, ATTR_DFLT_VALUE, &val);
 		SetCtrlVal(pc.ainst[num], pc.aodev, val);
+		change_ao_device(num);
 	}
 	
-	GetNumListItems(pc.ainst[num], pc.aochan, &nchans);
-	if(nchans) {
-		SetCtrlIndex(pc.ainst[num], pc.aochan, 0);
-	}
+	// Variation stuff.
+	GetNumListItems(pc.ainst[num], pc.adim, &nl);
+	if(nl) { DeleteListItem(pc.ainst[num], pc.adim, 0, -1); }
+	
+	GetCtrlAttribute(pc.ainst[num], pc.asteps, ATTR_DFLT_VALUE, &val);
+	SetCtrlVal(pc.ainst[num], pc.asteps, val);
+	
+	// uipc variable
+	uipc.ac_dim[num] = -1;
+	uipc.ao_vals[num] = realloc(uipc.ao_vals[num], sizeof(double));
+	GetCtrlAttribute(pc.ainst[num], pc.ainitval, ATTR_DFLT_VALUE, uipc.ao_vals[num]);
 }
 
 void set_aout_dimmed(int num, int dimmed, int nd) {
@@ -5866,6 +6044,93 @@ int get_ao_nd_state(int num) {
 	state = (on && col == VAL_BLUE)?2:on;
 	
 	return state;
+}
+
+char *get_ao_full_chan_name(int dev, int chan) {
+	// Gets the full name of the channel, including the device.
+	// This will eventually be used to distinguish between channel
+	// naming mechanisms when more than DAQs are supported.
+	//
+	// This returns a malloced string, which needs to be freed
+	
+	char *s = NULL;
+	
+	// Failure conditions
+	if(dev < 0 || uipc.adev_true == NULL || uipc.adev_true[dev] == NULL) {
+		return s;
+	}
+	
+	char *dname = uipc.adev_true[dev], *cname;
+	
+	// If no channel is provided but a dev is provided, it'll be of the form "Dev1/"
+	if(chan < 0 || uipc.ao_all_chans == NULL || uipc.ao_all_chans[dev] == NULL ||
+	   uipc.ao_all_chans[dev][chan] == NULL) {
+		cname = "";
+	} else {
+		cname = uipc.ao_all_chans[dev][chan];
+	}
+	int dlen = strlen(dname), clen = strlen(cname);
+	
+	// We'll assume that neither has a separator.
+	s = malloc(dlen+clen+2);
+
+	if(dname[dlen-1] == '/') { dlen--; }	// Don't copy a trailing slash
+	if(cname[0] == '/') { cname++; } 		// Move the pointer up one.
+	
+	// Concatenate the two strings with a separator.
+	strncpy(s, dname, dlen);
+	s[dlen] = '/';
+	strcpy(s+dlen+1, cname); // cname is null-terminated.
+	
+	return s;
+}
+
+char *get_ao_full_chan_name_safe(int dev, int chan) {
+	CmtGetLock(lock_uipc);
+	char *rv = get_ao_full_chan_name(dev, chan);
+	CmtReleaseLock(lock_uipc);
+	
+	return rv;
+}
+
+void get_ao_dev_chan(char *name, int *dev_out, int *chan_out) {
+	// Given the full name as would be returned from get_ao_full_chan_name,
+	// this will give you the indices for the device and channel.
+	//
+	// Passing NULL to dev_out or chan_out will suppress that output.
+	// Values are set to -1 if not found.
+	//
+	// TODO: This function may need to be updated and the
+	// prototype changed when non-DAQ boards are supported.
+	
+	int dev = -1, chan = -1;
+	
+	// No boards, it's definitely not in here.
+	if(uipc.anum_devs < 1) { goto error; }
+	
+	// First find the device
+	char *p = malloc(strlen(name)+1);
+	strcpy(p, name);
+	
+	p = strtok(p, "/");
+	if(p != NULL) { dev = string_in_array(uipc.adev_true, p, uipc.anum_devs); }
+	
+	if(dev < 0) { goto error; }
+	
+	// Now that we have the device, search for the channel.
+	p = strchr(name, '/');
+	if(p != NULL) { chan = string_in_array(uipc.ao_all_chans[dev], ++p, uipc.anum_all_chans[dev]); }
+	
+	error:
+	
+	if(dev_out != NULL) { *dev_out = dev; }
+	if(chan_out != NULL) { *chan_out = chan; }
+}
+
+void get_ao_dev_chan_safe(char *name, int *dev, int *chan) {
+	CmtGetLock(lock_uipc);
+	get_ao_dev_chan(name, dev, chan);
+	CmtReleaseLock(lock_uipc);
 }
 
 void update_ao_increment(int num, int mode) {
@@ -6090,6 +6355,14 @@ constants *setup_constants() {				// Setup all the static constants in the exper
 	return c;
 }
 
+constants *setup_constants_safe() {
+	CmtGetLock(lock_uipc);
+	constants *c = setup_constants();
+	CmtReleaseLock(lock_uipc);
+	
+	return c;
+}
+
 void update_constants(constants *c, int *cstep) { // Updates the constants for a given position in acq. space
 	// cstep must be a position in acqusition space of size uipc.nd+uipc.nc
 	char *current_var = malloc(5);
@@ -6119,11 +6392,11 @@ void create_pprogram(PPROGRAM *p) { // Initially allocates the PPROGRAM space
 	// Give us a pre-malloc'ed PPROGRAM for this function
 	// It needs the following fields already assigned:
 	// 	p->n_inst		p->max_n_steps	p->nUniqueInstrs
-	//	p->varied		p->nFuncs
+	//	p->varied		p->nFuncs       p->nAout
 	//	p->skip			p->nDims
 	//	p->nVaried	   	p->nCycles
 	
-	if(p->varied) {
+	if(p->nVaried) {
 		p->maxsteps = malloc(sizeof(int)*(p->nDims+p->nCycles)); 				// Allocate the maximum position point
 		p->v_ins = malloc(sizeof(int)*p->nVaried); 			// Allocate the array of varied instruction locations.
 		p->v_ins_dim = malloc(sizeof(int)*p->nVaried);		// Allocate the array of varied dimension per instr
@@ -6157,6 +6430,16 @@ void create_pprogram(PPROGRAM *p) { // Initially allocates the PPROGRAM space
 		
 		p->delay_exprs = NULL;
 		p->data_exprs = NULL;
+	}
+	
+	if(p->nAout) {
+		p->ao_varied = calloc(p->nAout, sizeof(int));
+		p->ao_vals = calloc(p->nAout, sizeof(double*));   
+		p->ao_chans = calloc(p->nAout, sizeof(char*));
+		p->ao_exprs = calloc(p->nAout, sizeof(char*));
+		
+		p->ao_dim = malloc((p->nAout)*sizeof(int));		
+		memset(p->ao_dim, -1, sizeof(int)*p->nAout);
 	}
 	
 	if(p->nFuncs)
@@ -6206,6 +6489,15 @@ void free_pprog(PPROGRAM *p) {
 			free(p->data_exprs[i]);
 			free(p->delay_exprs[i]);
 		}
+	}
+	
+	if(p->nAout) {
+		free(p->ao_varied);
+		free(p->ao_dim);
+		
+		free_doubles_array(p->ao_vals, p->nAout);
+		free_string_array(p->ao_chans, p->nAout);
+		free_string_array(p->ao_exprs, p->nAout);
 	}
 
 	// Free the arrays of pointers.
@@ -6373,6 +6665,14 @@ int get_maxsteps(int *maxsteps) {
 	}
 	
 	return max_n_steps;
+}
+
+int get_maxsteps_safe(int *maxsteps) {
+	CmtGetLock(lock_uipc);
+	int rv = get_maxsteps(maxsteps);
+	CmtReleaseLock(lock_uipc);
+	
+	return rv;
 }
 
 int get_lindex(int *cstep, int *maxsteps, int size)

@@ -150,6 +150,7 @@ extern void change_instr_data(int panel);
 extern void change_instruction(int num);
 extern void change_instruction_panel(int panel);
 extern void swap_ttl(int to, int from);
+extern void swap_ttl_safe(int to, int from);
 extern void move_ttl(int num, int to, int from);
 extern void move_ttl_panel(int panel, int to, int from);
 extern void change_trigger_ttl(void);
@@ -213,6 +214,7 @@ extern void set_phase_cycle_expanded_safe(int num, int state);
 extern int setup_expanded_instr(int num, int step);
 extern int setup_expanded_instr(int num, int step);
 extern void resize_expanded(int num, int steps);
+extern void resize_expanded_safe(int num, int steps);
 extern void save_all_expanded_instructions(void);
 extern void save_all_expanded_instructions_safe(void);
 extern void save_expanded_instructions(int num);
@@ -239,12 +241,16 @@ extern void change_num_aouts(void);
 extern void change_num_aouts_safe(void);
 extern void delete_aout(int num);
 extern void delete_aout_safe(int num);
+extern void move_aout(int to, int from);
+extern void move_aout_safe(int to, int from);
 extern void clear_aout(int num);
 
 extern void change_ao_device(int num);
 extern void change_ao_device_safe(int num);
 extern void change_ao_chan(int num);
 extern void change_ao_chan_safe(int num);
+extern void change_ao_chan_uipc(int num);
+extern void change_ao_chan_uipc_safe(int num);
 extern void populate_ao_dev(int num);
 extern void populate_ao_dev_safe(int num);
 extern void populate_ao_chan(int num);
@@ -257,6 +263,10 @@ extern void set_aout_nd_dimmed_safe(int num, int dimmed);
 extern void set_ao_nd_state(int num, int state);
 extern void set_ao_nd_state_safe(int num, int state);
 extern int get_ao_nd_state(int num);
+extern char *get_ao_full_chan_name(int dev, int chan);
+extern char *get_ao_full_chan_name_safe(int dev, int chan);
+extern void get_ao_dev_chan(char *name, int *dev, int *chan);
+extern void get_ao_dev_chan_safe(char *name, int *dev, int *chan);
 
 extern void change_ao_val(int num);
 extern void change_ao_val_safe(int num);
@@ -328,6 +338,7 @@ extern int move_bit(int in, int to, int from);
 // Math Evalution
 extern int get_update_error(int err_code, char *err_message);
 extern constants *setup_constants(void);
+extern constants *setup_constants_safe(void);
 extern void update_constants(constants *c, int *cstep);
 
 /*************** Vestigial ***************/

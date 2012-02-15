@@ -136,7 +136,7 @@
 #define  MainPanel_SPLITTER_2             17      /* control type: splitter, callback function: (none) */
 #define  MainPanel_SPLITTER               18      /* control type: splitter, callback function: (none) */
 #define  MainPanel_CurrentProgRing        19      /* control type: ring, callback function: (none) */
-#define  MainPanel_COMMANDBUTTON          20      /* control type: command, callback function: (none) */
+#define  MainPanel_COMMANDBUTTON          20      /* control type: command, callback function: TestCallback */
 #define  MainPanel_DataDirectory          21      /* control type: listBox, callback function: ChangeDataBox */
 #define  MainPanel_LoadInfoMode           22      /* control type: LED, callback function: ChangeLoadInfoMode */
 
@@ -493,6 +493,7 @@ int  CVICALLBACK SetupSkipCondition(int panel, int control, int event, void *cal
 int  CVICALLBACK SpectrumCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK StartProgram(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK StopProgram(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK TestCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ToggleBrokenTTL(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ToggleFIDChan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ToggleND(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);

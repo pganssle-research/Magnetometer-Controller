@@ -2481,6 +2481,7 @@ int get_devices () {
 	}
 	
 	free(device_name);
+	free(output);
 	
 	// Get the index as close to what it used to be as we can.
 	int default_adev = (uipc.anum_devs >0)?0:-1;
@@ -2505,6 +2506,7 @@ int get_devices () {
 			GetValueFromIndex(pc.dev[1], pc.dev[0], uidc.devindex, cdev);
 			
 			int ind = string_in_array(uipc.adev_true, cdev, uipc.anum_devs);
+			free(cdev);
 			if(ind >= 0) { default_adev = ind; }
 		}
 	} else {

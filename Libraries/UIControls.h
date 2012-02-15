@@ -324,7 +324,7 @@ struct {
 	int *anum_avail_chans;		// Sizes of ao_avail_chans		Size = anum_devs
 	char **adev_display;		// Display names for devices. 	Size = anum_devs
 	char **adev_true;			// True name for the device		Size = anum_devs	
-	int**ao_avail_chans;		// Unused output chans.			Size = [anum_devs][anum_avail_chans[i]]
+	int **ao_avail_chans;		// Unused output chans.			Size = [anum_devs][anum_avail_chans[i]]
 	char ***ao_all_chans;		// List of all channels.		Size = [anum_devs][anum_all_chans[i]]
 	
 	int *ac_varied;				// Is the channel varied		Size = [max_anum]

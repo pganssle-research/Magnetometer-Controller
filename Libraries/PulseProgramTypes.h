@@ -74,6 +74,15 @@ typedef struct PPROGRAM // This is a structure for containing information about 
 	
 	int *skip_locs;			// A linear-indexed array of size max_n_steps saying whether to skip that point in sampling space				
 	
+	// Analog outputs
+	int nAout;				// Number of analog output channels
+	int n_ao_var;			// Number of varied channels
+	int *ao_varied;			// Whether or not it's varied					Size = [nAout]
+	int *ao_dim;			// Dimension along which it varies.				Size = [nAout]
+	double **ao_vals;		// Analog output values.						Size = [nAout][(ao_varied)?dim_steps[ao_dim[i]]:1]
+	char **ao_chans;		// Full name of the channel for each thing.		Size = [nAout]
+	char **ao_exprs;		// The expression generating the thing			Size = [nAout], null if ao_varied[i] != 2;
+	
 	
 	// Function stuff
 	int nFuncs;				// Number of functions included

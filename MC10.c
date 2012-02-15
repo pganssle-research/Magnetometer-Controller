@@ -166,7 +166,8 @@ DefineThreadSafeScalarVar(int, Running, 0);
 DefineThreadSafeScalarVar(int, Initialized, 0);
 
 int lock_pb, lock_DAQ, lock_tdm; 		// Thread locks
-int lock_uidc, lock_uipc, lock_ce, lock_af; 
+int lock_uidc, lock_uipc, lock_ce, lock_af;
+PPROGRAM *gp = NULL;
 
 //////////////////////////////////////////////////////
 //                                                  //
@@ -1646,8 +1647,9 @@ int CVICALLBACK ToggleBrokenTTL (int panel, int control, int event, void *callba
 			int val, loc = (int)(callbackData), flag = 1<<loc;
 			GetCtrlVal(panel, control, &val);
 			
+			CmtGetLock(lock_uipc);
 			if(val) {
-				int reserved = ttls_in_use_safe();		// Get the ttls currently in use.
+				int reserved = ttls_in_use();		// Get the ttls currently in use.
 				
 				// If it's in use, offer to swap with whatever you want. Currently only one
 				// level of swapping. On cancel, no swap takes place.
@@ -1664,16 +1666,13 @@ int CVICALLBACK ToggleBrokenTTL (int panel, int control, int event, void *callba
 					free(resp);
 				}
 				
-				CmtGetLock(lock_uipc);
 				uipc.broken_ttls = uipc.broken_ttls|flag;	// Add the flag
-				CmtReleaseLock(lock_uipc);
 			} else {
-				CmtGetLock(lock_uipc);
 				uipc.broken_ttls = uipc.broken_ttls-(uipc.broken_ttls&flag);	// Remove the flag
-				CmtReleaseLock(lock_uipc);
 			}
 				
-			setup_broken_ttls_safe(); // Update the controls.
+			setup_broken_ttls(); // Update the controls.
+			CmtReleaseLock(lock_uipc);
 			break;
 	}
 	return 0;
@@ -2414,6 +2413,25 @@ int CVICALLBACK ChangeAOIncVal (int panel, int control, int event,
 			
 			update_ao_increment_safe(num, MC_FINAL);   
 			
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK TestCallback (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			if(gp == NULL) {
+				gp = get_current_program_safe();
+			} else { 
+				set_current_program_safe(gp);
+			
+				free_pprog(gp);
+				gp = NULL;
+			}
 			break;
 	}
 	return 0;

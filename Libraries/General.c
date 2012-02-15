@@ -105,7 +105,7 @@ int int_in_array (int *array, int val, int size) {
 int *add_item_to_sorted_array(int *array, int item, int size) {
 	// Add an item where it belongs in a sorted array. (insertion sort)
 	// Frees the old array and returns a new one. Update all pointers.
-	int *new_array = malloc(sizeof(int)*size+1), i;
+	int *new_array = malloc(sizeof(int)*(size+1)), i;
 	for(i = 0; i < size; i++) {
 		if(item < array[i]) {
 			new_array[i] = item;
@@ -122,7 +122,7 @@ int *add_item_to_sorted_array(int *array, int item, int size) {
 	}
 	
 	array = realloc(array, (++size)*sizeof(int));
-	memcpy(array, new_array, size);
+	memcpy(array, new_array, size*sizeof(int));
 
 	free(new_array);
 	
