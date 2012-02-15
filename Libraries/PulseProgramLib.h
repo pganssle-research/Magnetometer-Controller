@@ -43,6 +43,9 @@
 #define MCTD_NFUNCS "nFuncs"				// p.nFuncs
 #define MCTD_TFUNCS "tFuncs"				// p.tFuncs
 
+#define MCTD_NAOUT "nAouts"					// p.nAouts
+#define MCTD_NAOVAR "n_aout_var"			// p.n_ao_var
+
 // Program Instruction Details
 #define MCTD_PROGFLAG "ProgFlag"			// p.instrs[i].flags;
 #define MCTD_PROGTIME "ProgTime"			// p.instrs[i].instr_delay
@@ -62,6 +65,15 @@
 #define MCTD_PDATEXPRS "DataExprs"			// p.data_exprs
 
 #define MCTD_PFUNCLOCS "FuncLocs"			// p.func_locs
+
+// Analog output details
+#define MCTD_AOVAR "ao_varied"				// p.ao_varied
+#define MCTD_AOVALS "ao_vals"				// p.ao_vals
+#define MCTD_AODIM	"ao_dim"				// p.ao_dim     
+
+// Analog output properties - on MCTD_AOVAR
+#define MCTD_AOCHANS "ao_chans"				// p.ao_chans
+#define MCTD_AOEXPRS "ao_exprs"				// p.ao_exprs
 
 // Function details
 #define MCTD_PF_NAME "FuncNames"			// pfunc.name

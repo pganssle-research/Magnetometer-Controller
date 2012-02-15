@@ -274,7 +274,8 @@ int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p) {
 	int i;
 	int *idata = NULL;
 	double *ddata = NULL;
-	char *data_exprs = NULL, *delay_exprs = NULL;
+	unsigned char *skip_locs = NULL;
+	char *data_exprs = NULL, *delay_exprs = NULL, *ao_exprs = NULL, *ao_chans = NULL;
 	
 	// We're going to start out with a bunch of properties										
 	DDC_CreateChannelGroupProperty(pcg, MCTD_PNP, DDC_Int32, p->np);						// Number of points
@@ -295,6 +296,8 @@ int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p) {
 	DDC_CreateChannelGroupProperty(pcg, MCTD_PREAL_N_STEPS, DDC_Int32, p->real_n_steps);	// Total number of steps - those skipped
 	DDC_CreateChannelGroupProperty(pcg, MCTD_NFUNCS, DDC_Int32, p->nFuncs);					// Number of functions actually used
 	DDC_CreateChannelGroupProperty(pcg, MCTD_TFUNCS, DDC_Int32, p->tFuncs);					// Total number of functions available
+	DDC_CreateChannelGroupProperty(pcg, MCTD_NAOUT, DDC_Int32, p->nAout);					// Number of analog outputs
+	DDC_CreateChannelGroupProperty(pcg, MCTD_NAOVAR, DDC_Int32, p->n_ao_var);				// Number of analog outputs which vary.
 	
 	// Now we'll save the main instructions
 	DDCChannelHandle flags_c, time_c, ins_c, insd_c, us_c ; // Instruction channels.
@@ -330,24 +333,83 @@ int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p) {
 	
 	// Units and scan
 	DDC_AddChannel(pcg, DDC_Int32, MCTD_PROGUS, "Bit 0 is whether or not to scan, the remaining bits are units for each instr", "", &us_c);
-	for(i = 0; i < nui; i++)
+	for(i = 0; i < nui; i++) { 
 		idata[i] = p->instrs[i]->trigger_scan + 2*(p->instrs[i]->time_units);
+	}
+	
 	DDC_AppendDataValues(us_c, idata, nui);
 	
 	free(idata);
 	free(ddata);
 	
-	// The next bit only has to happen if this is a varied experiment
-	if(p->nVaried) {
-		// All the channel handles
-		DDCChannelHandle msteps_c, v_ins_c, v_ins_dims_c, v_ins_mode_c; 
-		DDCChannelHandle v_ins_locs_c = NULL, delay_exprs_c, data_exprs_c;
+	// Now add the analog outputs
+	if(p->nAout) {
+		// Figure out if we want to save any expressions.
+		int save_exprs = 0;
 		
-		// Again, we create a bunch of channels here and populate them as necessary
+		for(i = 0; i < p->nAout; i++) {
+			if(p->ao_varied[i] == 2) {
+				save_exprs = 1;
+				break;
+			}
+		}
+		
+		// All the channel handles
+		DDCChannelHandle ao_var_c, ao_dim_c, ao_vals_c;
+		
+		// Create all the channels we'll need.
+		DDC_AddChannel(pcg, DDC_Int32, MCTD_AOVAR, "Array containing variation state of each Analog output.", "", &ao_var_c);
+		DDC_AddChannel(pcg, DDC_Int32, MCTD_AODIM, "Dimension along which each output varies.", "", &ao_dim_c);
+		DDC_AddChannel(pcg, DDC_Double, MCTD_AOVALS, "Linearly-indexed array of analog output voltages.", "V", &ao_vals_c);
+		
+		// Save the expressions as a property of MCTD_AOVAR if necessary.
+		if(save_exprs) {
+			ao_exprs = generate_nc_string(p->ao_exprs, p->nAout, NULL);
+			
+			DDC_CreateChannelProperty(ao_var_c, MCTD_AOEXPRS, DDC_String, ao_exprs);
+			
+			free(ao_exprs);
+			ao_exprs = NULL;
+		}
+		
+		// Save the simple arrays now.
+		DDC_AppendDataValues(ao_var_c, p->ao_varied, p->nAout);
+	 	DDC_AppendDataValues(ao_dim_c, p->ao_dim, p->nAout);
+		
+		// Channels are saved as a string property on ao_var_c
+		ao_chans = generate_nc_string(p->ao_chans, p->nAout, NULL);
+		DDC_CreateChannelProperty(ao_var_c, MCTD_AOCHANS, DDC_String, ao_chans);
+		free(ao_chans);
+		ao_chans = NULL;
+		
+		// Now we need to save the values array. This is just sequential (linear indexing)
+		int nv;
+		for(i = 0; i < p->nAout; i++) {
+			if(p->ao_dim[i] >= 0) {
+				nv = p->maxsteps[p->ao_dim[i]+p->nCycles];
+			} else {
+				nv = 1;
+			}
+			DDC_AppendDataValues(ao_vals_c, p->ao_vals[i], nv);	
+		}
+	}
+	
+	// Save the maxsteps if necessary
+	if(p->varied) {
+		DDCChannelHandle msteps_c;
+		
 		// Maxsteps
 		DDC_AddChannel(pcg, DDC_Int32, MCTD_PMAXSTEPS, "Size of the acquisition space", "", &msteps_c);
 		DDC_AppendDataValues(msteps_c, p->maxsteps, (p->nDims+p->nCycles));
+	}
+	
+	// The next bit only has to happen if this is a varied experiment
+	if(p->nVaried) {
+		// All the channel handles
+		DDCChannelHandle v_ins_c, v_ins_dims_c, v_ins_mode_c; 
+		DDCChannelHandle v_ins_locs_c = NULL, delay_exprs_c, data_exprs_c;
 		
+		// Again, we create a bunch of channels here and populate them as necessary
 		// Varied instructions, dims and modes
 		DDC_AddChannel(pcg, DDC_Int32, MCTD_PVINS, "List of the varied instructions", "", &v_ins_c);
 		DDC_AddChannel(pcg, DDC_Int32, MCTD_PVINSDIM, "What dimension(s) the instrs vary along", "", &v_ins_dims_c);
@@ -383,7 +445,7 @@ int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p) {
 			if(p->skip & 1 && (p->skip_locs != NULL)) {
 				DDCChannelHandle skip_locs_c;
 				DDC_AddChannel(pcg, DDC_UInt8, MCTD_PSKIPLOCS, "An array of where the skips occur", "", &skip_locs_c);
-				unsigned char *skip_locs = malloc(sizeof(unsigned char)*p->max_n_steps);
+				skip_locs = malloc(sizeof(unsigned char)*p->max_n_steps);
 				for(i = 0; i < p->max_n_steps; i++)
 					skip_locs[i] = (unsigned char)p->skip_locs[i];
 				
@@ -404,10 +466,11 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 	
 	// Variable declarations
 	PPROGRAM *p = malloc(sizeof(PPROGRAM));
-	int on = 0, *idata = NULL, ev = 0, nvi = 0, *vfound = NULL;
+	int on = 0, *idata = NULL, ev = 0, nvi = 0, *vfound = NULL, nchans = 0;
 	double *ddata = NULL;
 	DDCChannelHandle *handles = NULL;
-	char *name_buff = NULL, *delay_exprs = NULL, *data_exprs = NULL;
+	char **names = NULL, *delay_exprs = NULL, *data_exprs = NULL;
+	char *ao_exprs = NULL, *ao_chans = NULL;
 	unsigned char *skip_locs = NULL;
 	err_val[0] = ev;
 	
@@ -429,164 +492,90 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 	}
 	
 	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNT, &p->nt, si)) {					// Number of transients
-		if(ev != DDC_PropertyDoesNotExist)
-			goto error;
-		else
-			GetCtrlVal(pc.nt[1], pc.nt[0], &p->nt);
+		if(ev != DDC_PropertyDoesNotExist) { goto error; }
+		GetCtrlVal(pc.nt[1], pc.nt[0], &p->nt);
 	}
 	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTMODE, &p->tmode, si)) {			// Transient acquisition mode
-		if(ev != DDC_PropertyDoesNotExist)
-			goto error;
-		else
-			GetCtrlVal(pc.tfirst[1], pc.tfirst[0], &p->tmode);
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTMODE, &p->tmode, si)) {
+		if(ev != DDC_PropertyDoesNotExist) { goto error; }
+		GetCtrlVal(pc.tfirst[1], pc.tfirst[0], &p->tmode);
 	}
-		
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSCAN, &p->scan, si))				// Whether or not there's a scan
-		goto error;
 	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTRIGTTL, &p->trigger_ttl, si))    	// Trigger TTL
-		goto error;
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_NAOUT, &p->nAout, si)) 
+	{ 
+		if(ev != DDC_PropertyDoesNotExist) { goto error; }
+		p->nAout = 0;
+	}
 	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTOTTIME, &p->total_time, sd))		// Total time
-		goto error;
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_NAOVAR, &p->n_ao_var, si)) {
+		if(ev != DDC_PropertyDoesNotExist) { goto error; }
+		p->n_ao_var = 0;
+	}
 	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNINSTRS, &p->n_inst, si))    		// Base number of instructions
-		goto error;
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSCAN, &p->scan, si)){ goto error; } 
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTRIGTTL, &p->trigger_ttl, si)){ goto error; } 
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTOTTIME, &p->total_time, sd)){ goto error; } 
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNINSTRS, &p->n_inst, si)){ goto error; } 
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNUINSTRS, &p->nUniqueInstrs, si)) { goto error; } 
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PVAR, &p->varied, si)) { goto error; } 
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNVAR, &p->nVaried, si)) { goto error; }
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNDIMS, &p->nDims, si)) { goto error; }
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNCYCS, &p->nCycles, si))	{ goto error; }
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSKIP, &p->skip, si)) { goto error; }
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PMAX_N_STEPS, &p->max_n_steps, si)) { goto error; }
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PREAL_N_STEPS, &p->real_n_steps, si)) { goto error; }
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_NFUNCS, &p->nFuncs, si)) { goto error; }
+	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_TFUNCS, &p->tFuncs, si)) { goto error; }
 	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNUINSTRS, &p->nUniqueInstrs, si))	// Total number of unique instructions
-		goto error;
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PVAR, &p->varied, si))				// Whether or not it's varied
-		goto error;
-
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNVAR, &p->nVaried, si))				// Number of varied instructions
-		goto error;
-
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNDIMS, &p->nDims, si))				// Number of dimensions
-		goto error;
-
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNCYCS, &p->nCycles, si))			// Number of phase cycles
-		goto error;
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSKIP, &p->skip, si))				// Whether or not there are skips
-		goto error;
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PMAX_N_STEPS, &p->max_n_steps, si))	// Total number of steps in the experiment
-		goto error;
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PREAL_N_STEPS, &p->real_n_steps, si))// Total number of steps - those skipped
-		goto error;
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_NFUNCS, &p->nFuncs, si))				// Number of functions actually used
-		goto error;
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_TFUNCS, &p->tFuncs, si))				// Total number of functions available
-		goto error;
 	
 	// Now we need to go through one by one and get the channel handles.
 	int i, j, k = 0;
-	int nchans, nchan_names = 5, nvchan_names = 6;
+	int nchan_names = 14; 
 	DDCChannelHandle flags_c, time_c, ins_c, us_c, insd_c;
 	DDCChannelHandle msteps_c, vins_c, vi_dim_c, vi_mode_c, vi_locs_c, s_locs_c;
-	flags_c = time_c = ins_c = us_c = insd_c = msteps_c = vins_c = vi_dim_c = vi_mode_c = vi_locs_c = s_locs_c = NULL;
+	DDCChannelHandle ao_var_c, ao_dim_c, ao_vals_c;
+	flags_c = time_c = ins_c = us_c = insd_c = msteps_c = vins_c = vi_dim_c = NULL;
+	vi_mode_c = vi_locs_c = s_locs_c = ao_var_c = ao_dim_c = ao_vals_c = NULL;
 	
-	char *chan_names[] = {MCTD_PROGFLAG, MCTD_PROGTIME, MCTD_PROGINSTR, MCTD_PROGUS, MCTD_PROGID};
-	DDCChannelHandle *chan_hs[] = {&flags_c, &time_c, &ins_c, &us_c, &insd_c};
+	char *chan_names[] = {MCTD_PROGFLAG, MCTD_PROGTIME, MCTD_PROGINSTR, MCTD_PROGUS, MCTD_PROGID, MCTD_PMAXSTEPS, 
+						  MCTD_PVINS, MCTD_PVINSDIM, MCTD_PVINSMODE, MCTD_PVINSLOCS, MCTD_PSKIPLOCS, MCTD_AOVAR, 
+						  MCTD_AODIM, MCTD_AOVALS};
+	DDCChannelHandle *chan_hs[] = {&flags_c, &time_c, &ins_c, &us_c, &insd_c, &msteps_c, &vins_c, &vi_dim_c, 
+								   &vi_mode_c, &vi_locs_c, &s_locs_c, &ao_var_c, &ao_dim_c, &ao_vals_c};
 	
-	char *v_chan_names[] = {MCTD_PMAXSTEPS, MCTD_PVINS, MCTD_PVINSDIM, MCTD_PVINSMODE, MCTD_PVINSLOCS, MCTD_PSKIPLOCS};
-	DDCChannelHandle *v_chan_hs[] = {&msteps_c, &vins_c, &vi_dim_c, &vi_mode_c, &vi_locs_c, &s_locs_c};
 	
 	// Get the number of channels and a list of the channel handles.
-	if(ev = DDC_GetNumChannels(pcg, &nchans))
-		goto error;
+	if(ev = DDC_GetNumChannels(pcg, &nchans)) { goto error; }
 	
 	handles = malloc(sizeof(DDCChannelHandle)*nchans);
+
+	if(ev = DDC_GetChannels(pcg, handles, nchans)) { goto error; }
 	
-	if(ev = DDC_GetChannels(pcg, handles, nchans))
-		goto error;
+	// Get the names of all the channels
+	names = calloc(nchans, sizeof(char*));	// Null-initialized array of names
+	int len;
 	
-	// Go through each channel and get its name, and if it matches something, set that value.
-	int len, g = 20, s = 20;
-	name_buff = malloc(g);
-	
-	// Search for all the 1D bits first.
-	int found = 0, *cfound = calloc(si*nchans, si);
 	for(i = 0; i < nchans; i++) {
-		if(ev = DDC_GetChannelStringPropertyLength(handles[i], DDC_CHANNEL_NAME, &len))
-			goto error;
+		if(ev = DDC_GetChannelStringPropertyLength(handles[i], DDC_CHANNEL_NAME, &len)) { goto error; }
 		
-		if(g < ++len)	// If there's not enough room, allocate more room 
-			name_buff = realloc(name_buff, g+=(((int)((len-g)/s)+1)*s));
+		names[i] = malloc(++len);
 		
-		// Get the actual channel name
-		if(ev = DDC_GetChannelProperty(handles[i], DDC_CHANNEL_NAME, name_buff, len))
-			goto error;
-		
-		for(j = 0; j < nchan_names; j++) {
-			if(1<<j & found)	// Don't search if we've already found it.
-				continue;
-			
-			if(strcmp(chan_names[j], name_buff) == 0)
-				break;
-		}
-		
-		if(j < nchan_names) {		// In this case, we found it.
-			memcpy(chan_hs[j], &handles[i], sizeof(DDCChannelHandle));
-			k++;
-			found += 1<<j;
-			cfound[i] = 1;
-			continue;
-		} else if (k >= nchan_names)
-			break;	
+		if(ev = DDC_GetChannelProperty(handles[i], DDC_CHANNEL_NAME, names[i], len)) { goto error; }
 	}
+
+	// Match the names of the elements to the strings
+	int *matches = strings_in_array(names, chan_names, nchans, nchan_names);
 	
-	// Now if we need to, to through all the variation bits
-	if(!p->nVaried)
-		nvchan_names = 0;
-	
-	k = 0;
-	found = 0;
-	for(i = 0; i < nchans; i++) {
-		if(cfound[i])	// Skip this one if we found it the first time around.
-			continue;
-		
-		if(ev = DDC_GetChannelStringPropertyLength(handles[i], DDC_CHANNEL_NAME, &len))
-			goto error;
-		
-		if(g < ++len)
-			name_buff = realloc(name_buff, g+=(((int)((len-g)/s)+1)*2));
-		
-		if(ev = DDC_GetChannelProperty(handles[i], DDC_CHANNEL_NAME, name_buff, len))
-			goto error;
-		
-		for(j = 0; j < nvchan_names; j++) {
-			if(1<<j & found)
-				continue;
-			
-			if(strcmp(v_chan_names[j], name_buff) == 0)
-				break;
-		}
-		
-		if(j < nvchan_names) {
-			memcpy(v_chan_hs[j], &handles[i], sizeof(DDCChannelHandle));
-			k++;
-			found += 1<<j;
-			cfound[i] = 1;
-			continue;
-		} else if (k >= nvchan_names)
-			break;
+	// Go through and associate the channels with the matches.
+	for(i = 0; i < nchan_names; i++) { 
+		if(matches[i] >= 0) { memcpy(chan_hs[i], &handles[matches[i]], sizeof(DDCChannelHandle)); }
 	}
-	
-	free(cfound);
+
 	free(handles);
-	free(name_buff);
 	handles = NULL;
-	name_buff = NULL;
+	names = free_string_array(names, nchans);
 	
 	// At this point, we should have more than enough to complete the allocation of the p file.
-	p->nAout = 0;	// Placeholder.
-	
 	create_pprogram(p);
 	on = 1;
 	
@@ -596,86 +585,69 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 	ddata = malloc(sd*nui);
 	
 	// Flags
-	if(ev = DDC_GetDataValues(flags_c, 0, nui, idata))
-		goto error;
-	for(i = 0; i < nui; i++)
+	if(ev = DDC_GetDataValues(flags_c, 0, nui, idata)) { goto error; }
+	for(i = 0; i < nui; i++) { 
 		p->instrs[i]->flags = idata[i];
+	}
 	
 	// Instruction Delay
-	if(ev = DDC_GetDataValues(time_c, 0, nui, ddata))
-		goto error;
-	for(i = 0; i < nui; i++)
+	if(ev = DDC_GetDataValues(time_c, 0, nui, ddata)) { goto error; }
+	for(i = 0; i < nui; i++) {
 		p->instrs[i]->instr_time = ddata[i];
+	}
 	
 	// Instructions
-	if(ev = DDC_GetDataValues(ins_c, 0, nui, idata))
-		goto error;
-	for(i = 0; i < nui; i++)
+	if(ev = DDC_GetDataValues(ins_c, 0, nui, idata)) { goto error; }
+	for(i = 0; i < nui; i++) {
 		p->instrs[i]->instr = idata[i];
+	}
 	
 	// Units and scan
-	if(ev = DDC_GetDataValues(us_c, 0, nui, idata))
-		goto error;
+	if(ev = DDC_GetDataValues(us_c, 0, nui, idata)) { goto error; }
 	for(i = 0; i < nui; i++) {
 		p->instrs[i]->trigger_scan = 1 & idata[i];
 		p->instrs[i]->time_units = (int)(idata[i]>>1);
 	}
 	
 	// Instruction Data
-	if(ev = DDC_GetDataValues(insd_c, 0, nui, idata))
-		goto error;
-	for(i = 0; i < nui; i++)
+	if(ev = DDC_GetDataValues(insd_c, 0, nui, idata)) { goto error; }
+	for(i = 0; i < nui; i++) {
 		p->instrs[i]->instr_data = idata[i];
+	}
 	
 	free(idata);
 	free(ddata);
 	idata = NULL;
 	ddata = NULL;
 	
-	// Now go through and get the varied instructions
+	// Get the stuff you need to if the experiment's varied.
 	nvi = p->nVaried;
+	if(p->varied) {
+		// MaxSteps  
+		if(ev = DDC_GetDataValues(msteps_c, 0, p->nCycles+p->nDims, p->maxsteps)) { goto error; }
+	}
+	
+	// Now if the instructions are varied.
 	if(nvi) {
-		// MaxSteps
-		if(ev = DDC_GetDataValues(msteps_c, 0, p->nCycles+p->nDims, p->maxsteps))
-			goto error;
-		
 		// VIns, VInsDims, VInsMode
-		if(ev = DDC_GetDataValues(vins_c, 0, p->nVaried, p->v_ins))
-			goto error;
-		
-		if(ev = DDC_GetDataValues(vi_dim_c, 0, p->nVaried, p->v_ins_dim))
-			goto error;
-		
-		if(ev = DDC_GetDataValues(vi_mode_c, 0, p->nVaried, p->v_ins_mode))
-			goto error;
+		if(ev = DDC_GetDataValues(vins_c, 0, p->nVaried, p->v_ins)) { goto error; }
+		if(ev = DDC_GetDataValues(vi_dim_c, 0, p->nVaried, p->v_ins_dim)) { goto error; }
+		if(ev = DDC_GetDataValues(vi_mode_c, 0, p->nVaried, p->v_ins_mode)) { goto error; }
 		
 		// Delay and data instructions are stored as a property on VIns.
 		int ldel, ldat;
-		if(ev = DDC_GetChannelStringPropertyLength(vins_c, MCTD_PDELEXPRS, &ldel))
-			goto error;
-		
-		if(ev = DDC_GetChannelStringPropertyLength(vins_c, MCTD_PDATEXPRS, &ldat))
-			goto error;
+		if(ev = DDC_GetChannelStringPropertyLength(vins_c, MCTD_PDELEXPRS, &ldel)) { goto error; }
+		if(ev = DDC_GetChannelStringPropertyLength(vins_c, MCTD_PDATEXPRS, &ldat)) { goto error; }
 		
 		delay_exprs = malloc(++ldel);
 		data_exprs = malloc(++ldat);
 		
-		if(ev = DDC_GetChannelProperty(vins_c, MCTD_PDELEXPRS, delay_exprs, ldel))
-			goto error;
-		
-		if(ev = DDC_GetChannelProperty(vins_c, MCTD_PDATEXPRS, data_exprs, ldat))
-			goto error;
+		if(ev = DDC_GetChannelProperty(vins_c, MCTD_PDELEXPRS, delay_exprs, ldel)) { goto error; }
+		if(ev = DDC_GetChannelProperty(vins_c, MCTD_PDATEXPRS, data_exprs, ldat)) { goto error; }
 		
 		// Now we need to get those data expressions as an array.
-		if(p->delay_exprs != NULL) {
-			for(i = 0; i < nvi; i++) {
-				if(p->delay_exprs[i] != NULL)
-					free(p->delay_exprs[i]);
-			}
-			free(p->delay_exprs);
-		}
-		
 		int ns = nvi;
+		p->delay_exprs = free_string_array(p->delay_exprs, nvi);
 		p->delay_exprs = get_nc_strings(delay_exprs, &ns);
 		
 		if(ns != nvi) {
@@ -683,14 +655,7 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 			goto error;
 		}
 		
-		if(p->data_exprs != NULL) {
-			for(i = 0; i < nvi; i++) {
-				if(p->data_exprs[i] != NULL)
-					free(p->data_exprs[i]);
-			}
-			free(p->data_exprs);
-		}
-		
+		p->data_exprs = free_string_array(p->data_exprs, nvi);
 		p->data_exprs = get_nc_strings(data_exprs, &ns);
 		if(ns != nvi) {
 			ev = -250;
@@ -699,31 +664,29 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 		
 		// Now we need to read the v_ins_locs, which has been stored as a single array, into a 2D array.
 		for(i = 0; i < nvi; i++) {
-			if(ev = DDC_GetDataValues(vi_locs_c, i*p->max_n_steps, p->max_n_steps, p->v_ins_locs[i]))
-				goto error;
+			if(ev = DDC_GetDataValues(vi_locs_c, i*p->max_n_steps, p->max_n_steps, p->v_ins_locs[i])) { goto error; }
 		}
 		
 		// Now we get the delay and data expressions
 	
 		if(p->skip & 2) {
 			// First we get the skip expression if it's been saved.
-			if(ev = DDC_GetChannelGroupStringPropertyLength(pcg, MCTD_PSKIPEXPR, &len))
-				goto error;
+			if(ev = DDC_GetChannelGroupStringPropertyLength(pcg, MCTD_PSKIPEXPR, &len)) { goto error; }
 			
-			if(p->skip_expr == NULL)
+			if(p->skip_expr == NULL) {
 				p->skip_expr = malloc(++len);
-			else
+			} else {
 				p->skip_expr = realloc(p->skip_expr, ++len);
+			}
 			
-			if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSKIPEXPR, p->skip_expr, len))
-				goto error;
+			if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSKIPEXPR, p->skip_expr, len)) { goto error; }
 			
 			if(p->skip & 1 && s_locs_c != NULL) {
 				skip_locs = malloc(sizeof(unsigned char)*p->max_n_steps);
 				if(ev = DDC_GetDataValues(s_locs_c, 0, p->max_n_steps, skip_locs)) { goto error; }
-				
-				for(i = 0; i < p->max_n_steps; i++)
-					p->skip_locs[i] = skip_locs[i];
+			
+				// Copy this over. There's an implicit cast involved, so I'm not using memcpy.
+				for(i = 0; i < p->max_n_steps; i++) { p->skip_locs[i] = skip_locs[i]; }
 				
 				free(skip_locs);
 				skip_locs = NULL;
@@ -731,10 +694,73 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 		}
 	}
 	
+	// Get the analog outputs.
+	if(p->nAout) {
+		if(DDC_GetDataValues(ao_var_c, 0, p->nAout, p->ao_varied)) { goto error; }
+		if(DDC_GetDataValues(ao_dim_c, 0, p->nAout, p->ao_dim)) { goto error; }
+		
+		int get_exprs = 0;
+		for(i = 0; i < p->nAout; i++) { 
+			if(p->ao_varied[i] == 2) {
+				get_exprs = 1;
+				break;
+			}
+		}
+		
+		int ns = p->nAout;
+		
+		// Get the channels
+		if(ev = DDC_GetChannelStringPropertyLength(ao_var_c, MCTD_AOCHANS, &len)) { goto error; }
+		ao_chans = malloc(++len);
+		
+		if(ev = DDC_GetChannelProperty(ao_var_c, MCTD_AOCHANS, ao_chans, len)) { goto error; }
+		
+		p->ao_chans = get_nc_strings(ao_chans, &ns);
+		if(ns != p->nAout) {
+			ev = -250;
+			goto error;
+		}
+		
+		// Get expressions if necessary
+		if(get_exprs) {
+			if(ev = DDC_GetChannelStringPropertyLength(ao_var_c, MCTD_AOEXPRS, &len)) { goto error; }
+			
+			ao_exprs = malloc(++len);
+			
+			if(ev = DDC_GetChannelProperty(ao_var_c, MCTD_AOEXPRS, ao_exprs, len)) { goto error; }
+			
+			p->ao_exprs = get_nc_strings(ao_exprs, &ns);
+			free(ao_exprs);
+			
+			if(ns != p->nAout) {
+				ev = -25;
+				goto error; 
+			}
+		}
+		
+		// Now grab the values array, it's stored sequentially.
+		int nv, k = 0;
+		for(i = 0; i < p->nAout; i++) { 
+			if(p->ao_dim[i] >= 0) {
+				nv = p->maxsteps[p->ao_dim[i]+p->nCycles];
+			} else {
+				nv = 1;
+			}
+			
+			p->ao_vals[i] = malloc(sizeof(double)*nv);
+			
+			if(ev = DDC_GetDataValues(ao_vals_c, k, nv, p->ao_vals[i])) { goto error; }
+
+			k+=nv;
+		}
+	}
+	
 	error:
 	
 	err_val[0] = ev;
 	
+	if(ao_chans != NULL) { free(ao_chans); }
+	if(ao_exprs != NULL) { free(ao_exprs); }
 	if(data_exprs != NULL) { free(data_exprs); }
 	if(delay_exprs != NULL) { free(delay_exprs); }
 	
@@ -744,358 +770,18 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 	if(skip_locs != NULL) { free(skip_locs); }
 
 	if(ev) { 
-		if(!on)
+		if(!on) {
 			free(p);
-		else
+		} else {
 			free_pprog(p);
+		}
+		
 		p = NULL;
-	} 
+	}
+	
+	free_string_array(names, nchans);
 	
 	return p;
-	
-}
-
-PPROGRAM *tdms_load_program(TDMSChannelGroupHandle pcg, int *err_val) {
-	// Loads programs from the Channel Group "pcg" in a TDM streaming library
-	
-	// Variable declarations
-	PPROGRAM *p = malloc(sizeof(PPROGRAM));
-	int on = 0, *idata = NULL, ev = 0, nvi = 0, *vfound = NULL;
-	double *ddata = NULL;
-	TDMSChannelHandle *handles = NULL;
-	char *name_buff = NULL, *delay_exprs = NULL, *data_exprs = NULL;
-	err_val[0] = ev;
-	
-	// We're going to start out by getting a bunch of properties
-	int si = sizeof(int), sd = sizeof(double);
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PNP, &p->np, si)) {					// Number of points
-		if(ev != TDMS_PropertyDoesNotExist)
-			goto error;
-		else
-			GetCtrlVal(pc.np[1], pc.np[0], &p->np);
-	}
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PSR, &p->sr, sd)) {					// Sampling Rate
-		if(ev != TDMS_PropertyDoesNotExist)
-			goto error;
-		else
-			GetCtrlVal(pc.sr[1], pc.sr[0], &p->sr);
-	}
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PNT, &p->nt, si)) {					// Number of transients
-		if(ev != TDMS_PropertyDoesNotExist)
-			goto error;
-		else
-			GetCtrlVal(pc.nt[1], pc.nt[0], &p->nt);
-	}
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PTMODE, &p->tmode, si)) {			// Transient acquisition mode
-		if(ev != TDMS_PropertyDoesNotExist)
-			goto error;
-		else
-			GetCtrlVal(pc.tfirst[1], pc.tfirst[0], &p->tmode);
-	}
-		
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PSCAN, &p->scan, si))				// Whether or not there's a scan
-		goto error;
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PTRIGTTL, &p->trigger_ttl, si))    	// Trigger TTL
-		goto error;
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PTOTTIME, &p->total_time, sd))		// Total time
-		goto error;
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PNINSTRS, &p->n_inst, si))    		// Base number of instructions
-		goto error;
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PNUINSTRS, &p->nUniqueInstrs, si))	// Total number of unique instructions
-		goto error;
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PVAR, &p->varied, si))				// Whether or not it's varied
-		goto error;
-
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PNVAR, &p->nVaried, si))				// Number of varied instructions
-		goto error;
-
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PNDIMS, &p->nDims, si))				// Number of dimensions
-		goto error;
-
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PNCYCS, &p->nCycles, si))			// Number of phase cycles
-		goto error;
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PSKIP, &p->skip, si))				// Whether or not there are skips
-		goto error;
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PMAX_N_STEPS, &p->max_n_steps, si))	// Total number of steps in the experiment
-		goto error;
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PREAL_N_STEPS, &p->real_n_steps, si))// Total number of steps - those skipped
-		goto error;
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_NFUNCS, &p->nFuncs, si))				// Number of functions actually used
-		goto error;
-	
-	if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_TFUNCS, &p->tFuncs, si))				// Total number of functions available
-		goto error;
-	
-	// Now we need to go through one by one and get the channel handles.
-	int i, j, k = 0;
-	int nchans, nchan_names = 5, nvchan_names = 6;
-	TDMSChannelHandle flags_c, time_c, ins_c, us_c, insd_c;
-	TDMSChannelHandle msteps_c, vins_c, vi_dim_c, vi_mode_c, vi_locs_c, s_locs_c;
-	flags_c = time_c = ins_c = us_c = insd_c = msteps_c = vins_c = vi_dim_c = vi_mode_c = vi_locs_c = s_locs_c = NULL;
-	
-	char *chan_names[] = {MCTD_PROGFLAG, MCTD_PROGTIME, MCTD_PROGINSTR, MCTD_PROGUS, MCTD_PROGID};
-	TDMSChannelHandle *chan_hs[] = {&flags_c, &time_c, &ins_c, &us_c, &insd_c};
-	
-	char *v_chan_names[] = {MCTD_PMAXSTEPS, MCTD_PVINS, MCTD_PVINSDIM, MCTD_PVINSMODE, MCTD_PVINSLOCS, MCTD_PSKIPLOCS};
-	TDMSChannelHandle *v_chan_hs[] = {&msteps_c, &vins_c, &vi_dim_c, &vi_mode_c, &vi_locs_c, &s_locs_c};
-	
-	// Get the number of channels and a list of the channel handles.
-	if(ev = TDMS_GetNumChannels(pcg, &nchans))
-		goto error;
-	
-	handles = malloc(sizeof(TDMSChannelHandle)*nchans);
-	
-	if(ev = TDMS_GetChannels(pcg, handles, nchans))
-		goto error;
-	
-	// Go through each channel and get its name, and if it matches something, set that value.
-	int len, g = 20, s = 20;
-	name_buff = malloc(g);
-	
-	// Search for all the 1D bits first.
-	int found = 0, *cfound = calloc(si*nchans, si);
-	for(i = 0; i < nchans; i++) {
-		if(ev = TDMS_GetChannelStringPropertyLength(handles[i], TDMS_CHANNEL_NAME, &len))
-			goto error;
-		
-		if(g < ++len)	// If there's not enough room, allocate more room 
-			name_buff = realloc(name_buff, g+=(((int)((len-g)/s)+1)*s));
-		
-		// Get the actual channel name
-		if(ev = TDMS_GetChannelProperty(handles[i], TDMS_CHANNEL_NAME, name_buff, len))
-			goto error;
-		
-		for(j = 0; j < nchan_names; j++) {
-			if(1<<j & found)	// Don't search if we've already found it.
-				continue;
-			
-			if(strcmp(chan_names[j], name_buff) == 0)
-				break;
-		}
-		
-		if(j < nchan_names) {		// In this case, we found it.
-			memcpy(chan_hs[j], &handles[i], sizeof(TDMSChannelHandle));
-			k++;
-			found += 1<<j;
-			cfound[i] = 1;
-			continue;
-		} else if (k >= nchan_names)
-			break;	
-	}
-	
-	// Now if we need to, to through all the variation bits
-	if(!p->varied)
-		nvchan_names = 0;
-	
-	k = 0;
-	found = 0;
-	for(i = 0; i < nchans; i++) {
-		if(cfound[i])	// Skip this one if we found it the first time around.
-			continue;
-		
-		if(ev = TDMS_GetChannelStringPropertyLength(handles[i], TDMS_CHANNEL_NAME, &len))
-			goto error;
-		
-		if(g < ++len)
-			name_buff = realloc(name_buff, g+=(((int)((len-g)/s)+1)*2));
-		
-		if(ev = TDMS_GetChannelProperty(handles[i], TDMS_CHANNEL_NAME, name_buff, len))
-			goto error;
-		
-		for(j = 0; j < nvchan_names; j++) {
-			if(1<<j & found)
-				continue;
-			
-			if(strcmp(v_chan_names[j], name_buff) == 0)
-				break;
-		}
-		
-		if(j < nvchan_names) {
-			memcpy(v_chan_hs[j], &handles[i], sizeof(TDMSChannelHandle));
-			k++;
-			found += 1<<j;
-			cfound[i] = 1;
-			continue;
-		} else if (k >= nvchan_names)
-			break;
-	}
-	
-	free(cfound);
-	free(handles);
-	free(name_buff);
-	handles = NULL;
-	name_buff = NULL;
-	
-	// At this point, we should have more than enough to complete the allocation of the p file.
-	create_pprogram(p);
-	on = 1;
-	
-	// First we'll read out the instructions
-	int nui = p->nUniqueInstrs;
-	idata = malloc(si*nui);
-	ddata = malloc(sd*nui);
-	
-	// Flags
-	if(ev = TDMS_GetDataValuesEx(flags_c, 0, nui, idata))
-		goto error;
-	for(i = 0; i < nui; i++)
-		p->instrs[i]->flags = idata[i];
-	
-	// Instruction Delay
-	if(ev = TDMS_GetDataValuesEx(time_c, 0, nui, ddata))
-		goto error;
-	for(i = 0; i < nui; i++)
-		p->instrs[i]->instr_time = ddata[i];
-	
-	// Instructions
-	if(ev = TDMS_GetDataValuesEx(ins_c, 0, nui, idata))
-		goto error;
-	for(i = 0; i < nui; i++)
-		p->instrs[i]->instr = idata[i];
-	
-	// Units and scan
-	if(ev = TDMS_GetDataValuesEx(us_c, 0, nui, idata))
-		goto error;
-	for(i = 0; i < nui; i++) {
-		p->instrs[i]->trigger_scan = 1 & idata[i];
-		p->instrs[i]->time_units = (int)(idata[i]>>1);
-	}
-	
-	// Instruction Data
-	if(ev = TDMS_GetDataValuesEx(insd_c, 0, nui, idata))
-		goto error;
-	for(i = 0; i < nui; i++)
-		p->instrs[i]->instr = idata[i];
-	
-	free(idata);
-	free(ddata);
-	idata = NULL;
-	ddata = NULL;
-	
-	// Now go through and get the varied instructions
-	nvi = p->nVaried;
-	if(nvi) {
-		// MaxSteps
-		if(ev = TDMS_GetDataValuesEx(msteps_c, 0, p->nCycles+p->nDims, p->maxsteps))
-			goto error;
-		
-		// VIns, VInsDims, VInsMode
-		if(ev = TDMS_GetDataValuesEx(vins_c, 0, p->nVaried, p->v_ins))
-			goto error;
-		
-		if(ev = TDMS_GetDataValuesEx(vi_dim_c, 0, p->nVaried, p->v_ins_dim))
-			goto error;
-		
-		if(ev = TDMS_GetDataValuesEx(vi_mode_c, 0, p->nVaried, p->v_ins_mode))
-			goto error;
-		
-		// Delay and data instructions are stored as a property on VIns.
-		int ldel, ldat;
-		if(ev = TDMS_GetChannelStringPropertyLength(vins_c, MCTD_PDELEXPRS, &ldel))
-			goto error;
-		
-		if(ev = TDMS_GetChannelStringPropertyLength(vins_c, MCTD_PDATEXPRS, &ldat))
-			goto error;
-		
-		delay_exprs = malloc(++ldel);
-		data_exprs = malloc(++ldat);
-		
-		if(ev = TDMS_GetChannelProperty(vins_c, MCTD_PDELEXPRS, delay_exprs, ldel))
-			goto error;
-		
-		if(ev = TDMS_GetChannelProperty(vins_c, MCTD_PDATEXPRS, data_exprs, ldat))
-			goto error;
-		
-		// Now we need to get those data expressions as an array.
-		if(p->delay_exprs != NULL) {
-			for(i = 0; i < nvi; i++) {
-				if(p->delay_exprs[i] != NULL)
-					free(p->delay_exprs[i]);
-			}
-			free(p->delay_exprs);
-		}
-		
-		int ns = nvi;
-		p->delay_exprs = get_nc_strings(delay_exprs, &ns);
-		
-		if(ns != nvi) {
-			ev = -250;
-			goto error;
-		}
-		
-		if(p->data_exprs != NULL) {
-			for(i = 0; i < nvi; i++) {
-				if(p->data_exprs[i] != NULL)
-					free(p->data_exprs[i]);
-			}
-			free(p->data_exprs);
-		}
-		
-		p->data_exprs = get_nc_strings(data_exprs, &ns);
-		if(ns != nvi) {
-			ev = -250;
-			goto error;
-		}
-		
-		// Now we need to read the v_ins_locs, which has been stored as a single array, into a 2D array.
-		for(i = 0; i < nvi; i++) {
-			if(ev = TDMS_GetDataValuesEx(vi_locs_c, i*p->max_n_steps, p->max_n_steps, p->v_ins_locs[i]))
-				goto error;
-		}
-		
-		// Now we get the delay and data expressions
-	
-		if(p->skip & 2) {
-			// First we get the skip expression if it's been saved.
-			if(ev = TDMS_GetChannelGroupStringPropertyLength(pcg, MCTD_PSKIPEXPR, &len))
-				goto error;
-			
-			if(p->skip_expr == NULL)
-				p->skip_expr = malloc(++len);
-			else
-				p->skip_expr = realloc(p->skip_expr, ++len);
-			
-			if(ev = TDMS_GetChannelGroupProperty(pcg, MCTD_PSKIPEXPR, p->skip_expr, len))
-				goto error;
-			
-			if(p->skip & 1 && s_locs_c != NULL) {
-				if(ev = TDMS_GetDataValuesEx(s_locs_c, 0, p->max_n_steps, p->skip_locs))
-					goto error;
-			}
-		}
-	}
-	
-	return p;
-	
-	error:
-	
-	err_val[0] = ev;
-	
-	if(idata != NULL)
-		free(idata);
-		
-	if(ddata != NULL)
-		free(ddata);
-	
-	if(!on)
-		free(p);
-	else
-		free_pprog(p);
-		
-	return NULL;
 	
 }
 
@@ -2015,12 +1701,16 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 	// Now the analog outs if they exist.
 	if(p->nAout) {
 		int size, len, dim, steps, dev = -1, chan = -1;
-		memcpy(uipc.ac_varied, p->ao_varied, sizeof(int)*p->nAout);
+		int *ac_varied = malloc(sizeof(int)*p->nAout);
+		
+		memcpy(ac_varied, p->ao_varied, sizeof(int)*p->nAout);
 		memcpy(uipc.ac_dim, p->ao_dim, sizeof(int)*p->nAout);
 		
 		for(i = 0; i < p->nAout; i++) {
 			// Generate the values ourselves from the start and finish.
-			SetCtrlVal(pc.ainst[i], pc.ainitval, p->ao_vals[i][0]); 
+			SetCtrlVal(pc.ainst[i], pc.ainitval, p->ao_vals[i][0]);
+			set_ao_nd_state(i, ac_varied[i]);
+			
 			if(uipc.ac_varied[i]) {
 				dim = p->ao_dim[i];
 				steps = p->maxsteps[dim+p->nCycles];
@@ -2047,6 +1737,8 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 			
 			SetCtrlVal(pc.ainst[i], pc.aochan, chan);
 		}
+		
+		free(ac_varied);
 	}
 
 	if(cstep != NULL)
@@ -6032,6 +5724,7 @@ void update_ao_increment(int num, int mode) {
 	GetCtrlAttribute(panel, pc.ainitval, ATTR_MAX_VALUE, &max);
 	
 	// Perform the calculations.
+	steps--;
 	switch(mode) {
 		case MC_INIT:
 			init = fin-(inc*steps); // Simple enough
@@ -6270,9 +5963,14 @@ void create_pprogram(PPROGRAM *p) { // Initially allocates the PPROGRAM space
 	//	p->varied		p->nFuncs       p->nAout
 	//	p->skip			p->nDims
 	//	p->nVaried	   	p->nCycles
+
+	if(p->varied) {
+		p->maxsteps = malloc(sizeof(int)*(p->nDims+p->nCycles)); 				// Allocate the maximum position point
+	} else {
+		p->maxsteps = NULL;
+	}
 	
 	if(p->nVaried) {
-		p->maxsteps = malloc(sizeof(int)*(p->nDims+p->nCycles)); 				// Allocate the maximum position point
 		p->v_ins = malloc(sizeof(int)*p->nVaried); 			// Allocate the array of varied instruction locations.
 		p->v_ins_dim = malloc(sizeof(int)*p->nVaried);		// Allocate the array of varied dimension per instr
 		p->v_ins_mode = malloc(sizeof(int)*p->nVaried);		// Allocate the array of variation modes
@@ -6298,7 +5996,6 @@ void create_pprogram(PPROGRAM *p) { // Initially allocates the PPROGRAM space
 			p->skip_expr = NULL;
 		}
 	} else {
-		p->maxsteps = NULL;
 		p->v_ins = NULL;
 		p->v_ins_dim = NULL;
 		p->v_ins_mode = NULL;
