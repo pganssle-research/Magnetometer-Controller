@@ -681,14 +681,17 @@ void initialize_ce() {
 	// Null for a bunch of stuff
 	ce.fname = NULL;
 		
-	ce.aTask = ce.cTask = NULL;
-	ce.ctname = ce.atname = NULL;
+	ce.aTask = ce.cTask = ce.oTask = NULL;
+	ce.ctname = ce.atname = ce.otname = NULL;
 	ce.update_thread = -1;
 	ce.atset = 0;
 	ce.ctset = 0;
 
 	ce.ccname = NULL;
-	ce.icnames = NULL;
+	ce.icnames = ce.ocnames = NULL;
+	
+	ce.ochanson = NULL;
+	ce.ao_vals = NULL;
 	
 	ce.cstep = NULL;
 	ce.ilist = NULL;

@@ -124,6 +124,12 @@ extern void change_range_safe(void);
 /****************** Device Interaction *******************/
 extern int setup_DAQ_task(void);
 extern int setup_DAQ_task_safe(int DAQ_lock, int UIDC_lock, int CE_lock);
+
+extern int setup_DAQ_aouts(void);
+extern int setup_DAQ_aouts_safe(int DAQ_lock, int UIPC_lock, int CE_lock);
+extern int update_DAQ_aouts(void);
+extern int update_DAQ_aouts_safe(int DAQ_lock, int CE_lock);
+
 extern int clear_DAQ_task(void);
 extern int clrea_DAQ_task_safe(void);
 

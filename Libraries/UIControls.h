@@ -380,7 +380,7 @@ struct {
 struct {
 	TaskHandle aTask; 		// Signal acquisition task
 	TaskHandle cTask;		// Counter task.
-	
+
 	int update_thread;		// Update thread id.
 	
 	PPROGRAM *p;			// Current program
@@ -412,6 +412,18 @@ struct {
 
 	CVIAbsoluteTime tstart;	// Time started
 	CVIAbsoluteTime tdone; 	// Time that the most recent part was completed.
+	
+	// Analog output info
+	TaskHandle oTask;		// Analog output task
+
+	char *otname;			// Analog output task name
+	
+	int otset;				// Whether or not analog output task is set
+	int nochans;			// Number of analog output channels.
+	int *ochanson;			// Analog output channels on. Size = nochans, Refers to indices in p->ao_chans
+	char **ocnames;			// Analog output channel names. Size = nochans.
+	float64 *ao_vals;		// Analog output values for each channel. Size = nochans;
+	
 	
 	// File saving info
 	int cind;					// Current index in acquisition

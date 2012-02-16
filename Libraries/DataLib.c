@@ -64,17 +64,20 @@ void CVICALLBACK discardIdleAndGetData (int poolHandle, int functionID, unsigned
 	CmtGetLock(lock_ce);
 	CmtGetLock(lock_DAQ);
 	
-	if(ce.ctset) {
-		DAQmxClearTask(ce.cTask);
-		ce.ctset = 0;
-		ce.cTask = NULL;
+	clear_DAQ_task();
+	
+	if(ce.ao_vals != NULL) {
+		free(ce.ao_vals);
+		ce.ao_vals = NULL;
 	}
 	
-	if(ce.atset) {
-		DAQmxClearTask(ce.aTask);
-		ce.atset = 0;
-		ce.aTask = NULL;
+	if(ce.ochanson != NULL) {
+		free(ce.ochanson);
+		ce.ochanson = NULL;
 	}
+	
+	ce.ocnames = free_string_array(ce.ocnames, ce.nochans);
+	ce.nochans = 0;
 	
 	// Clear out some current experiment stuff.
 	if(ce.ilist != NULL) {
@@ -166,14 +169,22 @@ int run_experiment(PPROGRAM *p) {
 		update_experiment_nav();
 	}
 	
+	if(p->nAout) {
+		if(setup_DAQ_aouts_safe(1, 1, 0) != 0) {
+			ev = 2;
+			goto error;
+		}
+	}
+	
+	int aouts = ce.nochans?1:0;
+	
 	CmtReleaseLock(lock_ce);
 	ce_locked = 0;
 	
 	// Make sure the pulseblaster is initiated.
 	if(!GetInitialized()) {
 		ev = pb_init_safe(1);
-		if(ev < 0) 
-			goto error;
+		if(ev < 0) { goto error; }
 	}
 
 	// For the moment, continuous acquisition in ND is not implemented
@@ -204,16 +215,28 @@ int run_experiment(PPROGRAM *p) {
 		if(!done) {
 			// This is the part where data acquisition takes place.
 			
-			if(scan) {
+			if(scan || aouts) {
 				// Get data from device
 				CmtGetLock(lock_DAQ);
+				
+				if(scan) {
+					DAQmxStartTask(ce.cTask);			// Tasks should be started BEFORE the program is run.
+					DAQmxStartTask(ce.aTask);
+				}
+				
+				if(aouts) {
+					// Since this task is just a change in the DC output levels,
+					// we can currently just start it, update the values, then stop
+					// it. When triggering and function outputs are added, we'll have 
+					// to move the DAQmxStopTask call to later.
+					
+					DAQmxStartTask(ce.oTask);
+					update_DAQ_aouts_safe(0, !ce_locked); // Updates the values.
+					DAQmxStopTask(ce.oTask);
+				}
 
-				DAQmxStartTask(ce.cTask);			// Tasks should be started BEFORE the program is run.
-				DAQmxStartTask(ce.aTask);
-			
 				CmtReleaseLock(lock_DAQ);
 			}
-
 			//  Program and start the pulseblaster.
 			if(program_pulses_safe(ce.ilist, ce.ninst, 1) < 0) { goto error; }
 			if(pb_start_safe(1) < 0) { goto error; }
@@ -3365,6 +3388,13 @@ int setup_DAQ_task() {
 	char *tc_name = NULL;
 	
 	if(rv = clear_DAQ_task()) { goto error; }
+	
+	if(ce.p == NULL) {		// This must be set.
+		rv = -1;
+		goto error;
+	}
+	
+	PPROGRAM *p = ce.p;			// Convenience.
 
 	// First we create the tasks
 	ce.atname = "AcquireTask";
@@ -3382,11 +3412,9 @@ int setup_DAQ_task() {
 	if(rv = DAQmxCreateTask(ce.ctname, &ce.cTask)) { goto error; }
 	ce.ctset = 1;	// We've created the counter task
 	
-	// Get some stuff from the UI
-	int np;
-	double sr;
-	GetCtrlVal(pc.np[1], pc.np[0], &np);
-	GetCtrlVal(pc.sr[1], pc.sr[0], &sr);
+	// Convenience
+	int np = p->np;
+	double sr = p->sr;
 	
 	// Create the analog input voltage channels
 	int i, ic, nc = uidc.onchans, insize = 25, len;
@@ -3449,6 +3477,7 @@ int setup_DAQ_task() {
 	
 	if(ce.ccname != NULL) { free(ce.ccname); }
 	ce.ccname = cc_out_name;
+	cc_out_name = NULL;
 	
 	/*****TODO*****
 	Update this to work with windowed acquisitions - should be easy
@@ -3482,17 +3511,11 @@ int setup_DAQ_task() {
 	error:
 	
 	if(tname != NULL) { free(tname); }
-	
 	if(ic_name != NULL) { free(ic_name); }
-
 	if(cc_name != NULL) { free(cc_name); }
-	
 	if(cc_out_name != NULL) { free(cc_out_name); }
-	
-	if(ce.ccname != NULL) { ce.ccname = NULL; }
-	
+//	if(ce.ccname != NULL) { ce.ccname = NULL; }  // Why was this being freed?
 	if(tc_name != NULL) { free(tc_name); }
-	
 	if(rv != 0) {
 		if(ce.atset) { DAQmxClearTask(ce.aTask); }
 		if(ce.ctset) { DAQmxClearTask(ce.cTask); }
@@ -3514,22 +3537,230 @@ int setup_DAQ_task_safe(int DAQ_lock, int UIDC_lock, int CE_lock) {
 	return rv;
 }
 
-int clear_DAQ_task() {
+int setup_DAQ_aouts() {
+	// This will create the relevant analog output tasks. Currently this
+	// is only set up to work with NI DAQs, when more devices are supported
+	// the nature of this may need to change.
+	//
+	// There will be one task, ce.oTask, which contains all the relevant
+	// analog output channels. Currently no triggering will be available
+	//
+	// Returns negative value on failure.
+	// -1: ce.p is null.
+	
+	int rv = 0, *chans_set = NULL;
+	
+	if(ce.p == NULL) { return -1; }
+	
+	PPROGRAM *p = ce.p;
+	if(!p->nAout) { return 0; }
+	
+	// Weed out the channels that aren't set.
+	int i, dev = -1, chan = -1, nout = 0;
+	chans_set = calloc(p->nAout, sizeof(int));
+	
+	for(i = 0; i < p->nAout; i++) {
+		get_ao_dev_chan(p->ao_chans[i], &dev, &chan);
+		
+		if(dev >= 0 && chan >= 0) { 
+			chans_set[i] = 1;
+			nout++;
+		}
+	}
+	
+	ce.nochans = nout;
+	
+	if(nout < 1) { return 0; } // No channels on.
+	
+	// Start by creating the task.
+	ce.otname = "AOutTask";
+	ce.oTask = NULL;
+	ce.otset = 0;
+	
+	if(rv = DAQmxCreateTask(ce.otname, &ce.oTask)) { goto error; }
+	ce.otset = 1;	// Success!
+	
+	// Free the old memory if necessary
+	if(ce.nochans > 0) {
+		ce.ocnames = free_string_array(ce.ocnames, ce.nochans);	
+	}
+
+	if(ce.ochanson != NULL) { free(ce.ochanson); }
+	ce.nochans = nout;
+	
+	// Create the analog output voltage channels.
+	int steps, val, j;
+	int k = 0, len = strlen("AnalogOuput00")+1;
+	ce.ochanson = malloc(sizeof(int)*nout);
+	ce.ocnames = malloc(sizeof(char*)*nout);
+
+	float64 min_val, max_val;
+	
+	for(i = 0; i < p->nAout; i++) {
+		if(!chans_set[i]) { continue; }
+		
+		// Get the names
+		ce.ochanson[k] = i;			   
+		ce.ocnames[k] = malloc(len);
+		sprintf(ce.ocnames[k], "AnalogOutput%02d", k);
+		
+		// Find minimum and maximum values.
+		min_val = max_val = p->ao_vals[i][0];
+		
+		if(p->ao_dim[i] >= 0) {
+			steps = p->maxsteps[p->nCycles+p->ao_dim[i]];
+			for(j = 0; j < steps; j++) {
+				val = p->ao_vals[i][j];
+				
+				// Since the float comparison operation is abelian,
+				// it's not possible for the value to simultaneously 
+				// be less than the minimum value and greater than 
+				// the maximum value, so we don't have to check both.
+				
+				if(min_val < val) {
+					min_val = val;	
+				} else if(max_val > val) {
+					max_val = val;	
+				}
+			}
+		}
+
+		// Create the channel.
+		if(rv = DAQmxCreateAOVoltageChan(ce.oTask, p->ao_chans[i], ce.ocnames[k],
+				min_val, max_val, DAQmx_Val_Volts, NULL)) { goto error; }
+			
+		k++;
+		
+		if(k == nout) { break; }	// We're done.
+	}
+	
+	error:
+	
+	if(rv != 0) {
+		// Clear the task if we can.
+		if(ce.otset) {
+			if(!DAQmxClearTask(ce.oTask)) { 
+				ce.otset = 0; 
+				ce.oTask = NULL;
+			}
+		}
+		
+		if(ce.ochanson != NULL) { 
+			free(ce.ochanson);
+			ce.ochanson = NULL;
+		}
+		
+		ce.ocnames = free_string_array(ce.ocnames, ce.nochans);
+	
+	}
+	
+	if(chans_set != NULL) { free(chans_set); }
+	
+	return rv;
+}
+
+int setup_DAQ_aouts_safe(int DAQ_lock, int UIPC_lock, int CE_lock) {
+	if(DAQ_lock) { CmtGetLock(lock_DAQ); }
+	if(CE_lock) { CmtGetLock(lock_ce); }
+	if(UIPC_lock) { CmtGetLock(lock_uipc); }
+	
+	int rv = setup_DAQ_aouts();
+	
+	if(UIPC_lock) { CmtReleaseLock(lock_uipc); }
+	if(CE_lock) { CmtReleaseLock(lock_ce); }
+	if(DAQ_lock) { CmtReleaseLock(lock_DAQ); }
+	
+	return rv;
+}
+
+int update_DAQ_aouts() {
+	// Update the DAQ aouts based on the ce function.
+	//
+	// Returns 0 on success, negative number on failure.
+	// -1: Task not active.
+	
 	int rv = 0;
+	
+	if(ce.nochans) { return 0; } // No channels
+	if(!ce.otset || ce.oTask == NULL) { return -1; }
+	
+	PPROGRAM *p = ce.p;
+	
+	// If it's the first time, you need to create ce.ao_vals
+	if(ce.ao_vals == NULL) {
+		ce.ao_vals = malloc(ce.nochans*sizeof(float64)); 
+		
+		// Initialize this array.
+		for(int i = 0; i < ce.nochans; i++) {
+			ce.ao_vals[i] = (float64)p->ao_vals[ce.ochanson[i]][0];		
+		}
+	}
+	
+	// Update the ao_vals array
+	if(p->n_ao_var) {
+		int chan, step;
+		for(int i = 0; i < ce.nochans; i++) {
+			int chan = ce.ochanson[i];
+			
+			if(p->ao_varied[chan]) {
+				step = ce.cstep[p->nCycles+p->ao_dim[chan]];
+				
+				ce.ao_vals[i] = (float64)p->ao_vals[chan][step];
+			}
+		}
+	}
+	
+	// Write the ao_vals array to the DAQ.
+	int32 ns = 0;
+	if(rv = DAQmxWriteAnalogF64(ce.oTask, 1, 1, -1, DAQmx_Val_GroupByChannel, ce.ao_vals, &ns, NULL)) { goto error; } 
+	
+	error:
+	
+	return rv;
+}
+
+int update_DAQ_aouts_safe(int DAQ_lock, int CE_lock) {
+	if(DAQ_lock) { CmtGetLock(lock_DAQ); } 
+	if(CE_lock) { CmtGetLock(lock_ce); }
+	
+	int rv = update_DAQ_aouts();
+	
+	if(CE_lock) { CmtReleaseLock(lock_ce); }
+	if(DAQ_lock) { CmtReleaseLock(lock_DAQ); }
+	
+	return rv;
+}
+
+
+int clear_DAQ_task() {
+	int rv = 0, rv2;
 
 	// Acquisition task
 	if(ce.atset) {
-		if(!(rv = DAQmxClearTask(ce.aTask)))
+		if(!(rv = DAQmxClearTask(ce.aTask))) {
 			ce.atset = 0;
+			ce.aTask = NULL;
+		}
 	}
 	
 	// Counter task
 	if(ce.ctset) {
-		int rv2 = rv;
+		rv2 = rv;
 		if(!(rv = DAQmxClearTask(ce.cTask))) {
 			ce.ctset = 0;
+			ce.cTask = NULL;
 			rv = rv2;
 		}
+	}
+	
+	// Analog outputs.
+	if(ce.otset) {
+		rv2 = rv;
+		if(!(rv = DAQmxClearTask(ce.oTask))) { 
+			ce.otset;
+			ce.oTask = NULL;
+			rv = rv2;
+		}	
 	}
 	
 	return rv;
@@ -3546,13 +3777,6 @@ int clear_DAQ_task_safe() {
 	
 	return rv;
 }
-
-//////////////////////////////////////////////////////////////
-// 															//
-//				   PulseBlaster Interaction					//	
-// 															//
-//////////////////////////////////////////////////////////////
-
 
 
 

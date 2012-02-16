@@ -5703,8 +5703,8 @@ void get_ao_dev_chan(char *name, int *dev_out, int *chan_out) {
 	
 	int dev = -1, chan = -1;
 	
-	// No boards, it's definitely not in here.
-	if(uipc.anum_devs < 1) { goto error; }
+	// No input or no boards, then it's definitely not in here.
+	if(names == NULL || uipc.anum_devs < 1) { goto error; }
 	
 	// First find the device
 	char *p = malloc(strlen(name)+1);
