@@ -327,10 +327,8 @@ int CVICALLBACK StopProgram (int panel, int control, int event,
 			
 			SetQuitUpdateStatus(1);
 			
-			if(!GetInitialized())
-				pb_init_safe(1);
-			
-			pb_stop_safe(1);
+			if(GetInitialized())
+				pb_stop_safe(1);
 		
 			break;
 	}

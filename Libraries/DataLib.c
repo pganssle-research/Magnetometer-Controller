@@ -124,7 +124,7 @@ int run_experiment(PPROGRAM *p) {
 	
 	int scan = p->scan;
 	int ev = 0, done = 0;
-	int ce_locked = 0;
+	int ce_locked = 0, daq_locked = 0;
 	int cont_mode = 1;		// If cont_mode is on, it is checked in the first iteration of the loop anyway.
 							// This will be more relevant when cont_run in ND is implemented
 	
@@ -152,7 +152,7 @@ int run_experiment(PPROGRAM *p) {
 		ce.cstep = NULL;
 	}
 	
-	if(p->nVaried) {
+	if(p->varied) {
 		ce.cstep = malloc(sizeof(int)*(p->nCycles+p->nDims));
 		get_cstep(0, ce.cstep, p->maxsteps, p->nCycles+p->nDims); 
 	}
@@ -208,20 +208,19 @@ int run_experiment(PPROGRAM *p) {
 			}
 			
 			if(done < 0) { ev = done; }
-			
-			if(done != 0) { break; }
 		}
 
 		if(!done) {
 			// This is the part where data acquisition takes place.
 			
-			if(scan || aouts) {
+			if(scan ||  aouts) {
 				// Get data from device
 				CmtGetLock(lock_DAQ);
+				daq_locked = 1;
 				
 				if(scan) {
-					DAQmxStartTask(ce.cTask);			// Tasks should be started BEFORE the program is run.
-					DAQmxStartTask(ce.aTask);
+					if(ev = DAQmxStartTask(ce.cTask)) { goto error; }			// Tasks should be started BEFORE the program is run.
+					if(ev = DAQmxStartTask(ce.aTask)) { goto error; }
 				}
 				
 				if(aouts) {
@@ -230,12 +229,15 @@ int run_experiment(PPROGRAM *p) {
 					// it. When triggering and function outputs are added, we'll have 
 					// to move the DAQmxStopTask call to later.
 					
-					DAQmxStartTask(ce.oTask);
-					update_DAQ_aouts_safe(0, !ce_locked); // Updates the values.
-					DAQmxStopTask(ce.oTask);
+					if(ev = DAQmxStartTask(ce.oTask)) { goto error; }
+					
+					if(ev = update_DAQ_aouts_safe(!daq_locked, !ce_locked)) { goto error; }
+					
+					if(ev = DAQmxStopTask(ce.oTask)) { goto error; }
 				}
-
+				
 				CmtReleaseLock(lock_DAQ);
+				daq_locked = 0;
 			}
 			//  Program and start the pulseblaster.
 			if(program_pulses_safe(ce.ilist, ce.ninst, 1) < 0) { goto error; }
@@ -258,23 +260,27 @@ int run_experiment(PPROGRAM *p) {
 			CmtReleaseLock(lock_ce);
 			ce_locked = 0;
 			
+			// Chill out and wait for the next step.
+			while( !GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
+				Delay(0.01);
+			}
+			
 			if(scan) {
-				// Get the data.
-				while( !GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
-					Delay(0.01);
-				}
-				
 				data = get_data(ce.aTask, ce.p->np, ce.nchan, ce.p->nt, ce.p->sr, &ev, 1);
 			
-				CmtGetLock(lock_DAQ);			
+				CmtGetLock(lock_DAQ);
+				daq_locked = 1;
 			
-				DAQmxStopTask(ce.cTask);			// Stop the tasks when you are done with them. They can be
-				DAQmxStopTask(ce.aTask);			// started again later. Clear them when you are really done.
+				// Stop the tasks qhen you are done with them. They can be started again
+				// later. Clear them when you are really done.
+				if(ev = DAQmxStopTask(ce.cTask)) { goto error; }
+				if(ev = DAQmxStopTask(ce.aTask)) { goto error; }			
 			
 				CmtReleaseLock(lock_DAQ);
+				daq_locked = 0;
 				
 				if(ev)  { goto error; }
-				
+			
 				// Update the navigation controls.
 				if(ce.p->nDims) { update_experiment_nav(); }
 			
@@ -329,6 +335,10 @@ int run_experiment(PPROGRAM *p) {
 		CmtReleaseLock(lock_ce);	
 	}
 	
+	if(daq_locked) {
+		CmtReleaseLock(lock_DAQ);
+	}
+	
 	SetCtrlVal(mc.mainstatus[1], mc.mainstatus[0], 0);	// Experiment is done!
 	SetCtrlAttribute(mc.mainstatus[1], mc.mainstatus[0], ATTR_LABEL_TEXT, "Stopped");
 	SetRunning(0);
@@ -336,7 +346,23 @@ int run_experiment(PPROGRAM *p) {
 	if(data != NULL)  { free(data); }
 	if(avg_data != NULL) { free(avg_data); }
 	
-	if(ev)  { display_ddc_error(ev); }
+	if(ev)  {
+		
+		if((ev < -247 && ev >= -250) || (ev < 6201 && ev >= -6224)) {  
+			display_ddc_error(ev); 
+		} else {
+			uInt32 es_size = DAQmxGetExtendedErrorInfo(NULL, 0);
+			
+			char *es = malloc(es_size+1);
+			DAQmxGetExtendedErrorInfo(es, es_size);
+		
+			
+			MessagePopup("DAQmx Error", es);
+			
+			free(es);
+		}
+		
+	}
 
 	return ev;
 }
@@ -445,7 +471,7 @@ int prepare_next_step (PPROGRAM *p) {
 	// ct/nt counters are 1-based indices.
 
 	// It's all the same if you aren't using varied instructions
-	if(!p->nVaried) {
+	if(!p->varied) {
 		ce.cind = ++ce.ct;
 		if(ce.ct <= p->nt) {
 			if(ce.ilist == NULL) {
@@ -3589,8 +3615,9 @@ int setup_DAQ_aouts() {
 	ce.nochans = nout;
 	
 	// Create the analog output voltage channels.
-	int steps, val, j;
-	int k = 0, len = strlen("AnalogOuput00")+1;
+	int steps, j;
+	float64 val;
+	int k = 0, len = strlen("AnalogOutput00")+1;
 	ce.ochanson = malloc(sizeof(int)*nout);
 	ce.ocnames = malloc(sizeof(char*)*nout);
 
@@ -3617,14 +3644,20 @@ int setup_DAQ_aouts() {
 				// be less than the minimum value and greater than 
 				// the maximum value, so we don't have to check both.
 				
-				if(min_val < val) {
+				if(min_val > val) {
 					min_val = val;	
-				} else if(max_val > val) {
+				} else if(max_val < val) {
 					max_val = val;	
 				}
 			}
 		}
-
+		
+		// Replace this with a comparison to actual minimum and maximum values for device, not this hard-coded thing.
+		if(min_val == max_val) {
+			if(min_val > -9.99) { min_val -= 0.01; }
+			if(max_val < 9.99) { max_val += 0.01; }
+		}
+		
 		// Create the channel.
 		if(rv = DAQmxCreateAOVoltageChan(ce.oTask, p->ao_chans[i], ce.ocnames[k],
 				min_val, max_val, DAQmx_Val_Volts, NULL)) { goto error; }
@@ -3681,7 +3714,7 @@ int update_DAQ_aouts() {
 	
 	int rv = 0;
 	
-	if(ce.nochans) { return 0; } // No channels
+	if(!ce.nochans) { return 0; } // No channels
 	if(!ce.otset || ce.oTask == NULL) { return -1; }
 	
 	PPROGRAM *p = ce.p;

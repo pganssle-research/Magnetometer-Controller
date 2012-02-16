@@ -1101,9 +1101,11 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	p->nDims = uipc.nd;									// Number of indirect dimensions
 	p->nAout = uipc.anum;
 	
-	int n_ao_var = 0, i;
+	int i;
+	
+	p->n_ao_var = 0;
 	for(i = 0; i < uipc.anum; i++) {
-		if(uipc.ac_varied[i]) { n_ao_var++; }	
+		if(uipc.ac_varied[i]) { p->n_ao_var++; }	
 	}
 	
 	if(p->nDims || p->nCycles) {				// If either of these is true, it's a varied experiment
@@ -1744,6 +1746,8 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 					
 					//update_ao_increment_from_exprs(i);
 				}
+			} else {
+				uipc.ao_vals[i][0] = p->ao_vals[i][0];	
 			}
 			
 			// Now we want to get the channel.
@@ -5704,7 +5708,7 @@ void get_ao_dev_chan(char *name, int *dev_out, int *chan_out) {
 	int dev = -1, chan = -1;
 	
 	// No input or no boards, then it's definitely not in here.
-	if(names == NULL || uipc.anum_devs < 1) { goto error; }
+	if(name == NULL || uipc.anum_devs < 1) { goto error; }
 	
 	// First find the device
 	char *p = malloc(strlen(name)+1);
