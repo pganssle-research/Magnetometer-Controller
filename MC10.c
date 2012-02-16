@@ -2360,11 +2360,16 @@ int CVICALLBACK NDToggleAO (int panel, int control, int event,
 			
 			int state = get_ao_nd_state(num);
 			
+			/*  Enable state 2 when expression parsing is done.
+			
 			state+=up;
 			state = (state+3)%3; 			// In C, mod is signed, so we need to add 3 first here
 	
+			*/
+			
+			state = !state;
 			set_ao_nd_state(num, state);	// Finally we can update the state.
-
+			
 			CmtReleaseLock(lock_uipc);
 			break;
 	}
