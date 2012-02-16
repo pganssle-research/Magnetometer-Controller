@@ -78,7 +78,7 @@ Desrip	: Need to add a few things to PPROGRAM that I did not consider at
 // 															//
 //////////////////////////////////////////////////////////////
 
-int SavePulseProgram(char *filename, PPROGRAM *ip) {
+int SavePulseProgram(char *filename, int safe, PPROGRAM *ip) {
 	// Feed this a filename and and a PPROGRAM and it will create a pulse program
 	// in the netCDF file with base variable name ppname. If NULL is passed to group
 	// then it is assumed that this is a PPROGRAM-only file, and no base filename will
@@ -88,12 +88,13 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 	int rv = 0;			// For error checking in the netCDF functions
 	char *fnbuff = NULL, *fname = NULL;
 	PPROGRAM *p = NULL;
+	int locked = 0;
 	
 	if(filename == NULL)
 		return 0;
 	
 	if(ip == NULL) { 
-		p = get_current_program_safe();
+			p = safe?get_current_program_safe():get_current_program();
 		if(p == NULL) {
 			rv = -247;
 			goto error;
@@ -120,15 +121,18 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 	title = malloc(MAX_FILENAME_LEN);
 	get_name(filename, title, ".tdm");
 	
-	CmtGetLock(lock_tdm);    
+	if(safe) { 
+		CmtGetLock(lock_tdm);    
+		locked = 1;
+	}
+	
 	// Create seems to freak out if the file already exists. 
 	if(FileExists(filename, 0))   { DeleteFile(filename); }
 	
 	char *index = malloc(strlen(filename)+7);
 	if(type == MCTD_TDMS) {
 		sprintf(index, "%s%s", filename, "_index");
-		if(FileExists(index, NULL))
-			DeleteFile(index);
+		if(FileExists(index, NULL)) { DeleteFile(index); }
 	} else if (type == MCTD_TDM) {
 		strcpy(index, filename);
 		index[strlen(index)-1] = 'x';
@@ -142,15 +146,13 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 	
 	if(rv = DDC_CreateFile(fname, NULL, title, "", title, MC_VERSION_STRING, &p_file)) { goto error; }
 	
-	if(rv = DDC_AddChannelGroup(p_file, MCTD_PGNAME, "The group containing the program", &pcg))
+	if(rv = DDC_AddChannelGroup(p_file, MCTD_PGNAME, "The group containing the program", &pcg)) {
 		goto error;
+	}
 	
-	CmtGetLock(lock_pb);
 	if(rv = save_program(pcg, p)) { goto error; }
-	CmtReleaseLock(lock_pb);
 	
-	 if(rv = DDC_SaveFile(p_file))
-		 goto error;
+	 if(rv = DDC_SaveFile(p_file))  { goto error; }
 	
 	error:
 	DDC_CloseFile(p_file);
@@ -172,12 +174,14 @@ int SavePulseProgram(char *filename, PPROGRAM *ip) {
 		free(buff);
 	}
 	
-	CmtReleaseLock(lock_tdm);  
+	if(safe && locked) {
+		CmtReleaseLock(lock_tdm);
+	}
 
 	return rv;
 }
 
-PPROGRAM *LoadPulseProgram(char *filename, int *err_val) {
+PPROGRAM *LoadPulseProgram(char *filename, int safe, int *err_val) {
 	// Loads a netCDF file to a PPROGRAM. p is dynamically allocated
 	// as part of the function, so make sure to free it when you are done with it.
 	// Passing NULL to group looks for a program in the root group, otherwise
@@ -186,7 +190,7 @@ PPROGRAM *LoadPulseProgram(char *filename, int *err_val) {
 	
 	// Returns 0 if successful, positive integers for errors.
 	
-	int ev = err_val[0] = 0, ng;
+	int ev = err_val[0] = 0, ng, locked = 0;
 	DDCFileHandle p_file = NULL;
 	DDCChannelGroupHandle pcg, *groups = NULL;
 	PPROGRAM *p = NULL;
@@ -202,7 +206,11 @@ PPROGRAM *LoadPulseProgram(char *filename, int *err_val) {
 		goto error;
 	}
 	
-	CmtGetLock(lock_tdm);
+	if(safe) {
+		CmtGetLock(lock_tdm);
+		locked = 1;
+	}
+	
 	if(ev = DDC_OpenFileEx(filename, tdms?"TDMS":"TDM", 1, &p_file))
 		goto error;
 	
@@ -253,15 +261,11 @@ PPROGRAM *LoadPulseProgram(char *filename, int *err_val) {
 	
 	error:
 
-	if(p_file != NULL)
-		DDC_CloseFile(p_file);
-	CmtReleaseLock(lock_tdm);
+	if(p_file != NULL) { DDC_CloseFile(p_file); }
+	if(groups != NULL) { free(groups); }
+	if(name_buff != NULL) { free(name_buff); }
 	
-	if(groups != NULL)
-		free(groups);
-	
-	if(name_buff != NULL)
-		free(name_buff);
+	if(safe && locked) { CmtReleaseLock(lock_tdm); }
 	
 	err_val[0] = ev;
 	
@@ -461,6 +465,14 @@ int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p) {
 	return 0;	
 }
 
+int save_program_safe(DDCChannelGroupHandle pcg, PPROGRAM *p) {
+	CmtGetLock(lock_tdm);
+	int rv = save_program(pcg, p);
+	CmtReleaseLock(lock_tdm);
+	
+	return rv;
+}
+
 PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 	// Loads programs from the Channel Group "pcg" in a TDM streaming library
 	
@@ -480,7 +492,7 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNP, &p->np, si)) {					// Number of points
 		if(ev != DDC_PropertyDoesNotExist)
 			goto error;
-		else
+		else 
 			GetCtrlVal(pc.np[1], pc.np[0], &p->np);
 	}
 	
@@ -782,7 +794,14 @@ PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
 	free_string_array(names, nchans);
 	
 	return p;
+}
+
+PPROGRAM *load_program_safe(DDCChannelGroupHandle pcg, int *err_val) {
+	CmtGetLock(lock_tdm);
+	PPROGRAM *rv = load_program(pcg, err_val);
+	CmtReleaseLock(lock_tdm);
 	
+	return rv;
 }
 
 int get_name(char *pathname, char *name, char *ending) {
@@ -910,7 +929,7 @@ void display_tdms_error(int err_val) {
 
 int load_pb_info(int verbose) {
 	// Counts the number of pulseblasters in the system and populates the ring control.
-	int nd = pb_count_boards();	// Count them up bitches.
+	int nd = pb_count_boards();	// Count them bitches up.
 
 	if(nd <= 0 && verbose) 
 		MessagePopup("Error Counting Spincore Boards:", pb_get_error());
@@ -1770,7 +1789,7 @@ void load_prog_popup() {
 		add_prog_path_to_recent_safe(path);
 
 	int err_val;
-	PPROGRAM *p = LoadPulseProgram(path, &err_val);
+	PPROGRAM *p = LoadPulseProgram(path, 1, &err_val);
 
 	if(err_val != 0)
 		display_ddc_error(err_val);
@@ -1795,7 +1814,7 @@ void save_prog_popup() {
 
 	PPROGRAM *p = get_current_program_safe();
 
-	int err_val = SavePulseProgram(path, p);
+	int err_val = SavePulseProgram(path, 1, p);
 
 	if(err_val != 0) 
 		display_ddc_error(err_val);
@@ -6161,8 +6180,7 @@ PINSTR *generate_instructions(PPROGRAM *p, int *cstep, int *n_inst) {
 	// to n_inst, which need not be set to the right initial value. The return value
 	// is dynamically allocated, and must be freed.
 	
-	if(p == NULL)
-		return NULL;
+	if(p == NULL) { return NULL; }
 	
 	int lindex = get_lindex(cstep, p->maxsteps, p->nCycles+p->nDims);
 	int ni = p->n_inst;

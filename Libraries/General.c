@@ -321,13 +321,11 @@ int pb_read_status_safe(int verbose)
 
 int pb_start_safe(int verbose)
 {
-	
 	int rv = 0;
 
 	if(!GetInitialized()) {
 		rv = pb_init_safe(verbose);
-		if(rv < 0)
-			return rv;
+		if(rv < 0)  { return rv; }
 	}
 	
 	CmtGetLock(lock_pb);

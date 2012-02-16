@@ -60,7 +60,6 @@ int CVICALLBACK IdleAndGetData (void *functionData) {
 
 void CVICALLBACK discardIdleAndGetData (int poolHandle, int functionID, unsigned int event, int value, void *callbackData)
 {
-	
 	// Clear out the data stuff.
 	CmtGetLock(lock_ce);
 	CmtGetLock(lock_DAQ);
@@ -86,8 +85,7 @@ void CVICALLBACK discardIdleAndGetData (int poolHandle, int functionID, unsigned
 	CmtReleaseLock(lock_DAQ);
 	CmtReleaseLock(lock_ce);
 	
-	if(GetInitialized())
-		pb_close_safe(0);
+	if(GetInitialized())  { pb_close_safe(0); }
 	
 	SetMenuBarAttribute(mc.mainmenu, mc.fload, ATTR_DIMMED, 0); // People can load data again.
 
@@ -123,6 +121,7 @@ int run_experiment(PPROGRAM *p) {
 	
 	int scan = p->scan;
 	int ev = 0, done = 0;
+	int ce_locked = 0;
 	int cont_mode = 1;		// If cont_mode is on, it is checked in the first iteration of the loop anyway.
 							// This will be more relevant when cont_run in ND is implemented
 	
@@ -141,6 +140,7 @@ int run_experiment(PPROGRAM *p) {
 	
 	// Initialize ce
 	CmtGetLock(lock_ce);
+	ce_locked = 1;
 	ce.ct = 0;
 	ce.p = p;
 	
@@ -153,19 +153,21 @@ int run_experiment(PPROGRAM *p) {
 		ce.cstep = malloc(sizeof(int)*(p->nCycles+p->nDims));
 		get_cstep(0, ce.cstep, p->maxsteps, p->nCycles+p->nDims); 
 	}
-	CmtReleaseLock(lock_ce);
 	
 	if(scan) {
-		if(setup_DAQ_task() != 0) {
+		if(setup_DAQ_task_safe(1, 1, 0) != 0) {
 			ev = 1;
 			goto error;
 		}
 		
 		// Initialize the TDM file
-		if(ev = initialize_tdm()) { goto error; }
-
+		if(ev = initialize_tdm_safe(0, 1)) { goto error; }
+		
 		update_experiment_nav();
 	}
+	
+	CmtReleaseLock(lock_ce);
+	ce_locked = 0;
 	
 	// Make sure the pulseblaster is initiated.
 	if(!GetInitialized()) {
@@ -178,29 +180,25 @@ int run_experiment(PPROGRAM *p) {
 	// In the future, it will just repeat whatever experiment you tell it to
 	// indefinitely.
 	GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode);
-	if(cont_mode && p->varied)
-		SetCtrlVal(pc.rc[1], pc.rc[0], 0);
+	if(cont_mode && p->varied) {  SetCtrlVal(pc.rc[1], pc.rc[0], 0); }
 	
 	// Main loop to keep track of where we're at in the experiment, etc.
 	while(!GetQuitIdle() && ce.ct <= p->nt) {
-		if(cont_mode)
-			GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode);
-		
-		if(done = prepare_next_step(p) != 0)
+		if(cont_mode) { GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode); }
+			
+		if(done = prepare_next_step_safe(p) != 0)
 		{
 			if(cont_mode && done == 1) {
-				CmtGetLock(lock_ce);
+				CmtGetLock(lock_ce);		// No possibility of break/goto, don't need to set ce_locked
 				ce.ct--;
-				CmtReleaseLock(lock_ce);
 				p->nt++;
 				done = prepare_next_step(p);
+				CmtReleaseLock(lock_ce);
 			}
 			
-			if(done < 0)
-				ev = done;
+			if(done < 0) { ev = done; }
 			
-			if(done != 0)
-				break;
+			if(done != 0) { break; }
 		}
 
 		if(!done) {
@@ -208,7 +206,7 @@ int run_experiment(PPROGRAM *p) {
 			
 			if(scan) {
 				// Get data from device
-				CmtGetLock(lock_DAQ);				// Multithreading requires these locks
+				CmtGetLock(lock_DAQ);
 
 				DAQmxStartTask(ce.cTask);			// Tasks should be started BEFORE the program is run.
 				DAQmxStartTask(ce.aTask);
@@ -225,6 +223,7 @@ int run_experiment(PPROGRAM *p) {
 			
 			// Start checking for updates in another thread.
 			CmtGetLock(lock_ce);
+			ce_locked = 1;
 			if(ce.update_thread == -1)
 				CmtScheduleThreadPoolFunction(DEFAULT_THREAD_POOL_HANDLE, UpdateStatus, NULL, &ce.update_thread);
 			else {
@@ -234,6 +233,7 @@ int run_experiment(PPROGRAM *p) {
 					CmtWaitForThreadPoolFunctionCompletion(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, 0);
 			}
 			CmtReleaseLock(lock_ce);
+			ce_locked = 0;
 			
 			if(scan) {
 				// Get the data.
@@ -241,7 +241,7 @@ int run_experiment(PPROGRAM *p) {
 					Delay(0.01);
 				}
 				
-				data = get_data(ce.p, &ev);
+				data = get_data(ce.aTask, ce.p->np, ce.nchan, ce.p->nt, ce.p->sr, &ev, 1);
 			
 				CmtGetLock(lock_DAQ);			
 			
@@ -250,13 +250,12 @@ int run_experiment(PPROGRAM *p) {
 			
 				CmtReleaseLock(lock_DAQ);
 				
-				if(ev)
-					goto error;
+				if(ev)  { goto error; }
 				
 				// Update the navigation controls.
 				if(ce.p->nDims) { update_experiment_nav(); }
 			
-				update_transients();
+				update_transients_safe();
 
 				// Only request the average data if you need it.
 				if(avg_data != NULL) {
@@ -264,19 +263,29 @@ int run_experiment(PPROGRAM *p) {
 					avg_data = NULL;
 				}
 			
-				if(ev = save_data(data, (uidc.disp_update == 0)?&avg_data:NULL)) { goto error; }
+				CmtGetLock(lock_uidc);
+				if(ev = save_data_safe(data, (uidc.disp_update == 0)?&avg_data:NULL))  { 
+					CmtReleaseLock(lock_uidc);
+					goto error; 
+				}
 			
 				if(uidc.disp_update < 2) {	// We're plotting stuff for 0 (Avg) or 1 (Latest)
-					if(uidc.disp_update && ce.ct > 1)
+					CmtGetLock(lock_ce);
+					if(uidc.disp_update && ce.ct > 1) { 
 						plot_data(avg_data, p->np, p->sr, ce.nchan);
-					else
+					} else {
 						plot_data(data, p->np, p->sr, ce.nchan);
-				
+					}
+					
 					// Update the nav controls now.
-					for(int i = 0; i < 2; i++)
+					for(int i = 0; i < 2; i++) {
 						set_nav_from_lind(ce.cind, dc.cloc[i], !uidc.disp_update);
-				
+					}
+					
+					CmtReleaseLock(lock_ce);
 				}
+				
+				CmtReleaseLock(lock_uidc);
 			
 				// Free memory
 				if(avg_data != NULL) {
@@ -288,28 +297,28 @@ int run_experiment(PPROGRAM *p) {
 				data = NULL;
 			}
 		}
-
+	
 	}
 	
 	error:
+	
+	if(ce_locked) {
+		CmtReleaseLock(lock_ce);	
+	}
 	
 	SetCtrlVal(mc.mainstatus[1], mc.mainstatus[0], 0);	// Experiment is done!
 	SetCtrlAttribute(mc.mainstatus[1], mc.mainstatus[0], ATTR_LABEL_TEXT, "Stopped");
 	SetRunning(0);
 	
-	if(data != NULL) 
-		free(data);
+	if(data != NULL)  { free(data); }
+	if(avg_data != NULL) { free(avg_data); }
 	
-	if(avg_data != NULL)
-		free(avg_data);
-
-	if(ev)
-		display_ddc_error(ev);
+	if(ev)  { display_ddc_error(ev); }
 
 	return ev;
 }
 
-double *get_data(PPROGRAM *p, int *error) {
+double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error, int safe) {
 	// This is the main function dealing with getting data from the DAQ.
 	// ce must be initialized properly and the DAQ task needs to have been started.
 	//
@@ -321,13 +330,12 @@ double *get_data(PPROGRAM *p, int *error) {
 	
 	
 	int32 nsread;
-	int j, np = p->np, t = ce.ct, nt = p->nt, nc = ce.nchan, err = 0;
-	double sr = p->sr;
+	int j, err = 0;
 	float64 *out = NULL;
 	char *errmess = NULL;
 	
 	// These are malformed program conditions
-	if(t > nt || np < 1) {
+	if(np < 1) {
 		err = 1;
 		goto error;
 	}
@@ -337,17 +345,25 @@ double *get_data(PPROGRAM *p, int *error) {
 	// be in a single idle-and-get-data thread. Eventually, we'll calculate the expected amount of time this
 	// should take and add a few seconds to it, so that this doesn't time out before it should.
 	unsigned int bc;
-	int i = 0;
+	int i = 0, locked = 0;
 	double time = Timer();
 	errmess = malloc(400);
 	
 	while(!GetDoubleQuitIdle()) {
-		CmtGetLock(lock_DAQ);
-		DAQmxGetReadAttribute(ce.aTask, DAQmx_Read_AvailSampPerChan, &bc);
-		CmtReleaseLock(lock_DAQ);
+		if(safe) { 
+			CmtGetLock(lock_DAQ); 
+			locked = 1;
+		}
 		
+		DAQmxGetReadAttribute(aTask, DAQmx_Read_AvailSampPerChan, &bc);
+
 		if(bc >= np) 	// It's ready to be read out
 			break;
+		
+		if(safe) { 	// Don't release it until we've read them! 
+			CmtReleaseLock(lock_DAQ); 
+			locked = 0;
+		}  
 		
 		// Timeout condition -> May want to add a setting for this
 		/*
@@ -379,17 +395,16 @@ double *get_data(PPROGRAM *p, int *error) {
 	
 	// Now we know it's ready to go, so we should read out the values.
 	out = malloc(sizeof(float64)*np*nc);
-	CmtGetLock(lock_DAQ);
-	DAQmxReadAnalogF64(ce.aTask, -1, 0.0, DAQmx_Val_GroupByChannel, out, np*nc, &nsread, NULL);
-	CmtReleaseLock(lock_DAQ);
-
+	DAQmxReadAnalogF64(aTask, -1, 0.0, DAQmx_Val_GroupByChannel, out, np*nc, &nsread, NULL);
+	
 	if(nsread != np)
 		err = 3;
 	
 	error:
 	
-	if(errmess != NULL)
-		free(errmess);
+	if(safe && locked) { CmtReleaseLock(lock_DAQ); }
+	
+	if(errmess != NULL) { free(errmess); }
 	
 	if(err && out != NULL) {
 		free(out);
@@ -408,14 +423,10 @@ int prepare_next_step (PPROGRAM *p) {
 
 	// It's all the same if you aren't using varied instructions
 	if(!p->nVaried) {
-		CmtGetLock(lock_ce);
 		ce.cind = ++ce.ct;
-		CmtReleaseLock(lock_ce);
 		if(ce.ct <= p->nt) {
 			if(ce.ilist == NULL) {
-				CmtGetLock(lock_ce);
 				ce.ilist = generate_instructions(p, NULL, &ce.ninst);
-				CmtReleaseLock(lock_ce);
 			}
 			return 0;
 		} else
@@ -423,7 +434,6 @@ int prepare_next_step (PPROGRAM *p) {
 	}
 
 	// Free the old ilist
-	CmtGetLock(lock_ce);
 	if(ce.ilist != NULL) {
 		free(ce.ilist);
 		ce.ilist = NULL;
@@ -439,37 +449,32 @@ int prepare_next_step (PPROGRAM *p) {
 	
 	int mcli = 1, mdli = 1;
 	
-	for(i = 0; i < p->nCycles; i++)
+	for(i = 0; i < p->nCycles; i++) {
 		mcli *= p->maxsteps[i];
+	}
 	
-	for(i = 0; i < p->nDims; i++)
+	for(i = 0; i < p->nDims; i++) {
 		mdli *= p->maxsteps[p->nCycles+i];
+	}
 	
-	CmtReleaseLock(lock_ce);
-	
-	if(p->nt%mcli != 0)
-		return -1;
+	if(p->nt%mcli != 0) { return -1; }
 	
 	// First check -> Have we finished all the transients?
 	if(ce.ct > p->nt) {
-		if(dli >= --mdli)		// Done condition.
+		if(dli >= --mdli) {		// Done condition.
 			return 1;	
-		else {
+		} else {
 			// Reset the transients and increase the dimension index.
-			CmtGetLock(lock_ce);
 			ce.ct = 1;
 			cli = 0;
 			dli++;
-			CmtReleaseLock(lock_ce);
 		}
 	} else 
 		cli = (ce.ct-1)%mcli;	// Transients are 1-based index, so we need to convert.
 	
 	// Update the cstep vars.
-	CmtGetLock(lock_ce);
 	if(p->nCycles) { get_cstep(cli, ce.cstep, p->maxsteps, p->nCycles); }
 	if(p->nDims) { get_cstep(dli, &ce.cstep[p->nCycles], &p->maxsteps[p->nCycles], p->nDims); }
-	CmtReleaseLock(lock_ce);
 	
 	// Keep going (recursive function call - probably a bad idea) if this is in the skips.
 	int lind = get_lindex(ce.cstep, p->maxsteps, p->nCycles+p->nDims);
@@ -479,18 +484,21 @@ int prepare_next_step (PPROGRAM *p) {
 		}
 	}
 	
-	CmtGetLock(lock_ce);
 	ce.ilist = generate_instructions(p, ce.cstep, &ce.ninst); // Generate the next instructions list.
-	CmtReleaseLock(lock_ce);
 	
-	if(ce.ilist == NULL)
-		return -2;
+	if(ce.ilist == NULL) { return -2; }
 	
-	CmtGetLock(lock_ce);
 	ce.cind = dli*p->nt+ce.ct-1;	// Current index in [nt {dim1, ... , dimn}] space
-	CmtReleaseLock(lock_ce);
 	
 	return 0;
+}
+
+int prepare_next_step_safe(PPROGRAM *p) {
+	CmtGetLock(lock_ce);
+	int rv = prepare_next_step(p);
+	CmtReleaseLock(lock_ce);
+	
+	return rv;
 }
 
 //////////////////////////////////////////////////////////////
@@ -504,15 +512,18 @@ int initialize_tdm() {
 	// This is the first thing you should call if you are trying to save data to a TDM
 	// file. It will put all the metadata and set everything up, returning what you need.
 	// This assumes that ce is properly initialized.
+	//
+	// Returns negative on error:
+	// -1: Filename or program is null.
+	// -2: No active channels.
+	// All other values are from DDC files.
 	
 	PPROGRAM *p = ce.p;
 	char *filename = ce.path;
 	
-	if(filename == NULL || p == NULL)
-		return -1;
+	if(filename == NULL || p == NULL) { return -1; }
 	
-	if(ce.nchan < 1)
-		return -2;
+	if(ce.nchan < 1) { return -2; }
 
 	int i, len, np, nd, ncyc, varied, lindex;
 	int rv = 0;
@@ -537,10 +548,8 @@ int initialize_tdm() {
 	strcpy(desc, ce.desc);
 	
 	// The version name.
-	vname = malloc(strlen("Magnetometer Controller Version ")+10);
-	sprintf(vname, "Magnetometer Controller Version %0.1f", MC_VERSION);
+	vname = MC_VERSION_STRING;
 	
-	CmtGetLock(lock_tdm);
 	if(rv = DDC_CreateFile(filename, "TDM", name, desc, name, vname, &data_file)) { goto error; }
 	if(rv = DDC_AddChannelGroup(data_file, MCTD_MAINDATA, "Main Data Group", &mcg)) { goto error; }
 	if(p->nt > 1) {
@@ -552,10 +561,8 @@ int initialize_tdm() {
 	free(name);
 	vname = desc = name = NULL;
 	
-	CmtGetLock(lock_ce);
 	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tdone);
 	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tstart);
-	CmtReleaseLock(lock_ce);
 
 	// Now since it's the first time, we need to set up the attributes, metadata and program.
 	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_NP, DDC_Int32, np)) { goto error; } 
@@ -574,17 +581,16 @@ int initialize_tdm() {
 	DDCChannelGroupHandle pcg = NULL;
 	DDC_AddChannelGroup(data_file, MCTD_PGNAME, "", &pcg);
 	
-	CmtGetLock(lock_pb);
 	save_program(pcg, p);
-	CmtReleaseLock(lock_pb);
 
 	// Create the data channels
 	chans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
 	achans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
 	for(i = 0; i < ce.nchan; i++) {
 		if(rv = DDC_AddChannel(mcg, DDC_Double, ce.icnames[i], "", "V", &chans[i])) { goto error; }
-		if(p->nt > 1)
+		if(p->nt > 1) {
 			if(rv = DDC_AddChannel(acg, DDC_Double, ce.icnames[i], "", "V", &achans[i])) { goto error; }
+		}
 	}
 	
 	// Save the file
@@ -592,25 +598,25 @@ int initialize_tdm() {
 	
 	error:
 
-	if(data_file != NULL)
-		DDC_CloseFile(data_file);
+	if(data_file != NULL) { DDC_CloseFile(data_file); }
 	
-	CmtReleaseLock(lock_tdm);
+	if(name != NULL) { free(name); }
+	if(desc != NULL) { free(desc); }
+	if(vname != NULL) { free(vname); }
+	if(chans != NULL) { free(chans); }
+	if(achans != NULL) { free(achans); }
 	
-	if(name != NULL)
-		free(name);
+	return rv;
+}
+
+int initialize_tdm_safe(int CE_lock, int TDM_lock) {
+	if(CE_lock) { CmtGetLock(lock_ce); }
+	if(TDM_lock) { CmtGetLock(lock_tdm); }
 	
-	if(desc != NULL)
-		free(desc);
+	int rv = initialize_tdm();
 	
-	if(vname != NULL)
-		free(vname);
-	
-	if(chans != NULL)
-		free(chans);
-	
-	if(achans != NULL)
-		free(achans);
+	if(TDM_lock) { CmtReleaseLock(lock_tdm); }
+	if(CE_lock) { CmtReleaseLock(lock_ce); }
 	
 	return rv;
 }
@@ -626,8 +632,7 @@ int save_data(double *data, double **avg) {
 	PPROGRAM *p = ce.p;
 	int rv = 0;
 	
-	if(p == NULL)
-		return -1;
+	if(p == NULL) { return -1; }
 	
 	int i, np = p->np, nd = p->nDims;
 	char *csstr = NULL;
@@ -640,7 +645,6 @@ int save_data(double *data, double **avg) {
 	char *names[2] = {MCTD_MAINDATA, MCTD_AVGDATA};
 
 	// Open the file.
-	CmtGetLock(lock_tdm);
 	if(rv = DDC_OpenFileEx(ce.path, "TDM", 0, &file)) { goto error; }
 	
 	// Get the channel groups -> Allocate space for two, but only look for 1 if nt == 1
@@ -658,8 +662,10 @@ int save_data(double *data, double **avg) {
 	
 	csstr = malloc(12*(p->nDims+2)+3); // Signed maxint is 10 digits, plus - and delimiters.
 	sprintf(csstr, "[%d", ce.ct-1);
-	for(i = 0; i < p->nDims; i++)
+	for(i = 0; i < p->nDims; i++) {
 		sprintf(csstr, "%s; %d", csstr, ce.cstep[i+p->nCycles]);	
+	}
+	
 	sprintf(csstr, "%s]", csstr);
 	
 	if(rv = DDC_SetChannelGroupProperty(mcg, MCTD_CSTEPSTR, csstr)) { goto error; }
@@ -667,10 +673,8 @@ int save_data(double *data, double **avg) {
 	csstr = NULL;
 	
 	// Save the time completed
-	CmtGetLock(lock_ce);
 	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tdone);
 	if(rv = DDC_SetChannelGroupProperty(mcg, MCTD_TIMEDONE, ce.tdone)) { goto error; }
-	CmtReleaseLock(lock_ce);
 	
 	// Grab the channels.
 	mchans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
@@ -715,8 +719,7 @@ int save_data(double *data, double **avg) {
 	DDC_SaveFile(file);
 	
 	error:
-	if(csstr != NULL)
-		free(csstr);
+	if(csstr != NULL) { free(csstr); }
 	
 	if(avg != NULL) {
 		*avg = avg_data;
@@ -724,11 +727,22 @@ int save_data(double *data, double **avg) {
 		free(avg_data);
 	}
 	
-	if(file != NULL)
-		DDC_CloseFile(file);
-	CmtReleaseLock(lock_tdm);
+	if(file != NULL) { DDC_CloseFile(file); }
 
 	return rv;
+}
+
+int save_data_safe(double *data, double **avg) {
+	CmtGetLock(lock_tdm);
+	CmtGetLock(lock_ce);
+	
+	int rv = save_data(data, avg);
+	
+	CmtReleaseLock(lock_ce);
+	CmtReleaseLock(lock_tdm);
+	
+	return rv;
+	
 }
 
 int load_experiment(char *filename) {
@@ -762,7 +776,6 @@ int load_experiment(char *filename) {
 	}
 	
 	// Open the file for reading
-	CmtGetLock(lock_tdm);
 	if(ev = DDC_OpenFileEx(filename, "TDM", 1, &file)) { goto error; }
 	
 	// Get the main and program channel names first (don't know if we need the average yet.
@@ -780,8 +793,7 @@ int load_experiment(char *filename) {
 	// Grab the program.
 	int err_val;
 	p = load_program(pcg, &ev);
-	if(ev || p == NULL)
-		goto error;
+	if(ev || p == NULL) { goto error; }
 	
     // Get the current step index.
 	if(ev = DDC_GetChannelGroupProperty(mcg, MCTD_CSTEP, &cind, sizeof(int))) { goto error; }
@@ -807,8 +819,6 @@ int load_experiment(char *filename) {
 		
 		achans = malloc(sizeof(DDCChannelHandle)*nc);
 		if(ev = DDC_GetChannels(acg, achans, nc)) { goto error; }
-	
-		
 	}
 	
 	if(ev = DDC_GetChannels(mcg, chs, nc)) { goto error; }
@@ -816,90 +826,73 @@ int load_experiment(char *filename) {
 	// Now allocate the array of cnames, then grab them. Currently these are not used, but I could see them
 	// being useful in the future and it's easy to implement.
 	cnames = malloc(sizeof(double*)*nc);
-	for(i = 0; i < nc; i++)
+	for(i = 0; i < nc; i++) {
 		cnames[i] = NULL;
+	}
 	
 	for(i = 0; i < nc; i++) {
-		if(DDC_GetChannelStringPropertyLength(chs[i], DDC_CHANNEL_NAME, &len))
-			goto error;
+		if(DDC_GetChannelStringPropertyLength(chs[i], DDC_CHANNEL_NAME, &len)) { goto error; }
 		
 		cnames[i] = malloc(++len);
 		
-		if(DDC_GetChannelProperty(chs[i], DDC_CHANNEL_NAME, cnames[i], len))
-			goto error;
+		if(DDC_GetChannelProperty(chs[i], DDC_CHANNEL_NAME, cnames[i], len))  { goto error; }
 	}
 	
 	// Finally get the data for the 0th index
-	if(p->nt > 1 && acg != NULL)
-		data = load_data_tdm(0, file, acg, achans, p, nc, &ev);
-	else 
-		data = load_data_tdm(0, file, mcg, chs, p, nc, &ev);
+	int aom = (p->nt > 1 && acg != NULL);
+	data = load_data_tdm(0, file, aom?acg:mcg, aom?achans:chs, p, nc, &ev);
 
-	if(ev != 0)
-		goto error;
+	if(ev != 0) { goto error; }
 	
 	// If we're here, then we've finished loading all the data without any errors. We can now safely clear the 
 	// old stuff and load the new stuff (hopefully).
-	CmtGetLock(lock_ce);
 	ce.cind = cind;
 	ce.nchan = nc; 
 	
-	if(ce.p != NULL)
-		free_pprog(ce.p);
+	if(ce.p != NULL) { free_pprog(ce.p); }
 	ce.p = p;
 	
-	if(ce.path != NULL)
-		free(ce.path);
+	if(ce.path != NULL) { free(ce.path); }
 	
 	ce.path = malloc(strlen(filename)+1);
 	strcpy(ce.path, filename);
-	CmtReleaseLock(lock_ce);
 	
 	// Now we want to plot the data and set up the experiment navigation.
 	plot_data(data, p->np, p->sr, ce.nchan);
 	free(data);
 	
 	update_experiment_nav();
-	update_transients();
 
 	error:
 	
 	// Free a bunch of memory - some of these things shouldn't be freed if ev wasn't reset,
 	// as the pointer has been assigned to a field of ce.
-	if(ev != 0 && p != NULL)
-		free_pprog(p);
-	
-	if(file != NULL)
-		DDC_CloseFile(file);
-	CmtReleaseLock(lock_tdm);
-		
-	if(chs != NULL)
-		free(chs);
-	
-	if(achans != NULL)
-		free(achans);
-	
-	if(cnames != NULL) {
-		for(i = 0; i < nc; i++) {	// Don't reuse nc, or this will break.
-			if(cnames[i] != NULL)
-				free(cnames[i]);
-		}
-		
-		free(cnames);
-	}
+	if(ev != 0 && p != NULL) { free_pprog(p); } // Don't free if ce.p points here!
+	if(chs != NULL) { free(chs); }
+	if(achans != NULL) { free(achans); }
+	if(groups != NULL) { free(groups); }
+	if(name_buff != NULL) { free(name_buff); }
+	if(data != NULL) { free(data); }
 
-	if(groups != NULL)
-		free(groups);
+	free_string_array(cnames, nc); // Don't reuse nc or this will break.
 	
-	if(name_buff != NULL)
-		free(name_buff);
+	if(file != NULL) { DDC_CloseFile(file); }
 	
-	if(data != NULL && ev) {
-		free(data);
-		data = NULL;
-	}
-
 	return ev;
+}
+
+int load_experiment_safe(char *filename) {
+	CmtGetLock(lock_tdm);
+	CmtGetLock(lock_ce);
+	CmtGetLock(lock_uidc);
+	
+	int rv = load_experiment(filename);
+	
+	CmtReleaseLock(lock_uidc);
+	CmtReleaseLock(lock_ce);
+	CmtReleaseLock(lock_tdm);
+	
+	return rv;
 }
 
 double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv) {
@@ -921,7 +914,6 @@ double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int
 	double *data = NULL;
 	
 	// Open the file for reading.
-	CmtGetLock(lock_tdm);
 	if(ev = DDC_OpenFileEx(filename, "TDM", 1, &file)) { goto error; }
 	
 	
@@ -945,17 +937,20 @@ double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int
 		
 	error:
 	
-	if(file != NULL)
-		DDC_CloseFile(file);
-	
-	CmtReleaseLock(lock_tdm);
-	
+	if(file != NULL) { DDC_CloseFile(file); }
+
 	if(chs != NULL) { free(chs); }
 	
 	*rv = ev;
 	return data;
+}
+
+double *load_data_safe(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv) {
+	CmtGetLock(lock_tdm);
+	double *data = load_data(filename, lindex, p, avg, nch, rv);
+	CmtReleaseLock(lock_tdm);
 	
-	
+	return data;
 }
 
 double *load_data_tdm(int lindex, DDCFileHandle file, DDCChannelGroupHandle mcg, DDCChannelHandle *chs, PPROGRAM *p, int nch, int *rv) {
@@ -997,6 +992,13 @@ double *load_data_tdm(int lindex, DDCFileHandle file, DDCChannelGroupHandle mcg,
 	return data;
 } 
 
+double *load_data_tdm_safe(int lindex, DDCFileHandle file, DDCChannelGroupHandle mcg, DDCChannelHandle *chs, PPROGRAM *p, int nch, int *rv) {
+	CmtGetLock(lock_tdm);
+	double *data = load_data_tdm(lindex, file, mcg, chs, p, nch, rv);
+	CmtReleaseLock(lock_tdm);
+	
+	return data;
+}
 int get_ddc_channel_groups(DDCFileHandle file, char **names, int num, DDCChannelGroupHandle *cgs) {
 	// Pass this a list of channel group names in the DDC file "file" and it returns an array of the handles.
 	//
@@ -1051,27 +1053,27 @@ int get_ddc_channel_groups(DDCFileHandle file, char **names, int num, DDCChannel
 			}
 		}
 		
-		if(nleft == 0)
-			break;
+		if(nleft == 0) { break; }
 	}
 	
-	if(nleft) 
-		rv = -3;
+	if(nleft)  { rv = -3; }
 		
 	error:
 	
-	if(buff != NULL)
-		free(buff);
-		
-	if(all_cgs != NULL)
-		free(all_cgs);
-	
-	if(found != NULL)
-		free(found);
+	if(buff != NULL) { free(buff); }
+	if(all_cgs != NULL) { free(all_cgs); }
+	if(found != NULL) { free(found); }
 	
 	return rv;
-	
 }
+
+ int get_ddc_channel_groups_safe(DDCFileHandle file, char **names, int num, DDCChannelGroupHandle *cgs) {
+	CmtGetLock(lock_tdm);
+	int rv = get_ddc_channel_groups(file, names, num, cgs);
+	CmtReleaseLock(lock_tdm);
+	
+	return rv;
+ }
 
 /******************** File Navigation *******************/
 void select_data_item() {
@@ -1173,7 +1175,7 @@ void select_file(char *path) {
 	free(msg);
 	
 	if(rv) {
-		rv = load_experiment(path);
+		rv = load_experiment_safe(path);
 		
 		if(rv != 0)
 			display_ddc_error(rv);
@@ -1182,18 +1184,17 @@ void select_file(char *path) {
 
 void load_file_info(char *path, char *old_path) {
 	// First we'll try to save the old description.
-	if(old_path != NULL)
+	if(old_path != NULL) {
 		update_file_info(old_path);
-
-	if(!FileExists(path, NULL))	
-		return;
+	}
+	
+	if(!FileExists(path, NULL))	{ return; }
 
 	int rv;
 	DDCFileHandle file = NULL;
 	int len;
 	char *desc = NULL, *name = NULL;
 	
-	CmtGetLock(lock_tdm);
 	if(rv = DDC_OpenFileEx(path, "TDM", 1, &file)) { goto error; }
 	
 	// Get the base filename
@@ -1222,21 +1223,20 @@ void load_file_info(char *path, char *old_path) {
 	SetCtrlAttribute(mc.datadesc[1], mc.datadesc[0], ATTR_DFLT_VALUE, desc);
 	
 	error:
-	if(file != NULL)
-		DDC_CloseFile(file);
+	if(file != NULL) { DDC_CloseFile(file); }
+	if(name != NULL) { free(name); }
+	if(desc != NULL) { free(desc); }
+}
+
+void load_file_info_safe(char *path, char *old_path) {
+	CmtGetLock(lock_tdm);
+	load_file_info(path, old_path);
 	CmtReleaseLock(lock_tdm);
-	
-	if(name != NULL)
-		free(name);
-	
-	if(desc != NULL)
-		free(desc);
 }
 
 void update_file_info(char *path) {
 	// Saves a new description for a TDM file.
-	if(!FileExists(path, NULL))
-		return;
+	if(!FileExists(path, NULL)) { return; }
 	
 	int rv;
 	DDCFileHandle file = NULL;
@@ -1246,20 +1246,20 @@ void update_file_info(char *path) {
 	// Get the description.
 	GetCtrlValStringLength(mc.datadesc[1], mc.datadesc[0], &len);
 	desc = (len >= 1)?malloc(len+1):NULL;
-	if(desc != NULL)
+	if(desc != NULL) {
 		GetCtrlVal(mc.datadesc[1], mc.datadesc[0], desc);
-	
+	}
 	// Check if there's been a change. If not, don't bother.
 	GetCtrlAttribute(mc.datadesc[1], mc.datadesc[0], ATTR_DFLT_VALUE_LENGTH, &len);
 	old_desc = (len >= 1)?malloc(len+1):NULL;
-	if(old_desc != NULL)
+	if(old_desc != NULL) {
 		GetCtrlAttribute(mc.datadesc[1], mc.datadesc[0], ATTR_DFLT_VALUE, old_desc);
+	}
 	
 	// If they are both NULL or they are the same, don't bother opening the file.
 	if(old_desc == NULL && desc == NULL || 
 		(old_desc != NULL && desc != NULL && strcmp(old_desc, desc) == 0)) { goto error; }
 		
-	CmtGetLock(lock_tdm);
 	if(rv = DDC_OpenFileEx(path, "TDM", 0, &file)) { goto error; }
 	
 	
@@ -1268,14 +1268,14 @@ void update_file_info(char *path) {
 	DDC_SaveFile(file);
 	
 	error:
-	if(desc != NULL)
-		free(desc);
-	
-	if(old_desc != NULL)
-		free(old_desc);
-	
-	if(file != NULL)
-		DDC_CloseFile(file);
+	if(desc != NULL) { free(desc); }
+	if(old_desc != NULL) { free(old_desc); }
+	if(file != NULL) { DDC_CloseFile(file); }
+}
+
+void update_file_info_safe(char *path) {
+	CmtGetLock(lock_tdm);
+	update_file_info(path);
 	CmtReleaseLock(lock_tdm);
 }
 
@@ -1286,16 +1286,19 @@ void update_file_info(char *path) {
 //////////////////////////////////////////////////////////////
 void load_data_popup() {
 	// The callback called from loading data.
+	
+	//CmtGetLock(lock_uidc); -> Placeholder, need to fix this eventually.
 	char *path = malloc(MAX_FILENAME_LEN+MAX_PATHNAME_LEN);
 	int rv = FileSelectPopup((uidc.dlpath != NULL)?uidc.dlpath:"", "*.tdm", ".tdm", "Load Experiment from File", VAL_LOAD_BUTTON, 0, 1, 1, 1, path);
 	
 	if(rv == VAL_NO_FILE_SELECTED) {
 		free(path);
 		return;
-	} else 
-		add_data_path_to_recent(path);
+	} else {
+		add_data_path_to_recent_safe(path);
+	}
 	
-	int err_val = load_experiment(path);
+	int err_val = load_experiment_safe(path);
 	
 	free(path);
 	
@@ -1306,8 +1309,7 @@ void load_data_popup() {
 
 void add_data_path_to_recent(char *opath) {
 	// Adds  data file to the top of the most recent paths list.
-	if(opath == NULL) 
-		return;
+	if(opath == NULL) {  return; }
 	
 	char *path = malloc(strlen(opath)+1);
 	strcpy(path, opath);
@@ -1321,17 +1323,17 @@ void add_data_path_to_recent(char *opath) {
 	c[1] = '\0';				   // Truncate after the last separator.
 
 	if(c != NULL && FileExists(path, NULL)) {
-		CmtGetLock(lock_uidc);
-		if(uidc.dlpath == NULL)
-			uidc.dlpath = malloc(strlen(path)+1);
-		else
-			uidc.dlpath = realloc(uidc.dlpath, strlen(path)+1);
-		
+		uidc.dlpath = malloc_or_realloc(uidc.dlpath, strlen(path)+1);
 		strcpy(uidc.dlpath, path);
-		CmtReleaseLock(lock_uidc);
 	}
 	
 	free(path);
+}
+
+void add_data_path_to_recent_safe(char *opath) {
+	CmtGetLock(lock_uidc);
+	add_data_path_to_recent(opath);
+	CmtReleaseLock(lock_uidc);
 }
 
 /*********** Plotting Functions ************/
@@ -1357,14 +1359,11 @@ int plot_data(double *data, int np, double sr, int nc) {
 	int ev = 0;
 	
 	// If the inputs are invalid, return 1.
-	if(np <= 0 || sr <= 0.0 || nc <= 0 || data == NULL)
-		return 1;
+	if(np <= 0 || sr <= 0.0 || nc <= 0 || data == NULL) { return 1; }
 	
 	clear_plots();	// Clear previous plot data.
-	CmtGetLock(lock_uidc);
 	uidc.sr = sr; 	// Update the UIDC variable.
-	CmtReleaseLock(lock_uidc);
-	
+
 	// Turn on autoscale if checked
 	int as;
 	
@@ -1372,14 +1371,12 @@ int plot_data(double *data, int np, double sr, int nc) {
 	if(as) {
 		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_BOTTOM_XAXIS, VAL_AUTOSCALE, 0, 0);
 		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_LEFT_YAXIS, VAL_AUTOSCALE, 0, 0);
-		
 	}
 	
 	GetCtrlVal(dc.spec, dc.sauto, &as); // Spectrum autoscale
 	if(as) {
 		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_BOTTOM_XAXIS, VAL_AUTOSCALE, 0, 0);
 		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_LEFT_YAXIS, VAL_AUTOSCALE, 0, 0);
-		
 	}
 
 	// We want to zero-pad the FFT out to a power of 2.
@@ -1419,9 +1416,7 @@ int plot_data(double *data, int np, double sr, int nc) {
 				curr_data[j] = curr_data[j]*uidc.fgain[i] + uidc.foff[i];
 		}
 		
-		CmtGetLock(lock_uidc);
 		uidc.fplotids[i] = PlotY(dc.fid, dc.fgraph, curr_data, np, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, uidc.fchans[i]?uidc.fcol[i]:VAL_TRANSPARENT);
-		CmtReleaseLock(lock_uidc);
 		
 		// Prepare the data.
 		PolyEv1D(freq, npfft/2, (double *)uidc.sphase[i], 3, phase);
@@ -1443,11 +1438,9 @@ int plot_data(double *data, int np, double sr, int nc) {
 			col[uidc.schan] = 1;
 		}
 		
-		CmtGetLock(lock_uidc);
 		uidc.splotids[i][0] = PlotY(dc.spec, dc.sgraph, fft_re, npfft/2, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, col[0]?uidc.scol[i]:VAL_TRANSPARENT);
 		uidc.splotids[i][1] = PlotY(dc.spec, dc.sgraph, fft_im, npfft/2, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, col[1]?uidc.scol[i]:VAL_TRANSPARENT);
 		uidc.splotids[i][2] = PlotY(dc.spec, dc.sgraph, fft_mag, npfft/2, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, col[2]?uidc.scol[i]:VAL_TRANSPARENT);
-		CmtReleaseLock(lock_uidc);
 	}
 	
 	for(i = 0; i < 8; i++) {
@@ -1466,28 +1459,23 @@ int plot_data(double *data, int np, double sr, int nc) {
 	
 	// Free our vectors
 	error:
-	if(curr_data != NULL)
-		free(curr_data);
-	
-	if(curr_fft != NULL)
-		free(curr_fft);
-	
-	if(fft_re != NULL)
-		free(fft_re);
-	
-	if(fft_im != NULL)
-		free(fft_im);
-	
-	if(fft_mag != NULL)
-		free(fft_mag);
-	
-	if(phase != NULL)
-		free(phase);
-	
-	if(freq != NULL)
-		free(freq);
+	if(curr_data != NULL) { free(curr_data); }
+	if(curr_fft != NULL) { free(curr_fft); }
+	if(fft_re != NULL) { free(fft_re); }
+	if(fft_im != NULL) { free(fft_im); }
+	if(fft_mag != NULL) { free(fft_mag); }
+	if(phase != NULL) { free(phase); }
+	if(freq != NULL) { free(freq); }
 	
 	return ev;
+}
+
+int plot_data_safe(double *data, int np, double sr, int nc) {
+	CmtGetLock(lock_uidc);
+	int rv = plot_data(data, np, sr, nc);
+	CmtReleaseLock(lock_uidc);
+	
+	return rv;
 }
 
 int change_phase(int chan, double phase, int order) {
@@ -1523,8 +1511,9 @@ int change_phase(int chan, double phase, int order) {
 	
 	// Generate the phase correction vector
 	// TODO: Fix this so that the higher order corrections can be adjusted on a finer level.
-	for(int i = 0; i < np; i++) 
+	for(int i = 0; i < np; i++) { 
 		ph[i] = (double)i*uidc.sr/(2*(double)np-1);	// This should be the frequency domain.
+	}
 	
 	// The user can only change the phases one order at a time, so we're calculating the
 	// offset of any given phase here. Since the first phase transform (up to uidc.sphase[c][order])
@@ -1559,12 +1548,17 @@ int change_phase(int chan, double phase, int order) {
 	free(orc);
 	free(oic);
 	
-	CmtGetLock(lock_uidc);
 	uidc.sphase[c][order] = phase;
-	CmtReleaseLock(lock_uidc);
 	
 	return 0;
+}
 
+int change_phase_safe(int chan, double phase, int order) {
+	CmtGetLock(lock_uidc);
+	int rv = change_phase(chan, phase, order);
+	CmtReleaseLock(lock_uidc);
+	
+	return rv;
 }
 
 
@@ -1660,12 +1654,17 @@ void update_experiment_nav() {
 	update_transients();
 }
 
+void update_experiment_nav_safe() {
+	CmtGetLock(lock_ce);
+	update_experiment_nav();
+	CmtReleaseLock(lock_ce);
+}
+
 void update_transients() {
 	// Call this after you've changed the position in acquisition space, or in the event of a new
-	// addition to the number of transients. uidc.p must be set.
+	// addition to the number of transients. ce.p must be set.
 	
-	if(ce.p == NULL)
-		return;
+	if(ce.p == NULL) { return; }
 	
 	PPROGRAM *p = ce.p;
 	
@@ -1680,8 +1679,9 @@ void update_transients() {
 		if(p->nDims) {
 			ind = get_selected_ind(pan, 0, NULL);
 			nt = calculate_num_transients(ce.cind, ind, p->nt);
-		} else
+		} else {
 			nt = ce.cind;
+		}
 		
 		if(nt)
 			SetCtrlAttribute(pan, dc.ctrans, ATTR_DIMMED, 0);
@@ -1726,6 +1726,12 @@ void update_transients() {
 	free(tc);
 }
 
+void update_transients_safe() {
+	CmtGetLock(lock_ce);
+	update_transients();
+	CmtReleaseLock(lock_ce);
+}
+
 void set_nav_from_lind(int lind, int panel, int avg) {
 	// Feed this a lind vector and a parent panel (CurrentLoc-based) and it
 	// sets the nav controls to what you want them to be. lind is a linear 
@@ -1739,20 +1745,25 @@ void set_nav_from_lind(int lind, int panel, int avg) {
 	// Break the lindex up into a vector we can iterate through 
 	int *cstep = malloc(sizeof(int)*(p->nDims+1));
 	int *steps = malloc(sizeof(int)*(p->nDims+1));
-	for(i = 0; i < p->nDims; i++)
+	for(i = 0; i < p->nDims; i++) {
 		steps[i+1] = p->maxsteps[p->nCycles+i];
+	}
 	steps[0] = p->nt;
 	
-	if(get_cstep(lind, cstep, steps, p->nDims+1) != 1)
-		return;	// Error getting the current step.
+	if(get_cstep(lind, cstep, steps, p->nDims+1) != 1) { return; }	// Return on error
 	
 	// Set the values, then we're done.
 	SetCtrlVal(panel, dc.ctrans, avg?0:cstep[0]+1);
-	for(i = 0; i < p->nDims; i++)
-		SetCtrlVal(panel, dc.idrings[i], cstep[i+1]);
+	for(i = 0; i < p->nDims; i++) { SetCtrlVal(panel, dc.idrings[i], cstep[i+1]); }
 	
 	free(cstep);
 	free(steps);
+}
+
+void set_nav_from_lind_safe(int lind, int panel, int avg) {
+	CmtGetLock(lock_ce);
+	set_nav_from_lind(lind, panel, avg);
+	CmtReleaseLock(lock_ce);
 }
 
 void set_data_from_nav(int panel) {
@@ -1781,8 +1792,19 @@ void set_data_from_nav(int panel) {
 	plot_data(data, ce.p->np, ce.p->sr, ce.nchan);	// Plot the data.
 	
 	error:
-	if(data != NULL)
-		free(data);
+	if(data != NULL) { free(data); }
+}
+
+void set_data_from_nav_safe(int panel) {
+	CmtGetLock(lock_ce);
+	CmtGetLock(lock_uidc);
+	CmtGetLock(lock_tdm);
+	
+	set_data_from_nav(panel);
+	
+	CmtReleaseLock(lock_tdm);
+	CmtReleaseLock(lock_uidc);
+	CmtReleaseLock(lock_ce);
 }
 
 void clear_plots() {
@@ -1796,12 +1818,16 @@ void clear_plots() {
 	DeleteGraphAnnotation(dc.spec, dc.sgraph, -1);
 	
 	// Replace the plotids with -1 to indicate that they are no longer in use.
-	CmtGetLock(lock_uidc);
 	for(int i = 0; i < 8; i++) {
 		uidc.fplotids[i] = -1;
 		for(int j = 0; j < 3; j++)
 			uidc.splotids[i][j] = -1;
 	}
+}
+
+void clear_plots_safe() {
+	CmtGetLock(lock_uidc);
+	clear_plots();
 	CmtReleaseLock(lock_uidc);
 }
 
@@ -1815,18 +1841,23 @@ int get_selected_ind(int panel, int t_inc, int *step) {
 	//
 	// Panel should be a CurrentLoc panel, otherwise this will be terrible.
 	//
-	// ce.p must already be set.
+	// Returns index on success and negative number of failure.
+	//
+	// Error values:
+	// -1: ce.p not set
+	// -2: Number of transients is invalid
+	// -3: Not multidimensional, didn't ask for transients
+	// -4: Multidimensional, but no dimensions are available to be selected.
+	// -5: Error in linear indexing
 	
 	PPROGRAM *p = ce.p;
-	if(p == NULL)
-		return -1;
+	if(p == NULL) { return -1; }
 	
 	int t = 0, nl;
 	
 	if(t_inc) {
 		GetNumListItems(panel, dc.ctrans, &nl);
-		if(nl < 1 || p->nt < 1)
-			return -2;
+		if(nl < 1 || p->nt < 1)  { return -2; }
 		
 		GetCtrlVal(panel, dc.ctrans, &t);
 	}
@@ -1857,8 +1888,7 @@ int get_selected_ind(int panel, int t_inc, int *step) {
 	
 	int ind = get_lindex(cstep, &p->maxsteps[p->nCycles], p->nDims); // We only need the id lindex at the moment.
 	
-	if(ind < 0)
-		return -5;
+	if(ind < 0) { return -5; }
 	
 	// Add in transient if necessary.
 	if(t_inc) {
@@ -1872,8 +1902,16 @@ int get_selected_ind(int panel, int t_inc, int *step) {
 			step[0] = t-1;
 	}
 	
-	free(cstep); // No longer needed
+	free(cstep);
 	return ind;
+}
+
+int get_selected_ind_safe(int panel, int t_inc, int *step) {
+	CmtGetLock(lock_ce);
+	int rv = get_selected_ind(panel, t_inc, step);
+	CmtReleaseLock(lock_ce);
+	
+	return rv;
 }
 
 int calculate_num_transients(int cind, int ind, int nt) {
@@ -1924,6 +1962,12 @@ void change_fid_chan_col(int num) {
 	}
 }
 
+void change_fid_chan_col_safe(int num) {
+	CmtGetLock(lock_uidc);
+	change_fid_chan_col(num);
+	CmtReleaseLock(lock_uidc);
+}
+
 void change_spec_chan_col(int num) {
 	// Given an already changed uidc var, we will update the relevant
 	// controls for a given fid channel.
@@ -1955,6 +1999,12 @@ void change_spec_chan_col(int num) {
 	}
 }
 
+void change_spec_chan_col_safe(int num) {
+	CmtGetLock(lock_uidc);
+	change_spec_chan_col(num);
+	CmtReleaseLock(lock_uidc);
+}
+
 void change_fid_gain(int num) {
 	// Updates the gain for the FID.
 	
@@ -1974,7 +2024,8 @@ void change_fid_gain(int num) {
 	int np, i;
 	GetPlotAttribute(dc.fid, dc.fgraph, uidc.fplotids[c], ATTR_NUM_POINTS, &np);
 	
-	double *data = malloc(sizeof(double)*np), gc = uidc.fgain[c]/oldgain; // Gain change
+	double *data = malloc(sizeof(double)*np);
+	double gc = uidc.fgain[c]/oldgain; // Gain change
 	
 	GetPlotAttribute(dc.fid, dc.fgraph, uidc.fplotids[c], ATTR_PLOT_YDATA, data);
 	
@@ -1987,7 +2038,12 @@ void change_fid_gain(int num) {
 	SetPlotAttribute(dc.fid, dc.fgraph, uidc.fplotids[c], ATTR_PLOT_YDATA, data);
 	
 	free(data);
-	
+}
+
+void change_fid_gain_safe(int num) {
+	CmtGetLock(lock_uidc);
+	change_fid_gain(num);
+	CmtReleaseLock(lock_uidc);
 }
 
 void change_fid_offset(int num) {
@@ -2009,7 +2065,8 @@ void change_fid_offset(int num) {
 	int np, i;
 	GetPlotAttribute(dc.fid, dc.fgraph, uidc.fplotids[c], ATTR_NUM_POINTS, &np);
 	
-	double *data = malloc(sizeof(double)*np), oc = uidc.foff[c] - oldoff; // Offset change
+	double *data = malloc(sizeof(double)*np);
+	double oc = uidc.foff[c] - oldoff; // Offset change
 	
 	GetPlotAttribute(dc.fid, dc.fgraph, uidc.fplotids[c], ATTR_PLOT_YDATA, data);
 	
@@ -2025,10 +2082,15 @@ void change_fid_offset(int num) {
 	
 }
 
+void change_fid_offset_safe(int num) {
+	CmtGetLock(lock_uidc);
+	change_fid_offset(num);
+	CmtReleaseLock(lock_uidc);
+}
+
 void change_spec_gain(int num) {
 	// Updates the gain for the Spectrum.
-	if(num < 0 || num >= 8)
-		return;
+	if(num < 0 || num >= 8) { return; }
 	
 	int c = num;
 	
@@ -2043,7 +2105,9 @@ void change_spec_gain(int num) {
 	int np, i;
 	GetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[c][0], ATTR_NUM_POINTS, &np);
 	
-	double **data = malloc(sizeof(double*)*3), gc = uidc.sgain[c]/oldgain; // Gain change
+	double **data = malloc(sizeof(double*)*3);
+	double gc = uidc.sgain[c]/oldgain; // Gain change
+	
 	for(i = 0; i < 3; i++) {
 		data[i] = malloc(sizeof(double)*np);
 		GetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[c][i], ATTR_PLOT_YDATA, data[i]);
@@ -2057,13 +2121,17 @@ void change_spec_gain(int num) {
 	}
 	
 	// Update the plot
-	
 	for(i = 0; i < 3; i++) {
 		SetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[c][i], ATTR_PLOT_YDATA, data[i]);
 	 	free(data[i]);
 	}
 	free(data);
-	
+}
+
+void change_spec_gain_safe(int num) {
+	CmtGetLock(lock_uidc);
+	change_spec_gain(num);
+	CmtReleaseLock(lock_uidc);
 }
 
 void change_spec_offset(int num) {
@@ -2087,7 +2155,8 @@ void change_spec_offset(int num) {
 	if(np < 1)
 		return;
 	
-	double **data = malloc(sizeof(double*)*3), oc = uidc.soff[c]-oldoff; // Gain change
+	double **data = malloc(sizeof(double*)*3);
+	double oc = uidc.soff[c]-oldoff; // Gain change
 	for(i = 0; i < 3; i++) {
 		data[i] = malloc(sizeof(double)*np);
 		GetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[c][i], ATTR_PLOT_YDATA, data[i]);   
@@ -2109,13 +2178,19 @@ void change_spec_offset(int num) {
 	
 }
 
+void change_spec_offset_safe(int num) {
+	CmtGetLock(lock_uidc);
+	change_spec_offset(num);
+	CmtReleaseLock(lock_uidc);
+}
+
 void toggle_fid_chan(int num) {
 	// Turns whether or not a given channel is on on or off and
 	// updates all the relevant controls.
 	
-	/****** TO DO *******
+	/****** TODO *******
 	 Once the data loading and such is done, this also needs to hide or show
-	 the appropriate data, update the channel preferences, etc.
+	 the appropriate data, update the channel preferences, etc.   (Is this done?)
 	 *******************/
 	
 	if(num < 0 || num >= 8)
@@ -2125,7 +2200,6 @@ void toggle_fid_chan(int num) {
 	int i, on;
 	GetCtrlVal(dc.fid, dc.fchans[num], &on);
 	
-	CmtGetLock(lock_uidc);
 	uidc.fchans[num] = on;
 	
 	if(on) {
@@ -2133,12 +2207,11 @@ void toggle_fid_chan(int num) {
 	} else {
 		uidc.fnc--;			// One fewer channel is on
 	}
-	CmtReleaseLock(lock_uidc);
 
-	
 	// Turn the data on or off
-	if(uidc.fplotids[num] >= 0)
+	if(uidc.fplotids[num] >= 0) {
 		SetPlotAttribute(dc.fid, dc.fgraph, uidc.fplotids[num], ATTR_TRACE_COLOR, on?uidc.fcol[num]:VAL_TRANSPARENT);
+	}
 	
 	update_chan_ring(dc.fid, dc.fcring, uidc.fchans);
 	
@@ -2150,17 +2223,23 @@ void toggle_fid_chan(int num) {
 	SetCtrlAttribute(dc.fid, dc.fcgain, ATTR_DIMMED, c_on);
 	SetCtrlAttribute(dc.fid, dc.fcoffset, ATTR_DIMMED, c_on);
 	
-	if(!c_on)
+	if(!c_on) {
 		update_fid_chan_box(); // Update the values of the chan box.
+	}
+}
+
+void toggle_fid_chan_safe(int num) {
+	CmtGetLock(lock_uidc);
+	toggle_fid_chan(num);
+	CmtReleaseLock(lock_uidc);
 }
 
 void toggle_spec_chan(int num) {
 	// Turns whether or not a given spectrumc hannel is on or off and updates the relevant controls
 	
-	if(num < 0 || num >= 8)
-		return;
+	if(num < 0 || num >= 8) { return; }
 	
-	/****** TO DO *******
+	/****** TODO *******
 	 Once the data loading and such is done, this also needs to hide or show
 	 the appropriate data, update the channel preferences, etc.
 	 *******************/
@@ -2168,7 +2247,6 @@ void toggle_spec_chan(int num) {
 	int i, on;
 	GetCtrlVal(dc.spec, dc.schans[num], &on);
 	
-	CmtGetLock(lock_uidc);
 	uidc.schans[num] = on;
 	
 	if(on) {
@@ -2176,7 +2254,6 @@ void toggle_spec_chan(int num) {
 	} else {
 		uidc.snc--;
 	}
-	CmtReleaseLock(lock_uidc);
 
 	// Turn the data on or off
 	if(uidc.schan >= 0 && uidc.schan < 3 && uidc.splotids[num][uidc.schan] >= 0) {
@@ -2213,9 +2290,15 @@ void toggle_spec_chan(int num) {
 		}
 	}
 	
-	if(!c_on)
+	if(!c_on) {
 		update_spec_chan_box(); // Update the values of the chan box.
-	
+	}
+}
+
+void toggle_spec_chan_safe(int num) {
+	CmtGetLock(lock_uidc);		  
+	toggle_spec_chan(num);
+	CmtReleaseLock(lock_uidc);
 }
 
 void update_chan_ring(int panel, int ctrl, int chans[]) {
@@ -2261,25 +2344,24 @@ void update_chan_ring(int panel, int ctrl, int chans[]) {
 	
 }
 
-void update_spec_fft_chan() {
-	// Run this whenever the uidc.schan value has changed.
+void update_fid_chan_box() {
+	// Called after a change in dc.fchanring to update the values in the box
 	
-	if(uidc.schan < 0 || uidc.schan >= 3)
-		return;
+	int c;
+	GetCtrlVal(dc.fid, dc.fcring, &c);
 	
-	int i, col[3] = {0, 0, 0};
+	if(c > 8 || c < 0)
+		return; 	// Something's fucked up - freak the shit out.
 	
-	// Go through and turn on or off the plots as appropriate.
-	for(i = 0; i < 8; i++) {
-		col[uidc.schan] = uidc.schans[i];
-		
-		if(uidc.splotids[i][0] >= 0)
-			SetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[i][0], ATTR_TRACE_COLOR, col[0]?uidc.scol[i]:VAL_TRANSPARENT);
-		if(uidc.splotids[i][1] >= 0)
-			SetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[i][1], ATTR_TRACE_COLOR, col[1]?uidc.scol[i]:VAL_TRANSPARENT);
-		if(uidc.splotids[i][2] >= 0)
-			SetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[i][2], ATTR_TRACE_COLOR, col[2]?uidc.scol[i]:VAL_TRANSPARENT);
-	}
+	SetCtrlVal(dc.fid, dc.fccol, uidc.fcol[c]);
+	SetCtrlVal(dc.fid, dc.fcgain, uidc.fgain[c]);
+	SetCtrlVal(dc.fid, dc.fcoffset, uidc.foff[c]);
+}
+
+void update_fid_chan_box_safe() {
+	CmtGetLock(lock_uidc);
+	update_fid_chan_box();
+	CmtReleaseLock(lock_uidc);
 }
 
 void update_spec_chan_box() {
@@ -2302,21 +2384,43 @@ void update_spec_chan_box() {
 	SetCtrlVal(dc.sphase[1], dc.sphase[0], uidc.sphase[c][phord]);
 }
 
-void update_fid_chan_box() {
-	// Called after a change in dc.fchanring to update the values in the box
-	
-	int c;
-	GetCtrlVal(dc.fid, dc.fcring, &c);
-	
-	if(c > 8 || c < 0)
-		return; 	// Something's fucked up - freak the shit out.
-	
-	SetCtrlVal(dc.fid, dc.fccol, uidc.fcol[c]);
-	SetCtrlVal(dc.fid, dc.fcgain, uidc.fgain[c]);
-	SetCtrlVal(dc.fid, dc.fcoffset, uidc.foff[c]);
-
+void update_spec_chan_box_safe() {
+	CmtGetLock(lock_uidc);
+	update_spec_chan_box();
+	CmtReleaseLock(lock_uidc);
 }
+
+void update_spec_fft_chan() {
+	// Run this whenever the uidc.schan value has changed.
 	
+	if(uidc.schan < 0 || uidc.schan >= 3)
+		return;
+	
+	int i, col[3] = {0, 0, 0};
+	
+	// Go through and turn on or off the plots as appropriate.
+	for(i = 0; i < 8; i++) {
+		col[uidc.schan] = uidc.schans[i];
+		
+		if(uidc.splotids[i][0] >= 0) {
+			SetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[i][0], ATTR_TRACE_COLOR, col[0]?uidc.scol[i]:VAL_TRANSPARENT);
+		}
+		
+		if(uidc.splotids[i][1] >= 0) {
+			SetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[i][1], ATTR_TRACE_COLOR, col[1]?uidc.scol[i]:VAL_TRANSPARENT);
+		}
+		
+		if(uidc.splotids[i][2] >= 0) {
+			SetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[i][2], ATTR_TRACE_COLOR, col[2]?uidc.scol[i]:VAL_TRANSPARENT);
+		}
+	}			   
+}
+
+void update_spec_fft_chan_safe() {
+	CmtGetLock(lock_uidc);
+	update_spec_fft_chan();
+	CmtReleaseLock(lock_uidc);
+}
 
 /********* Device Interaction Settings ********/
 
@@ -2334,8 +2438,7 @@ int get_current_fname (char *path, char *fname, int next) {
 	//
 	// Success returns 1;
 	
-	if(path == NULL || fname == NULL)
-		return -1;
+	if(path == NULL || fname == NULL) { return -1; }
 	
 	// Allocate space for the full pathname.
 	char *npath = malloc(strlen(path)+strlen(fname)+11);
@@ -2344,16 +2447,18 @@ int get_current_fname (char *path, char *fname, int next) {
 	
 	// Make sure that there's no path separator at the end of path
 	// or at the beginning or end of fname.
-	while(strlen(npath) > 1 && path[strlen(npath)-1] == '\\')
+	while(strlen(npath) > 1 && path[strlen(npath)-1] == '\\') {
 		npath[strlen(npath)-1] = '\0';
+	}
 	
 	if(strlen(npath) < 1 || !FileExists(npath, NULL)) {
 		free(npath);
 		return -2;
 	}
 	
-	while(strlen(fname) > 1 && fname[strlen(fname)-1] == '\\')
+	while(strlen(fname) > 1 && fname[strlen(fname)-1] == '\\') {
 		fname[strlen(fname)-1] = '\0';
+	}
 	
 	if(strlen(fname) < 1) {
 		free(npath);
@@ -2361,8 +2466,9 @@ int get_current_fname (char *path, char *fname, int next) {
 	}
 	
 	int i = 0, l = strlen(fname);
-	while(fname[i] == '\\' && i < l)
+	while(fname[i] == '\\' && i < l) {
 		i++;
+	}
 	
 	if(i > 0) {
 		strcpy(fname, &fname[i]);
@@ -2582,15 +2688,15 @@ int get_devices_safe() {
 	CmtGetLock(lock_uidc);
 	CmtGetLock(lock_uipc);
 	CmtGetLock(lock_DAQ);
+	
 	int rv = get_devices();
+	
 	CmtReleaseLock(lock_DAQ);
 	CmtReleaseLock(lock_uipc);
 	CmtReleaseLock(lock_uidc);
 	
 	return rv;
 }
-
-
 
 int load_AO_info() {
 	// Populates the uipc with information from the DAQs and such.
@@ -2788,6 +2894,10 @@ int load_AO_info_safe(void) {
 
 int load_DAQ_info() {
 	// Loads information about the DAQ to the UI controls.
+	// Return values are errors from function calls, mostly.
+	//
+	// Otherwise:
+	// -2: No devices found.
 	
 	// Variable declarations
 	int rv = 0, nl, len, old_ti = 0, old_ci = 0, curr_chan, i;
@@ -2820,33 +2930,27 @@ int load_DAQ_info() {
 	DeleteListItem(pc.trigc[1], pc.trigc[0], 0, -1);
 	DeleteListItem(pc.cc[1], pc.cc[0], 0, -1);
 	DeleteListItem(pc.curchan[1], pc.curchan[0], 0, -1);
-
-	
+ 
 	// Load devices.
-	if(get_devices_safe() < 0) {
+	if(get_devices() < 0) {
 		rv = -1;
-		goto err1;
+		nl = 0;
+	} else {
+		GetNumListItems(pc.dev[1], pc.dev[0], &nl);
 	}
 	
-	GetNumListItems(pc.dev[1], pc.dev[0], &nl);
 	if(nl < 1){
 		rv = -2;
-		
-		err1:
 		// Dim some controls, y'all.
 		SetCtrlAttribute(pc.trigc[1], pc.trigc[0], ATTR_DIMMED, 1);
 		SetCtrlAttribute(pc.trige[1], pc.trige[0], ATTR_DIMMED, 1);
 		SetCtrlAttribute(pc.curchan[1], pc.curchan[0], ATTR_DIMMED, 1);
 		SetCtrlAttribute(pc.range[1], pc.range[0], ATTR_DIMMED, 1);
 		
-		if (old_trig != NULL)
-			free(old_trig);
-		if (old_count != NULL)
-			free(old_count);
+		if (old_trig != NULL) { free(old_trig); }
+		if (old_count != NULL) { free(old_count); }
 		return rv;
 	}
-	
-	CmtGetLock(lock_DAQ);
 	
 	// Get the current device name
 	int nc = 0, devlen;
@@ -2869,7 +2973,6 @@ int load_DAQ_info() {
 	
 	// Change the uidc variable as appropriate.
 	if(nc != uidc.nchans) {
-		CmtGetLock(lock_uidc);
 		if(uidc.chans == NULL) {
 			uidc.chans = malloc(sizeof(int)*nc);
 			uidc.nchans = 1;
@@ -2881,26 +2984,23 @@ int load_DAQ_info() {
 			uidc.chans[i] = 0;
 		
 		uidc.nchans = nc;
-		CmtReleaseLock(lock_uidc);
 	}
 	
 	// Build an array of the names of the input channels
 	// Note: channel names are Device/Channel in this case, so we need to offset by devlen
 	// for UI purposes, otherwise the ring controls would look crowded.
-	CmtGetLock(lock_uidc);
 	uidc.onchans = 0;
-	CmtReleaseLock(lock_uidc);
 	channel_name = malloc(bsi);
 	char *buff_string = malloc(bsi);
 	p = p2 = input_chans;
 	
-	CmtGetLock(lock_uidc);
 	for(i = 0; i < nc; i++) {
 		p2 = strchr(p, ',');
-		if(p2 == NULL)
+		if(p2 == NULL) {
 			len = strlen(input_chans)-(p-input_chans)+2;
-		else 
+		} else { 
 			len = (p2 - p)+2;
+		}
 		
 		// The channel names either have a trailing space or a mark.
 		channel_name[0] = uidc.chans[i]?149:' '; 	// If it's on, char 149 is a mark
@@ -2919,7 +3019,6 @@ int load_DAQ_info() {
 		
 		p = (p2 == NULL)?NULL:p2+2;	// Increment if necessary. Skip the ", "
 	}
-	CmtReleaseLock(lock_uidc);
 	
 	// Fix up the current channel setup while we're at it.
 	if(uidc.onchans) {
@@ -2983,9 +3082,7 @@ int load_DAQ_info() {
 			SetCtrlIndex(pc.trigc[1], pc.trigc[0], old_ti);
 	}
 	
-	if(old_trig != NULL)
-		free(old_trig);
-	
+	if(old_trig != NULL) { free(old_trig); }
 	free(trig_chans);
 	
 	// Now we move on to the counter channels, basically the same deal as before.
@@ -3003,10 +3100,11 @@ int load_DAQ_info() {
 	p = p2 = counter_chans;
 	while(p != NULL) {
 		p2 = strchr(p, ',');
-		if(p2 == NULL)
+		if(p2 == NULL) {
 			len = strlen(counter_chans)-(p-counter_chans)+1;
-		else
+		} else {
 			len = p2-p+1;
+		}
 		
 		strncpy(buff_string, p, len);
 		strncpy(channel_name, &p[devlen], len-devlen);
@@ -3022,18 +3120,17 @@ int load_DAQ_info() {
 	GetNumListItems(pc.cc[1], pc.cc[0], &nl);
 	if(nl && old_count != NULL) {
 		GetIndexFromValue(pc.cc[1], pc.cc[0], &ind, old_count);
-		if(ind >= 0)
+		if(ind >= 0) {
 			SetCtrlIndex(pc.cc[1], pc.cc[0], ind);
-		else if (old_ci >= nl)
+		} else if (old_ci >= nl) {
 			SetCtrlIndex(pc.cc[1], pc.cc[0], nl-1);
-		else
+		} else {
 			SetCtrlIndex(pc.cc[1], pc.cc[0], old_ci);
+		}
 	}
 	
-	if(old_count != NULL)
-		free(old_count);
+	if(old_count != NULL) { free(old_count); }
 	free(counter_chans);
-	
 	free(channel_name);
 	free(buff_string);
 	
@@ -3042,10 +3139,22 @@ int load_DAQ_info() {
 	ReplaceListItem(pc.trige[1], pc.trige[0], 1, "Falling", DAQmx_Val_Falling);
 	
 	free(device);
-	CmtReleaseLock(lock_DAQ);
 	return 0;
 }
 
+int load_DAQ_info_safe(int UIDC_lock, int UIPC_lock, int DAQ_lock) {
+	if(UIDC_lock) { CmtGetLock(lock_uidc); }
+	if(UIPC_lock) { CmtGetLock(lock_uipc); }
+	if(DAQ_lock) { CmtGetLock(lock_DAQ); }
+	
+	int rv = load_DAQ_info();
+	
+	if(DAQ_lock) { CmtReleaseLock(lock_DAQ); }
+	if(UIPC_lock) { CmtReleaseLock(lock_uipc); }
+	if(UIDC_lock) { CmtReleaseLock(lock_uidc); }
+	
+	return rv;
+}
 
 void toggle_ic() {
 	// Toggles a given input channel. If you are turning it off, this
@@ -3087,24 +3196,22 @@ void toggle_ic() {
 	// Replace the list item to replace the label
 	ReplaceListItem(pc.ic[1], pc.ic[0], val, label, value);
 	
-	
 	// Now we're going to insert into the current channels ring in the right place
 	// Either delete the val when we find it, or insert this before the first one
 	// that's bigger than it.
 	int i, ind;
 	
-	if(uidc.chans[val])
+	if(uidc.chans[val]) {
 		remove_chan(val);
-	else
+	} else {
 		add_chan(&label[1], val);
-
+	}
+	
 	free(label);
 	free(value);
 	
 	// Update the uidc var now.
-	CmtGetLock(lock_uidc);
 	uidc.chans[val] = !uidc.chans[val];		// Toggle its place in the var
-	CmtReleaseLock(lock_uidc);
 	
 	// Finally, we'll do the bit where we set this to the right value.
 	if(!uidc.chans[val]) {
@@ -3137,6 +3244,12 @@ void toggle_ic() {
 	SetCtrlAttribute(pc.range[1], pc.range[0], ATTR_DIMMED, dimmed);
 }
 
+void toggle_ic_safe() {
+	CmtGetLock(lock_uidc);
+	toggle_ic();
+	CmtReleaseLock(lock_uidc);
+}
+
 void add_chan(char *label, int val) {
 	// Adds a channel to the current channel control in a sorted fashion.
 	// This also increments uidc.onchans.
@@ -3145,25 +3258,29 @@ void add_chan(char *label, int val) {
 	int i, ind;
 	for(i = 0; i < uidc.onchans; i++) {
 		GetValueFromIndex(pc.curchan[1], pc.curchan[0], i, &ind);
-		if(ind > val)
-			break;	
+		if(ind > val) { break; }	
 	}
 	
 	if(i >= uidc.onchans) {
 		ind = -1;
 		i = uidc.onchans;
-	} else
+	} else {
 		ind = i;
+	}
 	
 	InsertListItem(pc.curchan[1], pc.curchan[0], ind, label, val);
 	
-	CmtGetLock(lock_uidc);
 	// Now update the range controls
 	for(int j = uidc.onchans; j > i; j--)
 		uidc.range[j] = uidc.range[j-1];
 
 	GetCtrlAttribute(pc.range[1], pc.range[0], ATTR_DFLT_VALUE, &uidc.range[i]);
 	uidc.onchans++;
+}
+
+void add_chan_safe(char *label, int val) {
+	CmtGetLock(lock_uidc);
+	add_chan(label, val);
 	CmtReleaseLock(lock_uidc);
 }
 
@@ -3174,35 +3291,41 @@ void remove_chan(int val) {
 	int i, ind;
 	for(i = 0; i < uidc.onchans; i++) {
 		GetValueFromIndex(pc.curchan[1], pc.curchan[0], i, &ind);
-		if(ind == val)
-			break;
+		if(ind == val) { break; }
 	}
 	
-	if(i >= uidc.onchans)
-		return;				// It's not there
+	if(i >= uidc.onchans) { return; }	// It's not there
 	
 	DeleteListItem(pc.curchan[1], pc.curchan[0], i, 1);
 	
 	// Move over all the range values
-	CmtGetLock(lock_uidc);
 	for(i; i < uidc.onchans-1; i++) 
 		uidc.range[i] = uidc.range[i+1];
 	
 	uidc.onchans--;
-	CmtReleaseLock(lock_uidc);
 	
 	change_chan();	// In case we deleted the current channel.
+}
+
+void remove_chan_safe(int val) {
+	CmtGetLock(lock_uidc);
+	remove_chan(val);
+	CmtReleaseLock(lock_uidc);
 }
 
 void change_chan() {
 	// Function called when you change the current channel.
 	// Updates the range control with values from uidc.
+	//
+	// Single uidc readout call, no race condition, so it
+	// doesn't have to be thread-safe by itself.
 	
 	int chan;
 	GetCtrlIndex(pc.curchan[1], pc.curchan[0], &chan);
 	
-	if(chan >= 0 && chan < 8) 
+	if(chan >= 0 && chan < 8) { 
 		SetCtrlVal(pc.range[1], pc.range[0], uidc.range[chan]);
+	}
 }
 
 void change_range() {
@@ -3214,11 +3337,17 @@ void change_range() {
 	GetCtrlIndex(pc.curchan[1], pc.curchan[0], &chan);
 	GetCtrlVal(pc.range[1], pc.range[0], &val);
 	
-	CmtGetLock(lock_uidc);
-	if(chan >= 0 && chan < 8)
+	if(chan >= 0 && chan < 8) {
 		uidc.range[chan] = val;
+	}
+}
+
+void change_range_safe() {
+	CmtGetLock(lock_uidc);
+	change_range();
 	CmtReleaseLock(lock_uidc);
 }
+
 //////////////////////////////////////////////////////////////
 // 															//
 //				    Device Interaction						//	
@@ -3235,12 +3364,8 @@ int setup_DAQ_task() {
 	char *tname = NULL, *ic_name = NULL, *cc_name = NULL, *cc_out_name = NULL;
 	char *tc_name = NULL;
 	
-	if(rv = clear_DAQ_task())
-		goto error;
-	
-	CmtGetLock(lock_DAQ);
-	CmtGetLock(lock_ce);
-	
+	if(rv = clear_DAQ_task()) { goto error; }
+
 	// First we create the tasks
 	ce.atname = "AcquireTask";
 	ce.ctname = "CounterTask";
@@ -3251,12 +3376,10 @@ int setup_DAQ_task() {
 	ce.atset = 0;
 	ce.ctset = 0;
 	
-	if(rv = DAQmxCreateTask(ce.atname, &ce.aTask)) 
-		goto error;
+	if(rv = DAQmxCreateTask(ce.atname, &ce.aTask))  { goto error; }
 	ce.atset = 1;	// We've created the counter task
 	
-	if(rv = DAQmxCreateTask(ce.ctname, &ce.cTask))
-		goto error;
+	if(rv = DAQmxCreateTask(ce.ctname, &ce.cTask)) { goto error; }
 	ce.ctset = 1;	// We've created the counter task
 	
 	// Get some stuff from the UI
@@ -3271,12 +3394,10 @@ int setup_DAQ_task() {
 	ic_name = malloc(insize);
 
 	if(ce.icnames != NULL && ce.nchan > 0) {
-		for(i = 0; i < ce.nchan; i++)
-			free(ce.icnames[i]);
+		for(i = 0; i < ce.nchan; i++) { free(ce.icnames[i]); }
 	}
 	
-	if(ce.icnames != NULL)
-		free(ce.icnames);
+	if(ce.icnames != NULL) { free(ce.icnames); }
 	
 	ce.nchan = nc;
 	ce.icnames = malloc(sizeof(char*)*nc);
@@ -3301,8 +3422,9 @@ int setup_DAQ_task() {
 		
 		// Create the channel
 		if(rv = DAQmxCreateAIVoltageChan(ce.aTask, ic_name, tname, DAQmx_Val_Cfg_Default,
-			(float64)(-uidc.range[i]), (float64)(uidc.range[i]), DAQmx_Val_Volts, NULL))
+			(float64)(-uidc.range[i]), (float64)(uidc.range[i]), DAQmx_Val_Volts, NULL)) {
 			goto error;
+		}
 	}
 	
 	// Create the counter channel
@@ -3314,22 +3436,18 @@ int setup_DAQ_task() {
 	// this, so for now it's just a switch based on this specific application.
 	GetCtrlVal(pc.cc[1], pc.cc[0], cc_name);
 
-	if(strstr(cc_name, "ctr0") != NULL)
+	if(strstr(cc_name, "ctr0") != NULL) {
 		sprintf(cc_out_name, "Ctr0InternalOutput");
-	else if (strstr(cc_name, "ctr1") != NULL) 
+	} else if (strstr(cc_name, "ctr1") != NULL) { 
 		sprintf(cc_out_name, "Ctr1InternalOutput");
-	else {
+	} else {
 		MessagePopup("Counter Error", "Unsupported counter channel - choose ctr0 or ctr1\n\
 						If these options do not exist, you are fucked. Sorry, mate.\n");
 		rv = -150;
 		goto error;
 	}
 	
-	if(ce.ccname != NULL) {
-		free(ce.ccname);
-		ce.ccname = NULL;	
-	}
-	
+	if(ce.ccname != NULL) { free(ce.ccname); }
 	ce.ccname = cc_out_name;
 	
 	/*****TODO*****
@@ -3363,41 +3481,42 @@ int setup_DAQ_task() {
 	
 	error:
 	
-	if(tname != NULL)
-		free(tname);
+	if(tname != NULL) { free(tname); }
 	
-	if(ic_name != NULL)
-		free(ic_name);
+	if(ic_name != NULL) { free(ic_name); }
 
-	if(cc_name != NULL)
-		free(cc_name);
+	if(cc_name != NULL) { free(cc_name); }
 	
-	if(cc_out_name != NULL) 
-		free(cc_out_name);
+	if(cc_out_name != NULL) { free(cc_out_name); }
 	
-	if(ce.ccname != NULL)
-		ce.ccname = NULL;
+	if(ce.ccname != NULL) { ce.ccname = NULL; }
 	
-	if(tc_name != NULL)
-		free(tc_name);
+	if(tc_name != NULL) { free(tc_name); }
 	
 	if(rv != 0) {
-		if(ce.atset)
-			DAQmxClearTask(ce.aTask);
-		if(ce.ctset)
-			DAQmxClearTask(ce.cTask);
+		if(ce.atset) { DAQmxClearTask(ce.aTask); }
+		if(ce.ctset) { DAQmxClearTask(ce.cTask); }
 	}
+	return rv;
+}
+
+int setup_DAQ_task_safe(int DAQ_lock, int UIDC_lock, int CE_lock) {
+	if(DAQ_lock) { CmtGetLock(lock_DAQ); }
+	if(UIDC_lock) { CmtGetLock(lock_uidc); }
+	if(CE_lock) { CmtGetLock(lock_ce); }
 	
-	CmtReleaseLock(lock_ce);
-	CmtReleaseLock(lock_DAQ);
+	int rv = setup_DAQ_task();
+	
+	if(CE_lock) { CmtReleaseLock(lock_ce);  }
+	if(UIDC_lock) { CmtReleaseLock(lock_uidc); }
+	if(DAQ_lock) { CmtReleaseLock(lock_DAQ);  }
+	
 	return rv;
 }
 
 int clear_DAQ_task() {
 	int rv = 0;
-	CmtGetLock(lock_DAQ);
-	CmtGetLock(lock_ce);
-	
+
 	// Acquisition task
 	if(ce.atset) {
 		if(!(rv = DAQmxClearTask(ce.aTask)))
@@ -3413,10 +3532,19 @@ int clear_DAQ_task() {
 		}
 	}
 	
+	return rv;
+}
+
+int clear_DAQ_task_safe() {
+	CmtGetLock(lock_DAQ);
+	CmtGetLock(lock_ce);
+	
+	int rv = clear_DAQ_task();
+	
 	CmtReleaseLock(lock_ce);
 	CmtReleaseLock(lock_DAQ);
-	return rv;
 	
+	return rv;
 }
 
 //////////////////////////////////////////////////////////////

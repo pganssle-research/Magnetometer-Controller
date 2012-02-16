@@ -100,12 +100,14 @@
 /************************* Function Declarations *************************/
 
 /************** File I/O ****************/
-extern int SavePulseProgram(char *filename, PPROGRAM *p);
-extern PPROGRAM *LoadPulseProgram(char *filename, int *err_val);
+extern int SavePulseProgram(char *filename, int safe, PPROGRAM *p);
+extern PPROGRAM *LoadPulseProgram(char *filename, int safe, int *err_val);
 
 extern int get_name(char *pathname, char *name, char *ending);
 extern int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p);
+extern int save_program_safe(DDCChannelGroupHandle pcg, PPROGRAM *p);
 PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val);
+PPROGRAM *load_program_safe(DDCChannelGroupHandle pcg, int *err_val);
 
 extern char *generate_nc_string(char **strings, int numstrings, int *len);
 extern char **get_nc_strings(char *string, int *nss);

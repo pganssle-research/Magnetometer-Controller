@@ -73,8 +73,8 @@ extern void initialize_ce(void);
 extern int *get_broken_ttl_ctrls(void);
 
 // File I/O
-extern int save_session(char *filename);
-extern int load_session(char *filename);
+extern int save_session(char *filename, int safe);
+extern int load_session(char *filename, int safe);
 extern void display_xml_error(int err);
 
 

@@ -56,7 +56,6 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	pc.md_inst = MDInstr;
 	pc.a_inst = AOInstPan;
 	
-	
 	// Start building the tabs now.
 	if ((mc.mp = LoadPanel (0, uifname, MainPanel)) < 0)
 		return 1;
@@ -71,7 +70,6 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	// Then the menu bars
 	mc.mainmenu = GetPanelMenuBar(mc.mp); 	// Main menu
 	mc.rcmenu = LoadMenuBar(0, uifname, RCMenus);	// Right click menu
-	
 
 	// Then the container panels								 
 	pc.PProgCPan = LoadPanel(pc.PProgPan, uifname, PPPanel); // Pulse program instr container
@@ -108,21 +106,23 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	initialize_ce();
 	
 	// Load the DAQ and PB values.
-	load_DAQ_info();
+	load_DAQ_info_safe(1, 1, 1);
 	load_pb_info(0);
 
 	// Now load the previous session
-	int rv = load_session(NULL);
+	int rv = load_session(NULL, 1);
 	
-	if(rv)
-		display_xml_error(rv);
+	if(rv) {  display_xml_error(rv); }
 	
 	// Now load what UI stuff that needs to be loaded
 	setup_broken_ttls_safe();
+	
+	CmtGetLock(lock_uidc);
 	for(i = 0; i < 8; i++) {
 		change_fid_chan_col(i);
 		change_spec_chan_col(i);
 	}
+	CmtReleaseLock(lock_uidc);
 	
 	// Initialize the data navigation box
 	int len;
@@ -141,8 +141,7 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	
 	get_current_fname(path, fname, !ldm);
 
-	if(path[strlen(path)-1] == '\\')
-		path[strlen(path)-1] = '\0';
+	if(path[strlen(path)-1] == '\\') { path[strlen(path)-1] = '\0'; }
 	
 	path = realloc(path, strlen(path)+strlen(fname)+6);
 	
@@ -151,20 +150,21 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	strcat(path, ".tdm");
 	
 	SetCtrlVal(mc.datafbox[1], mc.datafbox[0], path);
-	if(ldm)
-		load_file_info(path, NULL);
-	else 
+	
+	if(ldm) {
+		load_file_info_safe(path, NULL);
+	} else { 
 		SetCtrlVal(mc.cdfname[1], mc.cdfname[0], fname);
+	}
 	
 	free(fname);
 	free(path);
-
+	
 	SetCtrlVal(pc.trig_ttl[1], pc.trig_ttl[0], uipc.trigger_ttl);
 	set_ttl_trigger(pc.inst[0], -1, 1);
-	
-	
+
 	// Do this for whatever reason.
-	update_experiment_nav();
+	update_experiment_nav_safe();
 	
 	DisplayPanel (mc.mp);
 	
@@ -736,9 +736,12 @@ int *get_broken_ttl_ctrls() {
 }
 
 /********************************  File I/O  *********************************/
-int save_session(char *filename) { // Primary session saving function
+int save_session(char *filename, int safe) { // Primary session saving function
 	// Generates a pair of files, an xml file named filename.xml and a program named
 	// filename.tdms. If you pass NULL, session_fname is used.
+	//
+	// If safe evaluates true, this will be executed in a thread-safe manner.
+	
 	
 	//////////////////////////////////////////////////////////////////////////////////
 	//																			  	//
@@ -804,11 +807,16 @@ int save_session(char *filename) { // Primary session saving function
 	
 	// We're going to start by saving the program, because that has a ui_cleanup call in it
 	sprintf(fname, "%s.tdm", fbuff);
-	SavePulseProgram(fname, NULL);
+	SavePulseProgram(fname, safe, NULL);	// This is a thread-safe function - call as appropriate.
 	
 	sprintf(fname, "%s.xml", fbuff);
 	
 	// Now create an XML file
+	if(safe) { 
+		CmtGetLock(lock_uipc);
+		CmtGetLock(lock_uidc);
+	}
+	
 	CVIXMLDocument xml_doc = -1;
 	CVIXMLElement r_e = 0, pref_e = 0, gen_e = 0, ppc_e = 0, dd_e = 0;
 	CVIXMLElement npsrat_e = 0, tview_e = 0;					 
@@ -823,21 +831,14 @@ int save_session(char *filename) { // Primary session saving function
 	buff = malloc(g);
 	
 	// Create the document
-	if(rv = CVIXMLNewDocument(MCXML_RETAG, &xml_doc))
-		goto error;
+	if(rv = CVIXMLNewDocument(MCXML_RETAG, &xml_doc)) { goto error; } 
 	
 	// Get the root element
-	if(rv = CVIXMLGetRootElement(xml_doc, &r_e))
-		goto error;
+	if(rv = CVIXMLGetRootElement(xml_doc, &r_e)) { goto error; }
 	
 	// Save version info as attribute
-	len = strlen("Magnetometer Controller Version ")+8;
-	g = realloc_if_needed(buff, g, len, s); 
+	CVIXMLAddAttribute(r_e, MCXML_VER, MC_VERSION_STRING); 
 
-	sprintf(buff, "%s%.1f", "Magnetometer Controller Version ", MC_VERSION);
-	CVIXMLAddAttribute(r_e, MCXML_VER, buff); 
-
-	
 	// Now create the highest-level child elements.
 	if(rv = CVIXMLNewElement(r_e, -1, MCXML_PREFS, &pref_e)) { goto error; }	// User preferences
 	if(rv = CVIXMLNewElement(r_e, -1, MCXML_GEN, &gen_e)) { goto error; }		// General controls
@@ -916,15 +917,8 @@ int save_session(char *filename) { // Primary session saving function
 	GetCtrlVal(mc.basefname[1], mc.basefname[0], bfname);
 	GetCtrlVal(mc.path[1], mc.path[0], fpath);
 
-	CmtGetLock(lock_uidc);
-	if(uidc.dlpath == NULL) 
-		uidc.dlpath = fpath;
-	CmtReleaseLock(lock_uidc);
-	
-	CmtGetLock(lock_uipc);
-	if(uipc.ppath == NULL)
-		uipc.ppath = "Programs";
-	CmtReleaseLock(lock_uipc);
+	if(uidc.dlpath == NULL)  { uidc.dlpath = fpath; }
+	if(uipc.ppath == NULL) { uipc.ppath = "Programs"; }
 	
 	// Create the elements
 	// Base data file name
@@ -982,14 +976,12 @@ int save_session(char *filename) { // Primary session saving function
 	int trig_ttl;
 	GetCtrlVal(pc.trig_ttl[1], pc.trig_ttl[0], &trig_ttl);
 	sprintf(buff, "%d", trig_ttl);
-	if(rv = CVIXMLAddAttribute(ppc_e, MCXML_TRIGTTL, buff))
-		goto error;
+	
+	if(rv = CVIXMLAddAttribute(ppc_e, MCXML_TRIGTTL, buff)) { goto error; }
 	
 	// Get the device name and index and add them to the xml file.
 	int nl, cind;
 	GetNumListItems(pc.dev[1], pc.dev[0], &nl);
-	
-	CVIDynamicMemoryInfo("Message", NULL, NULL, DYNAMIC_MEMORY_SHOW_ALLOCATED_MEMORY);
 	
 	if(nl > 0) {		// This will throw errors if no devices are present
 		int devind;
@@ -1009,15 +1001,8 @@ int save_session(char *filename) { // Primary session saving function
 	if(rv = CVIXMLSetElementValue(dev_e, devname)) { goto error; }
 	if(rv = CVIXMLAddAttribute(dev_e, MCXML_INDEX, buff)) { goto error; }
 	
-	char *a = malloc(1);
-	
 	free(devname);
 	devname = NULL;
-	
-	free(a);
-	
-	a = malloc(1);
-	free(a);
 	
 	// Now save the Pulseblaster device.
 	int pb_dev = -1;
@@ -1043,8 +1028,7 @@ int save_session(char *filename) { // Primary session saving function
 		// g is at least 200, and the max number of channels is 8, so even
 		// assuming each channel is of size maxint, we would only need 88 bytes
 		// to store all of them, so we'll just use buff to hold the indices. 
-		if(nchans > 8)
-			nchans = 8;
+		if(nchans > 8) { nchans = 8;}
 	
 		int cinlen = 1, cind, g3 = 200;	// For the channel names.
 		cnames = malloc(g3);
@@ -1220,8 +1204,7 @@ int save_session(char *filename) { // Primary session saving function
 	int gainl = 0, offl = 0;
 	
 	for(i = 0; i < 8; i++) {
-		if(uidc.fchans[i])
-			sprintf(buff, "%s%d;", buff, i);
+		if(uidc.fchans[i]) { sprintf(buff, "%s%d;", buff, i); }
 		
 		// Colors
 		sprintf(colors, "%s%06x;", colors, uidc.fcol[i]);
@@ -1293,8 +1276,7 @@ int save_session(char *filename) { // Primary session saving function
 	gainl = offl = 0;
 	
 	for(i = 0; i < 8; i++) {
-		if(uidc.schans[i])
-			sprintf(buff, "%s%d;", buff, i);
+		if(uidc.schans[i]) { sprintf(buff, "%s%d;", buff, i); }
 		
 		// Colors
 		sprintf(colors, "%s%06x;", colors, uidc.scol[i]);
@@ -1331,6 +1313,7 @@ int save_session(char *filename) { // Primary session saving function
 	// Finally write these things to elements.
 	if(rv = CVIXMLNewElement(spec_e, -1, MCXML_CHANSON, &con_e)) { goto error; }
 	if(rv = CVIXMLSetElementValue(con_e, buff)) { goto error; }
+	
 	sprintf(buff, "%d", uidc.snc);
 	if(rv = CVIXMLAddAttribute(con_e, MCXML_NUM, buff)) { goto error; }
 	
@@ -1412,12 +1395,20 @@ int save_session(char *filename) { // Primary session saving function
 	if(off_e != 0) { CVIXMLDiscardElement(off_e); }
 	if(con_e != 0) { CVIXMLDiscardElement(con_e); }
 
+	if(safe) {
+		CmtReleaseLock(lock_uipc);
+		CmtReleaseLock(lock_uidc);
+	}
+	
 	return rv;
 }
 
-int load_session(char *filename) { // Primary session loading function
+int load_session(char *filename, int safe) { // Primary session loading function
  	// Generates a pair of files, an xml file named filename.xml and a program named
 	// filename.tdms. If you pass NULL, session_fname is used.
+	//
+	// If safe returns true, this will get the thread locks lock_uidc,
+	// lock_uipc and lock_tdm, lock_DAQ.
 	
 	//////////////////////////////////////////////////////////////////////////////////
 	//																			  	//
@@ -1481,6 +1472,11 @@ int load_session(char *filename) { // Primary session loading function
 
 	fname = malloc(strlen(fbuff)+strlen(".tdms")+1);
 	
+	if(safe) { 
+		CmtGetLock(lock_uidc);
+		CmtGetLock(lock_uipc);
+	}
+	
 	CVIXMLDocument xml_doc = -1;
 	
 	// Elements
@@ -1501,8 +1497,7 @@ int load_session(char *filename) { // Primary session loading function
 	// Unlike with the save_session function, we'll end with the pulse program, since we need
 	// to make sure broken ttls and trigger ttls and such are set up.
 	sprintf(fname, "%s.xml", fbuff);
-	if(rv = CVIXMLLoadDocument(fname, &xml_doc)) 	// Load the file
-		goto error;
+	if(rv = CVIXMLLoadDocument(fname, &xml_doc)) { goto error; }
 	
 	// Get the root element and the main elements.
 	if(rv = CVIXMLGetRootElement(xml_doc, &r_e)) { goto error; }
@@ -1536,14 +1531,9 @@ int load_session(char *filename) { // Primary session loading function
 		CtrlCallbackPtr cb;		// Need to get a pointer to the callback function
 		GetCtrlAttribute(pc.np[1], pc.np[0], ATTR_CALLBACK_FUNCTION_POINTER, &cb);
 		
-		if(np != -1)
-			InstallCtrlCallback(pc.np[1], pc.np[0], cb, (void *)np);
-		
-		if(sr != -1)
-			InstallCtrlCallback(pc.sr[1], pc.sr[0], cb, (void *)sr);
-		
-		if(at != -1)
-			InstallCtrlCallback(pc.at[1], pc.at[0], cb, (void *)at);
+		if(np != -1) { InstallCtrlCallback(pc.np[1], pc.np[0], cb, (void *)np); }
+		if(sr != -1) { InstallCtrlCallback(pc.sr[1], pc.sr[0], cb, (void *)sr); }
+		if(at != -1) { InstallCtrlCallback(pc.at[1], pc.at[0], cb, (void *)at); }
 		
 		CVIXMLDiscardElement(npsrat_e);
 		npsrat_e = 0;
@@ -1556,17 +1546,15 @@ int load_session(char *filename) { // Primary session loading function
 		int tview = -1;
 		sscanf(buff, "%d", &tview);
 		
-		if(tview < 0 || tview > 2)
-			tview = 0;
+		if(tview < 0 || tview > 2) { tview = 0; }
 		
-		CmtGetLock(lock_uidc);
 		uidc.disp_update = tview; // Update the uidc var.
-		CmtReleaseLock(lock_uidc);
 		
 		// Need to make sure that the menu bar checking reflects the uidc var. 
 
-		for(i = 0; i < 3; i++)
+		for(i = 0; i < 3; i++) {
 			SetMenuBarAttribute(mc.mainmenu, mc.vtviewopts[i], ATTR_CHECKED, (i == tview)?1:0);
+		}
 		
 		// Free memory
 		CVIXMLDiscardElement(tview_e);
@@ -1610,16 +1598,14 @@ int load_session(char *filename) { // Primary session loading function
 	
 	// Base filename
 	if(bf_e != 0) {
-		if(rv = CVIXMLGetElementValueLength(bf_e, &len))
-			goto error;
+		if(rv = CVIXMLGetElementValueLength(bf_e, &len)) { goto error; }
 		
 		g = realloc_if_needed(buff, g, len, s);
 		
-		if(rv = CVIXMLGetElementValue(bf_e, buff))
-			goto error;
+		if(rv = CVIXMLGetElementValue(bf_e, buff)) { goto error; }
 		
-		if(len > 0)
-			SetCtrlVal(mc.basefname[1], mc.basefname[0], buff);
+		if(len > 0) 
+		 SetCtrlVal(mc.basefname[1], mc.basefname[0], buff); 
 		
 		CVIXMLDiscardElement(bf_e);
 		bf_e = 0;
@@ -1649,13 +1635,11 @@ int load_session(char *filename) { // Primary session loading function
 		if(rv = CVIXMLGetElementValue(dlpath_e, buff)) { goto error; }
 		
 		// We don't want to set dlpath to anything but NULL unless we actually have something to put there.
-		CmtGetLock(lock_uidc);
 		if(len > 0) {
 			uidc.dlpath = malloc(len+1);
 			strcpy(uidc.dlpath, buff);
 		}
-		CmtReleaseLock(lock_uidc);
-		
+
 		CVIXMLDiscardElement(dlpath_e);
 		dlpath_e = 0;
 	}
@@ -1688,10 +1672,8 @@ int load_session(char *filename) { // Primary session loading function
 		if(rv = CVIXMLGetElementValue(ppath_e, buff)) { goto error; }
 		
 		if(len > 0) {
-			CmtGetLock(lock_uipc);
 			uipc.ppath = malloc(len+1);
-			strcpy(uipc.ppath, buff);
-			CmtReleaseLock(lock_uipc);
+			strcpy(uipc.ppath, buff);;
 		}
 		
 		CVIXMLDiscardElement(ppath_e);
@@ -1743,9 +1725,7 @@ int load_session(char *filename) { // Primary session loading function
 		sscanf(buff, "%d", &trig_ttl);
 		
 		if(trig_ttl >= 0 && trig_ttl < 24) {
-			CmtGetLock(lock_uipc);
 			uipc.trigger_ttl = trig_ttl;
-			CmtReleaseLock(lock_uipc);
 			SetCtrlVal(pc.trig_ttl[1], pc.trig_ttl[0], trig_ttl);
 		}
 		
@@ -1791,8 +1771,9 @@ int load_session(char *filename) { // Primary session loading function
 				
 				// We need to reload the DAQ info for the given device if it's been changed.
 				GetCtrlIndex(pc.dev[1], pc.dev[0], &ind);
-				if(ind != old_ind)
-					load_DAQ_info();
+				if(ind != old_ind) {
+					load_DAQ_info_safe(0, 0, 1);
+				}
 			}
 		}
 		
@@ -1884,8 +1865,7 @@ int load_session(char *filename) { // Primary session loading function
 			}
 		}
 		
-		if(chann_e != 0)
-			CVIXMLDiscardElement(chann_e);
+		if(chann_e != 0) { CVIXMLDiscardElement(chann_e); }
 		chann_e = 0;
 		
 		// Now we get the ranges.
@@ -1904,19 +1884,16 @@ int load_session(char *filename) { // Primary session loading function
 			}
 		}
 		
-		if(chanr_e != 0)
-			CVIXMLDiscardElement(chanr_e);
+		if(chanr_e != 0) { CVIXMLDiscardElement(chanr_e); }
 		chanr_e = 0;
 		
-		if(inds != NULL)
-			DeleteListItem(pc.curchan[1], pc.curchan[0], 0, -1);
+		if(inds != NULL) { DeleteListItem(pc.curchan[1], pc.curchan[0], 0, -1); }
 		
 		// Now we should have a list of ranges and indices, and we can set up
 		// the proper user interface.
 		int j = 0;
 		int vlen;
 		
-		CmtGetLock(lock_uidc);
 		uidc.onchans = 0;
 		for(i = 0; i < num; i++) {
 			if(inds[i] < 0)
@@ -1940,8 +1917,7 @@ int load_session(char *filename) { // Primary session loading function
 			
 			j++;	// Counter of how many things we've added.
 		}
-		CmtReleaseLock(lock_uidc);
-		
+
 		SetCtrlVal(pc.nc[1], pc.nc[0], uidc.onchans);
 		
 		if(ranges != NULL) { free(ranges); }
@@ -2098,9 +2074,7 @@ int load_session(char *filename) { // Primary session loading function
 	if(bttls_e != 0) {
 		if(rv = CVIXMLGetElementValue(bttls_e, buff)) { goto error; }
 		
-		CmtGetLock(lock_uipc);
 		sscanf(buff, "%d", &uipc.broken_ttls);
-		CmtReleaseLock(lock_uipc);
 		
 		CVIXMLDiscardElement(bttls_e);
 		bttls_e = 0;
@@ -2145,8 +2119,7 @@ int load_session(char *filename) { // Primary session loading function
 				int as = -1;
 				sscanf(buff, "%d", &as);
 			
-				if(as != -1)
-					SetCtrlVal(pan[j], as_c[j], as);
+				if(as != -1) { SetCtrlVal(pan[j], as_c[j], as); }
 			
 				CVIXMLDiscardAttribute(as_a);
 				as_a = 0;
@@ -2285,13 +2258,14 @@ int load_session(char *filename) { // Primary session loading function
 	// Finally, we load the program
 	sprintf(fname, "%s.tdm", fbuff);
 	if(FileExists(fname, NULL)) {
-		PPROGRAM *p = LoadPulseProgram(fname, &rv);
+		
+		PPROGRAM *p = LoadPulseProgram(fname, safe, &rv);	// Gets lock_tdm, no others.
 		
 		if(rv)
 			goto error;
 		
 		if(p != NULL) {
-			set_current_program_safe(p);
+			set_current_program(p);
 			free_pprog(p);
 		}
 	}
@@ -2352,9 +2326,12 @@ int load_session(char *filename) { // Primary session loading function
 	if(as_a != 0) { CVIXMLDiscardAttribute(as_a); }
 	
 	// Discard the document
-	if(xml_doc != -1)
-		CVIXMLDiscardDocument(xml_doc);
-
+	if(xml_doc != -1) { CVIXMLDiscardDocument(xml_doc); }
+	
+	if(safe) { 
+		CmtReleaseLock(lock_uidc);
+		CmtReleaseLock(lock_uipc);
+	}
 	return rv;
 }
 
