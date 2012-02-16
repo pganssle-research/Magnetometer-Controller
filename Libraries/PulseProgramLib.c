@@ -1946,7 +1946,7 @@ int ui_cleanup(int verbose) {
 	
 	int change = 0;		// Flag if there's a change
 	int i, j, state, steps, dim, cyc, ind, step;
-	int data_on, delay_on, ao_on, ao_on_disabled = 0;
+	int data_on, delay_on, ao_on = 0, ao_on_disabled = 0;
 	double time;
 	
 	// First go through and find any problems within the multidimensional acquisition, if applicable.
