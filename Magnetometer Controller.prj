@@ -24,7 +24,7 @@ Path Is Rel = True
 Path Rel To = "CVI"
 Path Rel To Override = "CVI"
 Path Rel Path = "toolslib/toolbox/cvixml.fp"
-Path = "/c/Program Files (x86)/National Instruments/CVI90/toolslib/toolbox/cvixml.fp"
+Path = "/c/program files (x86)/national instruments/cvi90/toolslib/toolbox/cvixml.fp"
 Exclude = False
 Project Flags = 0
 Folder = "Instrument Files"
@@ -61,7 +61,7 @@ Path Is Rel = True
 Path Rel To = "CVI"
 Path Rel To Override = "CVI"
 Path Rel Path = "toolslib/custctrl/FileBrowser.fp"
-Path Line0001 = "/c/Program Files (x86)/National Instruments/CVI90/toolslib/custctrl/FileBrowser."
+Path Line0001 = "/c/program files (x86)/national instruments/cvi90/toolslib/custctrl/FileBrowser."
 Path Line0002 = "fp"
 Exclude = False
 Project Flags = 0
@@ -183,7 +183,7 @@ Path Is Rel = True
 Path Rel To = "CVI"
 Path Rel To Override = "CVI"
 Path Rel Path = "toolslib/toolbox/msxmldom.fp"
-Path = "/c/Program Files (x86)/National Instruments/CVI90/toolslib/toolbox/msxmldom.fp"
+Path = "/c/program files (x86)/national instruments/cvi90/toolslib/toolbox/msxmldom.fp"
 Exclude = False
 Project Flags = 0
 Folder = "Instrument Files"
@@ -251,41 +251,30 @@ Project Flags = 0
 Folder = "Source Files"
 
 [File 0020]
-File Type = "Include"
+File Type = "DLL"
 Res Id = 20
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "../../../../../../SpinCore/SpinAPI64/spinapi_source/spinapi.h"
-Path = "/c/SpinCore/SpinAPI64/spinapi_source/spinapi.h"
+Path Rel Path = "../../../../../../SpinCore/SpinAPI/dll/spinapi.dll"
+Path = "/c/SpinCore/SpinAPI/dll/spinapi.dll"
+Exclude = False
+Project Flags = 0
+Folder = "Not In A Folder"
+
+[File 0021]
+File Type = "Include"
+Res Id = 21
+Path Is Rel = True
+Path Rel To = "Project"
+Path Rel Path = "../../../../../../SpinCore/SpinAPI/dll/spinapi.h"
+Path = "/c/SpinCore/SpinAPI/dll/spinapi.h"
 Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0021]
-File Type = "DLL"
-Res Id = 21
-Path Is Rel = True
-Path Rel To = "Project"
-Path Rel Path = "../../../../../../SpinCore/SpinAPI64/dll/spinapi64.dll"
-Path = "/c/SpinCore/SpinAPI64/dll/spinapi64.dll"
-Exclude = False
-Project Flags = 0
-Folder = "Not In A Folder"
-
 [File 0022]
-File Type = "Library"
-Res Id = 22
-Path Is Rel = True
-Path Rel To = "Project"
-Path Rel Path = "../../../../../../SpinCore/SpinAPI64/dll/spinapi64.lib"
-Path = "/c/SpinCore/SpinAPI64/dll/spinapi64.lib"
-Exclude = False
-Project Flags = 0
-Folder = "Not In A Folder"
-
-[File 0023]
 File Type = "Include"
-Res Id = 23
+Res Id = 22
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/UIControls.h"
@@ -294,6 +283,17 @@ Path Line0002 = "Controls.h"
 Exclude = False
 Project Flags = 0
 Folder = "Include Files"
+
+[File 0023]
+File Type = "Library"
+Res Id = 23
+Path Is Rel = True
+Path Rel To = "Project"
+Path Rel Path = "../../../../../../SpinCore/SpinAPI/dll/spinapi.lib"
+Path = "/c/SpinCore/SpinAPI/dll/spinapi.lib"
+Exclude = False
+Project Flags = 0
+Folder = "Not In A Folder"
 
 [Folders]
 Folder 0 = "Source Files"
@@ -323,29 +323,10 @@ Image Base Address = 4194304
 Compiler Defines = "/DWIN32_LEAN_AND_MEAN"
 
 [Include Paths]
-Include Path 1 Is Rel = False
-Include Path 1 = "/c/SpinCore/SpinAPI/dll"
-Include Path 2 Is Rel = False
-Include Path 2 = "/c/Documents and Settings/OmegaUser/My Documents/National Instruments/CVI/FFTw"
-Include Path 3 Is Rel = False
-Include Path 3 = "/c/SpinCore/SpinAPI/spinapi_source"
-Include Path 4 Is Rel = True
-Include Path 4 Rel To = "Project"
-Include Path 4 Rel Path = "Libraries"
-Include Path 4 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries"
-Include Path 5 Is Rel = False
-Include Path 5 Line0001 = "/c/Users/BVCAP/Documents/SugarSync Shared Folders/Paul G/Pulse Creator and Data "
-Include Path 5 Line0002 = "Explorer/netcdf/include"
-Include Path 6 Is Rel = True
-Include Path 6 Rel To = "Project"
-Include Path 6 Rel Path = "Libraries/netcdf-4.1.3/include"
-Include Path 6 Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/ne"
-Include Path 6 Line0002 = "tcdf-4.1.3/include"
-Include Path 7 Is Rel = True
-Include Path 7 Rel To = "Project"
-Include Path 7 Rel Path = "Libraries/netcdf"
-Include Path 7 Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/ne"
-Include Path 7 Line0002 = "tcdf"
+Include Path 1 Is Rel = True
+Include Path 1 Rel To = "Project"
+Include Path 1 Rel Path = "Libraries"
+Include Path 1 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries"
 
 [Create Executable]
 Executable File_Debug Is Rel = True

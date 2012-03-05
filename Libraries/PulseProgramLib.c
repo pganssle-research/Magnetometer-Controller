@@ -1020,19 +1020,23 @@ int program_pulses(PINSTR *ilist, int n_inst, int verbose) {
 				instr_data = fid[instr_data];
 		}
 		
+		if(in == LONG_DELAY) { instr_data--; }
+		
 		fid[i] = pb_inst_pbonly(ilist[i].flags, in, instr_data, ilist[i].instr_time);
 		if(fid[i] < 0) {
 			rv = -3;
 			break;
 		}
 	}
+	char *err = NULL;
+	
+	if(rv == -3) { err = pb_get_error(); }
 	
 	pb_stop_programming();
 	
 	// Error processing.
 	if(rv == -3) {
 		if(verbose) {
-			char *err = pb_get_error();
 			char *err_str = malloc(strlen(err)+strlen("Error in Instruction 0000: \n\n")+10);
 			sprintf(err_str, "Error in Instruction %d:\n\n %s", i, err);
 			MessagePopup("Error Programming Board", err_str);

@@ -273,18 +273,21 @@ int run_experiment(PPROGRAM *p) {
 			
 				// Stop the tasks qhen you are done with them. They can be started again
 				// later. Clear them when you are really done.
-				if(ev = DAQmxStopTask(ce.cTask)) { goto error; }
-				if(ev = DAQmxStopTask(ce.aTask)) { goto error; }			
-			
+				
+				if(ev = DAQmxStopTask(ce.cTask)) { if(ev != 200010) { goto error; } }
+				if(ev = DAQmxStopTask(ce.aTask)) { goto error; }
+				
 				CmtReleaseLock(lock_DAQ);
 				daq_locked = 0;
 				
 				if(ev)  { goto error; }
 			
 				// Update the navigation controls.
-				if(ce.p->nDims) { update_experiment_nav(); }
-			
-				update_transients_safe();
+				if(ce.p->nDims) { 
+					update_experiment_nav(); 
+				} else {	
+					update_transients(); 
+				}
 
 				// Only request the average data if you need it.
 				if(avg_data != NULL) {
@@ -335,10 +338,6 @@ int run_experiment(PPROGRAM *p) {
 		CmtReleaseLock(lock_ce);	
 	}
 	
-	if(daq_locked) {
-		CmtReleaseLock(lock_DAQ);
-	}
-	
 	SetCtrlVal(mc.mainstatus[1], mc.mainstatus[0], 0);	// Experiment is done!
 	SetCtrlAttribute(mc.mainstatus[1], mc.mainstatus[0], ATTR_LABEL_TEXT, "Stopped");
 	SetRunning(0);
@@ -347,21 +346,26 @@ int run_experiment(PPROGRAM *p) {
 	if(avg_data != NULL) { free(avg_data); }
 	
 	if(ev)  {
-		
-		if((ev < -247 && ev >= -250) || (ev < 6201 && ev >= -6224)) {  
+		if((ev < -247 && ev >= -250) || (ev < -6201 && ev >= -6224)) {  
 			display_ddc_error(ev); 
 		} else {
 			uInt32 es_size = DAQmxGetExtendedErrorInfo(NULL, 0);
 			
-			char *es = malloc(es_size+1);
-			DAQmxGetExtendedErrorInfo(es, es_size);
-		
+			char *es = malloc((es_size > 0)?(es_size+1):100);
 			
-			MessagePopup("DAQmx Error", es);
+			if(es_size > 0) {
+				DAQmxGetExtendedErrorInfo(es, es_size);
+			} else {
+				sprintf(es, "Unknown DAQmx Error, code was %d", ev);
+			}
 			
+			 MessagePopup("DAQmx Error", es);
 			free(es);
 		}
-		
+	}
+	
+	if(daq_locked) {
+		CmtReleaseLock(lock_DAQ);
 	}
 
 	return ev;
@@ -404,7 +408,7 @@ double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error
 			locked = 1;
 		}
 		
-		DAQmxGetReadAttribute(aTask, DAQmx_Read_AvailSampPerChan, &bc);
+		if(err = DAQmxGetReadAttribute(aTask, DAQmx_Read_AvailSampPerChan, &bc)) { goto error; }
 
 		if(bc >= np) 	// It's ready to be read out
 			break;
@@ -444,10 +448,12 @@ double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error
 	
 	// Now we know it's ready to go, so we should read out the values.
 	out = malloc(sizeof(float64)*np*nc);
-	DAQmxReadAnalogF64(aTask, -1, 0.0, DAQmx_Val_GroupByChannel, out, np*nc, &nsread, NULL);
+	if(err = DAQmxReadAnalogF64(aTask, -1, 0.0, DAQmx_Val_GroupByChannel, out, np*nc, &nsread, NULL)) { goto error; }
 	
-	if(nsread != np)
+	if(nsread != np) { 
 		err = 3;
+		goto error;
+	}
 	
 	error:
 	
@@ -605,7 +611,6 @@ int initialize_tdm() {
 		if(rv = DDC_AddChannelGroup(data_file, MCTD_AVGDATA, "", &acg)) { goto error; }
 	}
 	
-	free(vname);
 	free(desc);
 	free(name);
 	vname = desc = name = NULL;
@@ -651,7 +656,6 @@ int initialize_tdm() {
 	
 	if(name != NULL) { free(name); }
 	if(desc != NULL) { free(desc); }
-	if(vname != NULL) { free(vname); }
 	if(chans != NULL) { free(chans); }
 	if(achans != NULL) { free(achans); }
 	
@@ -686,7 +690,7 @@ int save_data(double *data, double **avg) {
 	int i, np = p->np, nd = p->nDims;
 	char *csstr = NULL;
 	double *avg_data = NULL;
-	DDCFileHandle file = NULL;
+	DDCFileHandle file = NULL, file2 = NULL;
 	DDCChannelGroupHandle *cgs = NULL;
 	DDCChannelHandle *achans = NULL, *mchans = NULL;
 	DDCChannelGroupHandle mcg, acg;
@@ -695,6 +699,8 @@ int save_data(double *data, double **avg) {
 
 	// Open the file.
 	if(rv = DDC_OpenFileEx(ce.path, "TDM", 0, &file)) { goto error; }
+//	if(rv = DDC_OpenFileEx(ce.path, "TDM", 0, &file2)) { goto error; }
+	
 	
 	// Get the channel groups -> Allocate space for two, but only look for 1 if nt == 1
 	cgs = malloc(sizeof(DDCChannelGroupHandle)*2);
@@ -749,8 +755,7 @@ int save_data(double *data, double **avg) {
 			int dli = (int)((ce.cind-1)/p->nt); // ct is a 1-based index.
 			avg_data = load_data_tdm(dli, file, acg, achans, ce.p, ce.nchan, &rv);
 			
-			if(rv != 0)
-				goto error;
+			if(rv != 0) { goto error; }
 			
 			// Now update the average.
 			for(i = 0; i < (p->np*ce.nchan); i++) {
@@ -765,7 +770,7 @@ int save_data(double *data, double **avg) {
 	}
 	
 	// Save the data
-	DDC_SaveFile(file);
+	if(rv = DDC_SaveFile(file)) { goto error; };
 	
 	error:
 	if(csstr != NULL) { free(csstr); }
@@ -908,7 +913,8 @@ int load_experiment(char *filename) {
 	
 	// Now we want to plot the data and set up the experiment navigation.
 	plot_data(data, p->np, p->sr, ce.nchan);
-	free(data);
+	free(data);	
+	data = NULL;
 	
 	update_experiment_nav();
 
@@ -1845,15 +1851,15 @@ void set_data_from_nav(int panel) {
 }
 
 void set_data_from_nav_safe(int panel) {
+	CmtGetLock(lock_tdm);
 	CmtGetLock(lock_ce);
 	CmtGetLock(lock_uidc);
-	CmtGetLock(lock_tdm);
 	
 	set_data_from_nav(panel);
 	
-	CmtReleaseLock(lock_tdm);
 	CmtReleaseLock(lock_uidc);
 	CmtReleaseLock(lock_ce);
+	CmtReleaseLock(lock_tdm);
 }
 
 void clear_plots() {
@@ -3511,7 +3517,7 @@ int setup_DAQ_task() {
 
 	// Create the output, when this task is started and triggered, it will generate
 	// a train of pulses at frequency sr, until np pulses have occured.
-	DAQmxCreateCOPulseChanFreq(ce.cTask, cc_name, "Counter", DAQmx_Val_Hz, DAQmx_Val_Low, 0.0, sr, 0.5);
+	if(rv = DAQmxCreateCOPulseChanFreq(ce.cTask, cc_name, "Counter", DAQmx_Val_Hz, DAQmx_Val_Low, 0.0, sr, 0.5)) { goto error; }
 	
 	// Set the trigger for the counter and make it retriggerable
 	int edge;
@@ -3529,10 +3535,10 @@ int setup_DAQ_task() {
 	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_MinPulseWidth, 6.425e-6)) { goto error; }
 	
 	// Set the counter output channel as the clock foro the analog task
-	if (rv = DAQmxCfgSampClkTiming(ce.aTask, cc_out_name, (float64)sr, DAQmx_Val_Rising, DAQmx_Val_ContSamps, np)) { goto error;}
+	if(rv = DAQmxCfgSampClkTiming(ce.aTask, ce.ccname, (float64)sr, DAQmx_Val_Rising, DAQmx_Val_ContSamps, np)) { goto error;}
 	
 	// Set the buffer for the input. Currently there is no programmatic protection against overruns
-	rv = DAQmxSetBufferAttribute(ce.aTask, DAQmx_Buf_Input_BufSize, (np*nc)+1000); // Extra 1000 in case
+	if(rv = DAQmxSetBufferAttribute(ce.aTask, DAQmx_Buf_Input_BufSize, (np*nc)+1000)) { goto error; }  // Extra 1000 in case
 	
 	error:
 	
