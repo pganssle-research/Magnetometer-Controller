@@ -132,16 +132,18 @@ Descrip	: Since changing over to this new system, you've broken all the
 
 #include <Magnetometer Controller.h>	// Then the libraries specific to
 #include <PulseProgramTypes.h>			// this software.
+#include <MathParserLib.h>
+#include <FileSave.h>
 #include <cvitdms.h>
 #include <cviddc.h>
-#include <UIControls.h>
-#include <MathParserLib.h>
 #include <MCUserDefinedFunctions.h>
 #include <MC10.h> 
 #include <DataLib.h>
 #include <PulseProgramLib.h>
 #include <SaveSessionLib.h>
 #include <General.h>
+#include <UIControls.h>
+#include <PPConversion.h>
 
 static TaskHandle acquireSignal, counterTask;    
 extern PVOID RtlSecureZeroMemory(PVOID ptr, SIZE_T cnt);
@@ -374,7 +376,7 @@ void CVICALLBACK SaveConfig (int menuBar, int menuItem, void *callbackData,
 {
 	int ev = save_session(NULL, 1);
 	
-	if(ev) { display_tdms_error(ev); }
+	if(ev) { display_ddc_error(ev); }
 	
 }
 
@@ -389,7 +391,7 @@ void CVICALLBACK SaveConfigToFile (int menuBar, int menuItem, void *callbackData
 	int ev = save_session(filename, 1);
 	free(filename);
 
-	if(ev) { display_tdms_error(ev); }
+	if(ev) { display_ddc_error(ev); }
 }
 
 void CVICALLBACK LoadConfigurationFromFile (int menuBar, int menuItem, void *callbackData,

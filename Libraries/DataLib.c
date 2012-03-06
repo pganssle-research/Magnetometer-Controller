@@ -29,12 +29,14 @@
 #include <spinapi.h>					// SpinCore functions
 
 #include <PulseProgramTypes.h>
+#include <FileSave.h>
 #include <cvitdms.h>
 #include <cviddc.h> 
 #include <UIControls.h>					// For manipulating the UI controls
 #include <MathParserLib.h>				// For parsing math
 #include <DataLib.h>
 #include <MCUserDefinedFunctions.h>		// Main UI functions
+#include <PPConversion.h>
 #include <PulseProgramLib.h>			// Prototypes and type definitions for this file
 #include <SaveSessionLib.h>
 #include <General.h>
@@ -635,7 +637,7 @@ int initialize_tdm() {
 	DDCChannelGroupHandle pcg = NULL;
 	DDC_AddChannelGroup(data_file, MCTD_PGNAME, "", &pcg);
 	
-	save_program(pcg, p);
+	save_programDDC(pcg, p);
 
 	// Create the data channels
 	chans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
@@ -846,7 +848,7 @@ int load_experiment(char *filename) {
 	
 	// Grab the program.
 	int err_val;
-	p = load_program(pcg, &ev);
+	p = load_programDDC(pcg, &ev);
 	if(ev || p == NULL) { goto error; }
 	
     // Get the current step index.
@@ -1093,7 +1095,7 @@ int get_ddc_channel_groups(DDCFileHandle file, char **names, int num, DDCChannel
 	for(i = 0; i < ncg; i++) {
 		// Get the channel name from the list of all channels
 		DDC_GetChannelGroupStringPropertyLength(all_cgs[i], DDC_CHANNELGROUP_NAME, &len); 
-		g = realloc_if_needed(buff, g, ++len, s);	// Allocate space for the name if we need it.
+		buff = realloc_if_needed(buff, &g, ++len, s);	// Allocate space for the name if we need it.
 		DDC_GetChannelGroupProperty(all_cgs[i], DDC_CHANNELGROUP_NAME, buff, len);
 		
 		for(j = 0; j < num; j++) {

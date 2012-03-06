@@ -1,6 +1,9 @@
 /******************************** Includes *******************************/
-#include <cvitdms.h>
-#include <cviddc.h>
+// Some defines that are useful for read_status
+#define PB_STOPPED 1		// Bit 0 = Stopped
+#define PB_RESET 2			// Bit 1 = Reset
+#define PB_RUNNING 4		// Bit 2 = Running
+#define PB_WAITING 8		// Bit 3 = Waiting
 
 #define PP_V_ID 1 		// Varies in an indirect dimension linearly.
 #define PP_V_PC 2		// Varies in a phase cycle
@@ -18,102 +21,101 @@
 #define MCTD_TDMS 0		// TDMS
 #define MCTD_TDM 1		// TDM
 
-
-// Properties of the Programs group
-#define MCTD_PGNAME	"ProgramGroup"			// Name of the group
-
-#define MCTD_PNP "nPoints"					// p.np
-#define MCTD_PSR "SampleRate"				// p.sr
-#define MCTD_PNT "nTransients"				// p.nt
-#define MCTD_PTMODE "TransAcqMode"			// p.tfirst
-#define MCTD_PSCAN "Scan"					// p.scan
-#define MCTD_PTRIGTTL "TriggerTTL"			// p.trigger_ttl
-#define MCTD_PTOTTIME "TotalTime"			// p.totaltime
-#define MCTD_PNINSTRS "nInstrs"				// p.n_inst
-#define MCTD_PNUINSTRS "nUniqueInstrs"		// p.nUniqueInstrs
-
-#define MCTD_PVAR "Varied"					// p.varied
-#define MCTD_PNVAR "nVaried"				// p.nVaried
-#define MCTD_PNDIMS "nDims"					// p.nDims
-#define MCTD_PNCYCS "nCycles"				// p.nCycles
-#define MCTD_PSKIP "Skip"					// p.skip
-#define MCTD_PMAX_N_STEPS "MaxNSteps"		// p.max_n_steps
-#define MCTD_PREAL_N_STEPS "RealNSteps"		// p.real_n_steps
-
-#define MCTD_NFUNCS "nFuncs"				// p.nFuncs
-#define MCTD_TFUNCS "tFuncs"				// p.tFuncs
-
-#define MCTD_NAOUT "nAouts"					// p.nAouts
-#define MCTD_NAOVAR "n_aout_var"			// p.n_ao_var
-
-// Program Instruction Details
-#define MCTD_PROGFLAG "ProgFlag"			// p.instrs[i].flags;
-#define MCTD_PROGTIME "ProgTime"			// p.instrs[i].instr_delay
-#define MCTD_PROGINSTR "ProgInstr"			// p.instrs[i].instr;
-#define MCTD_PROGUS "ProgUS"				// p.instrs[i].units and p.instrs[i].scan
-#define MCTD_PROGID "ProgID"				// p.instrs[i].instr_data;
-
-// Varying program details
-#define MCTD_PMAXSTEPS "MaxSteps"			// p.maxsteps
-#define MCTD_PVINS "VarIns"					// p.v_ins
-#define MCTD_PVINSDIM "VarInsDims"			// p.v_ins_dim
-#define MCTD_PVINSMODE "VarInsMode"			// p.v_ins_mode
-#define MCTD_PVINSLOCS "VarInsLocs"			// p.v_ins_locs
-#define MCTD_PSKIPLOCS	"SkipLocs"			// p.skip_locs
-#define MCTD_PSKIPEXPR "SkipExpr"			// p.skip_expr
-#define MCTD_PDELEXPRS "DelayExprs"			// p.delay_exprs
-#define MCTD_PDATEXPRS "DataExprs"			// p.data_exprs
-
-#define MCTD_PFUNCLOCS "FuncLocs"			// p.func_locs
-
-// Analog output details
-#define MCTD_AOVAR "ao_varied"				// p.ao_varied
-#define MCTD_AOVALS "ao_vals"				// p.ao_vals
-#define MCTD_AODIM	"ao_dim"				// p.ao_dim     
-
-// Analog output properties - on MCTD_AOVAR
-#define MCTD_AOCHANS "ao_chans"				// p.ao_chans
-#define MCTD_AOEXPRS "ao_exprs"				// p.ao_exprs
-
-// Function details
-#define MCTD_PF_NAME "FuncNames"			// pfunc.name
-#define MCTD_PF_RF "FuncResFlags"			// pfunc.r_flags
-#define MCTD_PF_NINSTR "FuncNInstrs"		// pfunc.n_instr
-#define MCTD_PF_ARGMODE "FuncArgMode"		// pfunc.argmode
-
-// Function instruction details
-#define MCTD_PFINSTR "FuncInstr"			// pfunc.instrs[i].instr
-#define MCTD_PFFLAG "FuncFlag"				// pfunc.instrs[i].flags
-#define MCTD_PFID "FuncID"					// pfunc.instrs[i].instr_data;
-#define MCTD_PFUS "FuncUS"					// pfunc.instrs[i].time_units and scan
-
-// Some defines that are useful for read_status
-#define PB_STOPPED 1		// Bit 0 = Stopped
-#define PB_RESET 2			// Bit 1 = Reset
-#define PB_RUNNING 4		// Bit 2 = Running
-#define PB_WAITING 8		// Bit 3 = Waiting
-
-
 // Some UI parameters.
 #define MCUI_DEL_PREC 5		// Precision for delay controls.
 
+// Pulse Program Saving Macros:
+// Main Groups
+#define MCPP_PROGHEADER "[PulseProgram]"
+
+#define MCPP_GROUPSNUM 5
+
+// Header names
+#define MCPP_PROPHEADER "[Properties]"
+#define MCPP_VERSION "Version"
+#define MCPP_NP "np"
+#define MCPP_SR "sr"
+#define MCPP_NT "nt"
+#define MCPP_TRIGTTL "trigger_ttl"
+#define MCPP_TMODE "tmode"
+#define MCPP_SCAN "scan"
+#define MCPP_VARIED "varied"
+#define MCPP_NINST "n_inst"
+#define MCPP_TOTALTIME "total_time"
+#define MCPP_NUINSTRS "nUniqueInstrs"
+#define MCPP_NDIMS "nDims"
+#define MCPP_NCYCS "nCycles"
+#define MCPP_NVARIED "nVaried"
+#define MCPP_MAXNSTEPS "max_n_steps"
+#define MCPP_REALNSTEPS "real_n_steps"
+#define MCPP_SKIP "skip"
+#define MCPP_NAOUT "nAout"
+#define MCPP_NAOVAR "n_ao_var"
+
+#define MCPP_PROPSNUM 19
+#define MCPP_PROPORD 0
+
+// Instructions
+#define MCPP_INSTHEADER "[Instructions]"
+#define MCPP_INSTORD 1
+#define MCPP_INSTNUMFIELDS 6
+
+#define MCPP_INST_FLAGS "flags"		// Field names
+#define MCPP_INST_INSTR "instr"
+#define MCPP_INST_INSTRDATA "instr_data"
+#define MCPP_INST_TRIGGERSCAN "trigger_scan"
+#define MCPP_INST_INSTRTIME "instr_time"
+#define MCPP_INST_TIMEUNITS "time_units"
+
+#define MCPP_INST_NAMES {MCPP_INST_FLAGS, MCPP_INST_INSTR, MCPP_INST_INSTRDATA, MCPP_INST_TRIGGERSCAN, MCPP_INST_INSTRTIME, MCPP_INST_TIMEUNITS}
+#define MCPP_INST_TYPES {FS_INT, FS_INT, FS_INT, FS_UCHAR, FS_DOUBLE, FS_UCHAR}
+
+// AOut names
+#define MCPP_AOHEADER "[AnalogOutput]"
+#define MCPP_AONUM 5
+#define MCPP_AOVARIED "ao_varied"
+#define MCPP_AODIM	"ao_dim"
+#define MCPP_AOVALS "ao_vals"
+#define MCPP_AOCHANS "ao_chans"
+#define MCPP_AOEXPRS "ao_exprs"
+
+#define MCPP_AOORD 2
+
+// Multidimensional
+#define MCPP_NDHEADER "[ND/PC]"
+#define MCPP_NDNUM 7
+#define MCPP_MAXSTEPS "maxsteps"
+#define MCPP_VINS "v_ins"
+#define MCPP_VINSDIM "v_ins_dim"
+#define MCPP_VINSMODE "v_ins_mode"
+#define MCPP_VINSLOCS "v_ins_locs"
+#define MCPP_DELAYEXPRS "delay_exprs"
+#define MCPP_DATAEXPRS "data_exprs"
+
+#define MCPP_NDORD 3
+
+// Skip
+#define MCPP_SKIPHEADER "[Skip]"
+#define MCPP_SKIPNUM 2
+#define MCPP_SKIPEXPR "skip_expr"
+#define MCPP_SKIPLOCS "skip_locs"
+
+#define MCPP_SKIPORD 4
+
 /************************* Function Declarations *************************/
+extern PPROGRAM *load_pprogram(FILE *f, int *ev);
 
-/************** File I/O ****************/
-extern int SavePulseProgram(char *filename, int safe, PPROGRAM *p);
-extern PPROGRAM *LoadPulseProgram(char *filename, int safe, int *err_val);
+extern PINSTR *read_pinstr_from_char(char *array, int n_inst, int *ev);
 
-extern int get_name(char *pathname, char *name, char *ending);
-extern int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p);
-extern int save_program_safe(DDCChannelGroupHandle pcg, PPROGRAM *p);
-PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val);
-PPROGRAM *load_program_safe(DDCChannelGroupHandle pcg, int *err_val);
+extern int SavePulseProgram(PPROGRAM *p, char *fname);
+extern int save_pprogram(PPROGRAM *p, FILE *f);
 
-extern char *generate_nc_string(char **strings, int numstrings, int *len);
-extern char **get_nc_strings(char *string, int *nss);
+extern fsave generate_header(PPROGRAM *p, int *ev);
+extern fsave generate_instr_array(PPROGRAM *p);
+extern fsave generate_ao(PPROGRAM *p, int *ev);
+extern fsave generate_nd(PPROGRAM *p, int *ev);
+extern fsave generate_skip_fs(PPROGRAM *p, int *ev);
 
-extern void display_ddc_error(int err_val);
-extern void display_tdms_error(int err_val);
 
 /******** Pulseblaster Functions ********/
 extern int load_pb_info(int verbose);
@@ -311,8 +313,6 @@ extern int insert_instruction(PPROGRAM *p, PINSTR *instr, int num);
 /********** General Utilities ************/
 // Linear indexing
 extern int get_maxsteps(int *maxsteps);
-extern int get_lindex(int *cstep, int *maxsteps, int size);
-extern int get_cstep(int lindex, int *cstep, int *maxsteps, int size);
 
 // Loop manipulation
 extern int find_end_loop(int instr);
@@ -323,30 +323,8 @@ extern int in_loop(int instr, int big);
 extern void change_visibility_mode(int panel, int *ctrls, int num, int mode);
 extern void change_control_mode(int panel, int *ctrls, int num, int mode);
 
-// Array manipulation
-extern void remove_array_item(int *array, int index, int num_items);
-extern void remove_array_item_void(void *array, int index, int num_items, int type);
-extern int constant_array_double(double *array, int size);
-extern int constant_array_int(int *array, int size);
+// PINSTR
 extern int constant_array_pinstr(PINSTR **array, int size);
-extern int get_index(int *array, int val, int size);
-extern int realloc_if_needed(char *array, int len, int new_len, int inc);
-
-// Sorting
-extern void sort_linked(int **array, int num_arrays, int size);
-extern int __cdecl qsort_comp_array(const void *a, const void *b);
-
-// String manipulation
-extern char **generate_char_num_array(int first, int last, int *elems);
-extern char *generate_expression_error_message(char *err_message, int *pos, int size);
-
-// Math
-int calculate_units(double val);
-int get_precision(double val, int total_num);
-extern int get_bits(int in, int start, int end);
-extern int get_bits_in_place(int in, int start, int end);
-extern int move_bit_skip(int in, int skip, int to, int from);
-extern int move_bit(int in, int to, int from);
 
 // Math Evalution
 extern int get_update_error(int err_code, char *err_message);
@@ -354,9 +332,17 @@ extern constants *setup_constants(void);
 extern constants *setup_constants_safe(void);
 extern void update_constants(constants *c, int *cstep);
 
-/*************** Vestigial ***************/
-extern int get_vdim(int panel, int varyctrl, int dimctrl);
-extern int get_vsteps(int panel, int varyctrl, int nsteps);
+/************** Safe Pulseblaster Functions *************/
+extern int pb_initialize(int verbose);
+extern int pb_init_safe(int verbose);
+extern int pb_start_programming_safe(int verbose, int device);
+extern int pb_stop_programming_safe(int verbose);
+extern int pb_inst_pbonly_safe(int verbose, unsigned int flags, int inst, int inst_data, double length);
+extern int pb_close_safe(int verbose);
+extern int pb_read_status_or_error(int verbose);
+extern int pb_read_status_safe(int verbose);
+extern int pb_start_safe(int verbose);
+extern int pb_stop_safe(int verbose);
 
 
 

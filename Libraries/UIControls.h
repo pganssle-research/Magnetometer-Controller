@@ -1,3 +1,6 @@
+// Includes
+#include <NIDAQmx.h>
+
 /******************* Constant Definitions *******************/
 #define MC_FID	0
 #define MC_FFT	1

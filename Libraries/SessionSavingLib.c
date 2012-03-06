@@ -28,6 +28,7 @@
 #include <NIDAQmx.h>
 
 #include <PulseProgramTypes.h>
+#include <FileSave.h>
 #include <cvitdms.h>
 #include <cviddc.h>
 #include <UIControls.h>					// For manipulating the UI controls
@@ -38,6 +39,7 @@
 #include <DataLib.h>
 #include <Magnetometer Controller.h>
 #include <General.h>
+#include <PPConversion.h>
 
 // Globals
 char *session_fname = "SavedSession";
@@ -810,7 +812,7 @@ int save_session(char *filename, int safe) { // Primary session saving function
 	
 	// We're going to start by saving the program, because that has a ui_cleanup call in it
 	sprintf(fname, "%s.tdm", fbuff);
-	SavePulseProgram(fname, safe, NULL);	// This is a thread-safe function - call as appropriate.
+	SavePulseProgramDDC(fname, safe, NULL);	// This is a thread-safe function - call as appropriate.
 	
 	sprintf(fname, "%s.xml", fbuff);
 	
@@ -1046,8 +1048,8 @@ int save_session(char *filename, int safe) { // Primary session saving function
 			GetLabelLengthFromIndex(pc.ic[1], pc.ic[0], cind, &len);
 			cinlen += ++len; // Len needs a null termination, cinlen needs a semicolon
 			
-			g2 = realloc_if_needed(buff2, g2, len, s);
-			g3 = realloc_if_needed(cnames, g3, cinlen, s);
+			buff2 = realloc_if_needed(buff2, &g2, len, s);
+			cnames = realloc_if_needed(cnames, &g3, cinlen, s);
 			
 			GetLabelFromIndex(pc.ic[1], pc.ic[0], cind, buff2);
 			
@@ -1218,7 +1220,7 @@ int save_session(char *filename, int safe) { // Primary session saving function
 		digs = (digs>=8)?digs+3:11;
 		gainl+= digs;
 		
-		g3 = realloc_if_needed(gains, g3, gainl, s2);
+		gains = realloc_if_needed(gains, &g3, gainl, s2);
 		
 		sprintf(gains, f_str, gains, uidc.fgain[i]);
 		
@@ -1228,7 +1230,7 @@ int save_session(char *filename, int safe) { // Primary session saving function
 		digs = (digs>=8)?digs+3:11;
 		offl+= digs;
 		
-		g4 = realloc_if_needed(offsets, g4, offl, s2);
+		offsets = realloc_if_needed(offsets, &g4, offl, s2);
 		
 		sprintf(offsets, f_str, offsets, uidc.foff[i]);
 	}
@@ -1290,7 +1292,7 @@ int save_session(char *filename, int safe) { // Primary session saving function
 		digs = (digs>=8)?digs+3:11;
 		gainl+= digs;
 		
-		g3 = realloc_if_needed(gains, g3, gainl, s2);
+		gains = realloc_if_needed(gains, &g3, gainl, s2);
 		
 		sprintf(gains, f_str, gains, uidc.sgain[i]);
 		
@@ -1300,7 +1302,7 @@ int save_session(char *filename, int safe) { // Primary session saving function
 		digs = (digs>=8)?digs+3:11;
 		offl+= digs;
 		
-		g4 = realloc_if_needed(offsets, g4, offl, s2);
+		offsets = realloc_if_needed(offsets, &g4, offl, s2);
 		
 		sprintf(offsets, f_str, offsets, uidc.soff[i]);
 	}
@@ -1603,7 +1605,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	if(bf_e != 0) {
 		if(rv = CVIXMLGetElementValueLength(bf_e, &len)) { goto error; }
 		
-		g = realloc_if_needed(buff, g, len, s);
+		buff = realloc_if_needed(buff, &g, len, s);
 		
 		if(rv = CVIXMLGetElementValue(bf_e, buff)) { goto error; }
 		
@@ -1618,7 +1620,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	if(fpath_e != 0) {
 		if(rv = CVIXMLGetElementValueLength(fpath_e, &len)) { goto error; }
 		
-		g = realloc_if_needed(buff, g, len, s);
+		buff = realloc_if_needed(buff, &g, len, s);
 		
 		if(rv = CVIXMLGetElementValue(fpath_e, buff)) { goto error; }
 		
@@ -1633,7 +1635,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	if(dlpath_e != 0) {
 		if(rv = CVIXMLGetElementValueLength(dlpath_e, &len)) { goto error; }
 		
-		g = realloc_if_needed(buff, g, len, s);
+		buff = realloc_if_needed(buff, &g, len, s);
 		
 		if(rv = CVIXMLGetElementValue(dlpath_e, buff)) { goto error; }
 		
@@ -1669,7 +1671,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	if(ppath_e != 0) {
 		if(rv = CVIXMLGetElementValueLength(ppath_e, &len)) { goto error; }
 		
-		g = realloc_if_needed(buff, g, len, s);
+		buff = realloc_if_needed(buff, &g, len, s);
 		
 		// As above, load into a buffer first, in case there's an error.
 		if(rv = CVIXMLGetElementValue(ppath_e, buff)) { goto error; }
@@ -1755,7 +1757,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			// Then the value
 			if(rv = CVIXMLGetElementValueLength(dev_e, &len)) { goto error; }
 		
-			g = realloc_if_needed(buff, g, len, s);
+			buff = realloc_if_needed(buff, &g, len, s);
 		
 			if(rv = CVIXMLGetElementValue(dev_e, buff)) { goto error; }
 		
@@ -1849,7 +1851,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			devname = malloc(++dlen);
 			GetCtrlVal(pc.dev[1], pc.dev[0], devname);
 			
-			g = realloc_if_needed(buff, g, len+1, s);
+			buff = realloc_if_needed(buff, &g, len+1, s);
 			
 			// Read the value into the buffer.
 			if(len > 0 &&  (rv = CVIXMLGetElementValue(chann_e, buff))) { goto error; }
@@ -1905,8 +1907,8 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			GetLabelLengthFromIndex(pc.ic[1], pc.ic[0], inds[i], &len);
 			GetValueLengthFromIndex(pc.ic[1], pc.ic[0], inds[i], &vlen);
 			
-			g = realloc_if_needed(buff, g, len, s);
-			g2 = realloc_if_needed(buff2, g2, len, s);
+			buff = realloc_if_needed(buff, &g, len, s);
+			buff2 = realloc_if_needed(buff2, &g2, len, s);
 			
 			GetLabelFromIndex(pc.ic[1], pc.ic[0], inds[i], buff);
 			GetValueFromIndex(pc.ic[1], pc.ic[0], inds[i], buff2);
@@ -1951,14 +1953,14 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		}
 		
 		if(nl > 0 && len > 0) {
-			g = realloc_if_needed(buff, g, len+1, s);
+			buff = realloc_if_needed(buff, &g, len+1, s);
 			if(rv = CVIXMLGetElementValue(curcc_e, buff)) { goto error; }
 			
 			// Find the index that this points to.
 			ind = -1;
 			for(i = 0; i < nl; i++) {
 				GetLabelLengthFromIndex(pc.curchan[1], pc.curchan[0], i, &len);
-				g2 = realloc_if_needed(buff2, g2, len+1, s);
+				buff2 = realloc_if_needed(buff2, &g2, len+1, s);
 				
 				GetLabelFromIndex(pc.curchan[1], pc.curchan[0], i, buff2);
 				
@@ -1998,14 +2000,14 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		
 		GetNumListItems(pc.cc[1], pc.cc[0], &nl);
 		if(nl > 0 && len > 0) {
-			g = realloc_if_needed(buff, g, len+1, s);
+			buff = realloc_if_needed(buff, &g, len+1, s);
 			if(rv = CVIXMLGetElementValue(countc_e, buff)) { goto error; }
 			
 			// Find the index that this points to.
 			ind = -1;
 			for(i = 0; i < nl; i++) {
 				GetLabelLengthFromIndex(pc.cc[1], pc.cc[0], i, &len);
-				g2 = realloc_if_needed(buff2, g2, len+1, s);
+				buff2 = realloc_if_needed(buff2, &g2, len+1, s);
 				
 				GetLabelFromIndex(pc.cc[1], pc.cc[0], i, buff2);
 				
@@ -2033,14 +2035,14 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		
 		GetNumListItems(pc.trigc[1], pc.trigc[0], &nl);
 		if(nl > 0 && len > 0) {
-			g = realloc_if_needed(buff, g, len+1, s);
+			buff = realloc_if_needed(buff, &g, len+1, s);
 			if(rv = CVIXMLGetElementValue(trig_e, buff)) { goto error; }
 			
 			// Find the index that this points to, if it's there.
 			ind = -1;
 			for(i = 0; i < nl; i ++) {
 				GetLabelLengthFromIndex(pc.trigc[1], pc.cc[0], i, &len);
-				g2 = realloc_if_needed(buff2, g2, len+1, s);
+				buff2 = realloc_if_needed(buff2, &g2, len+1, s);
 				
 				GetLabelFromIndex(pc.trigc[1], pc.trigc[0], i, buff2);
 				
@@ -2147,7 +2149,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 				if(rv = CVIXMLGetElementValueLength(con_e, &len) < 0) { goto error; }
 				
 				if(rv == 0 && len > 0) {
-					g = realloc_if_needed(buff, g, len+1, s);
+					buff = realloc_if_needed(buff, &g, len+1, s);
 					
 					if(rv = CVIXMLGetElementValue(con_e, buff)) { goto error; }
 					
@@ -2191,7 +2193,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 				if(rv = CVIXMLGetElementValueLength(col_e, &len)) { goto error; }
 				
 				if(len > 0) {
-					g = realloc_if_needed(buff, g, len+1, s);
+					buff = realloc_if_needed(buff, &g, len+1, s);
 					
 					if(rv = CVIXMLGetElementValue(col_e, buff)) { goto error; }
 					
@@ -2213,7 +2215,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 				if(rv = CVIXMLGetElementValueLength(gain_e, &len)) { goto error; }
 				
 				if(len > 0) {
-					g = realloc_if_needed(buff, g, len+1, s);
+					buff = realloc_if_needed(buff, &g, len+1, s);
 					
 					if(rv = CVIXMLGetElementValue(gain_e, buff)) { goto error; }
 					
@@ -2235,7 +2237,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 				if(rv = CVIXMLGetElementValueLength(off_e, &len)) { goto error; }
 				
 				if(len > 0) { 
-					g = realloc_if_needed(buff, g, len+1, s);
+					buff = realloc_if_needed(buff, &g, len+1, s);
 				
 					if(rv = CVIXMLGetElementValue(off_e, buff)) { goto error; }
 				
@@ -2262,7 +2264,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	sprintf(fname, "%s.tdm", fbuff);
 	if(FileExists(fname, NULL)) {
 		
-		PPROGRAM *p = LoadPulseProgram(fname, safe, &rv);	// Gets lock_tdm, no others.
+		PPROGRAM *p = LoadPulseProgramDDC(fname, safe, &rv);	// Gets lock_tdm, no others.
 		
 		if(rv)
 			goto error;
