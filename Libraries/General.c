@@ -447,6 +447,34 @@ int get_name(char *pathname, char *name, char *ending) {
 	return 0;
 }
 
+char *get_extension(char *pathname) {
+	// Returns the extension, malloced. Finds the last index of ".", so this won't be
+	// able to detect shit like "foo.tar.gz"
+	//
+	// Returns NULL if no extension is found, otherwise returns malloced string.
+	
+	if(pathname == NULL) { return NULL; }
+	
+	char *c = NULL;
+	
+	int i, l = strlen(pathname);
+	
+	if(l == 0) { return NULL; }
+	
+	for(i = l ; i > 0; i--) {
+		if(pathname[i] == '.') { break; }
+		if(pathname[i] == '\\') { return NULL; }
+	}
+	
+	if(i == 0) { return NULL; }
+	
+	c = malloc(l-i+1);
+	strcpy(c, pathname+l);
+	
+	return c;
+}
+
+
 char *temp_file(char *extension) {
 	return temporary_filename(NULL, extension);
 }

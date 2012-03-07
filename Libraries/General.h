@@ -26,6 +26,7 @@ extern int **free_ints_array(int **array, int size);
 
 /************** File I/O *************/     
 extern int get_name(char *pathname, char *name, char *ending);
+extern char *get_extension(char *pathname);
 
 extern char *temp_file(char *extension);
 extern char *temporary_filename(char *dir, char *extension);

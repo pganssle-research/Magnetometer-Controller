@@ -103,6 +103,7 @@
 #define MCPP_SKIPORD 4
 
 /************************* Function Declarations *************************/
+extern PPROGRAM *LoadPulseProgram(char *fname, int safe, int *ev);
 extern PPROGRAM *load_pprogram(FILE *f, int *ev);
 
 extern PINSTR *read_pinstr_from_char(char *array, int n_inst, int *ev);

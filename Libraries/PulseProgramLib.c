@@ -83,6 +83,44 @@ Desrip	: Need to add a few things to PPROGRAM that I did not consider at
 // 															//
 //////////////////////////////////////////////////////////////
 
+PPROGRAM *LoadPulseProgram(char *fname, int safe, int *ev) {
+	int rv = 0, locked = 0;
+	FILE *f = NULL;
+	PPROGRAM *p = NULL;
+	
+	if(safe) { 
+		CmtGetLock(lock_tdm);
+		locked = 1;
+	}
+	
+	if(fname == NULL || !file_exists(fname)) { rv = MCPP_ERR_NOFILE; goto error; }
+	
+	f = fopen(fname, "rb");
+	if(f == NULL) { rv = MCPP_ERR_FILEREAD; goto error; }
+	
+	p = load_pprogram(f, &rv);
+	if(rv != 0) { goto error; }
+	
+	
+	error:
+	
+	if(f != NULL) { fclose(f); }
+
+	if(safe && locked) {
+		CmtReleaseLock(lock_tdm);
+		locked = 0;
+	}			   
+	
+	if(rv != 0) {
+		if(p != NULL) { free_pprog(p); }
+		p = NULL;
+	}
+	
+	*ev = rv;
+	return p;
+}
+
+
 PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	// Load a program from a .pp file (or any file with that format)
 	
@@ -596,7 +634,7 @@ PINSTR *read_pinstr_from_char(char *array, int n_inst, int *ev) {
 	return in;
 }
 
-int SavePulseProgram(PPROGRAM *p, char *fname) {
+int SavePulseProgram(PPROGRAM *p, char *filename) {
 	// Save a program to file
 	// 
 	// Errors:
@@ -610,9 +648,26 @@ int SavePulseProgram(PPROGRAM *p, char *fname) {
 	FILE *f = NULL;
 	char *tname = NULL;
 	char *new_fname = NULL;
+	char *fname = NULL, *ext = NULL;
 	
-	if(fname == NULL) { return MCPP_ERR_NOFILE; }
+	if(filename == NULL) { return MCPP_ERR_NOFILE; }
 	if(p == NULL) { return MCPP_ERR_NOPROG; }
+	
+	// Make sure it's got the right extension.
+	ext = get_extension(filename);
+	if(ext == NULL || strlen(ext) < 3 || strcmp(ext+1, PPROG_EXTENSION)) {
+		// Append the extension.
+		int nl = strlen(filename);
+		if(ext != NULL) { nl -= strlen(ext); }
+		
+		fname = calloc(nl+strlen(PPROG_EXTENSION)+1, 1);
+		strncpy(fname, filename, nl);
+		strcat(fname, ".");
+		strcat(fname, PPROG_EXTENSION);
+	} else {
+		fname = malloc(strlen(filename));
+		strcpy(fname, filename);
+	}
 	
 	// Start by creating a temporary filename.
 	tname = temp_file(PPROG_EXTENSION);
@@ -671,6 +726,7 @@ int SavePulseProgram(PPROGRAM *p, char *fname) {
 	
 	error:
 	if(f != NULL) { fclose(f); }
+	if(fname != NULL) { free(fname); }
 	if(tname != NULL)  {
 		if(file_exists(tname)) { remove(tname); }
 		free(tname);
