@@ -17,6 +17,10 @@
 #define MC_DEF_MODE 0	// File is in define mode
 #define MC_DAT_MODE 1	// File is in data mode.
 
+#define MC_TMODE_ID 0	// ID First
+#define MC_TMODE_TF 1	// Transients first
+#define MC_TMODE_PC	2	// Phase cycles first
+
 // File type
 #define MCTD_TDMS 0		// TDMS
 #define MCTD_TDM 1		// TDM
@@ -83,8 +87,9 @@
 
 // Multidimensional
 #define MCPP_NDHEADER "[ND/PC]"
-#define MCPP_NDNUM 7
+#define MCPP_NDNUM 8
 #define MCPP_MAXSTEPS "maxsteps"
+#define MCPP_STEPS "steps"
 #define MCPP_VINS "v_ins"
 #define MCPP_VINSDIM "v_ins_dim"
 #define MCPP_VINSMODE "v_ins_mode"
@@ -108,7 +113,7 @@ extern PPROGRAM *load_pprogram(FILE *f, int *ev);
 
 extern PINSTR *read_pinstr_from_char(char *array, int n_inst, int *ev);
 
-extern int SavePulseProgram(PPROGRAM *p, char *fname);
+extern int SavePulseProgram(PPROGRAM *p, char *fname, int safe);
 extern int save_pprogram(PPROGRAM *p, FILE *f);
 
 extern fsave generate_header(PPROGRAM *p, int *ev);
@@ -137,6 +142,9 @@ extern void add_prog_path_to_recent(char *path);
 extern void add_prog_path_to_recent_safe(char *path);
 
 extern void get_pinstr_array(PINSTR **ins_ar, PPROGRAM *p, int *cstep);
+
+extern int *get_steps_array(int tmode, int *maxsteps, int nc, int nd, int nt);
+extern int get_steps_array_size(int tmode, int nc, int nd);
 
 extern int ui_cleanup(int verbose);
 extern int ui_cleanup_safe(int verbose);
@@ -306,7 +314,10 @@ extern void free_pprog(PPROGRAM *p);
 extern int pinstr_cmp(PINSTR *pi1, PINSTR *pi2);
 extern PINSTR *copy_pinstr(PINSTR *instr_in, PINSTR *instr_out);
 
-extern PINSTR *generate_instructions(PPROGRAM *p, int *cstep, int *n_inst);
+extern PINSTR *generate_instructions(PPROGRAM *p, int cind, int *n_inst);
+extern int get_cyc_step(PPROGRAM *p, int cind, int *cyc_step);
+extern int get_dim_step(PPROGRAM *p, int cind, int *dim_step);
+extern int get_var_ind(PPROGRAM *p, int cind);
 
 extern int pprogramcpy(PPROGRAM *p_f, PPROGRAM *p_t);
 extern int insert_instruction(PPROGRAM *p, PINSTR *instr, int num); 
@@ -344,6 +355,3 @@ extern int pb_read_status_or_error(int verbose);
 extern int pb_read_status_safe(int verbose);
 extern int pb_start_safe(int verbose);
 extern int pb_stop_safe(int verbose);
-
-
-

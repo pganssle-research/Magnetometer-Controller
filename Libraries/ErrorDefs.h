@@ -1,39 +1,82 @@
 /***********************************************************
 *  														   *
+*            		Error Indexing						   *
+* 														   *
+***********************************************************/
+// Index
+#define MCD_ERR 1
+#define MCPP_ERR 2
+#define MCEX_ERR 3
+
+// Data Saving
+#define MCD_ERR_TITLE "Data Saving Error"		
+#define MCD_ERR_MAX -11000
+#define MCD_ERR_MIN -11250
+
+// Pulse Program
+#define MCPP_ERR_TITLE "Pulse Program Error"	
+#define MCPP_ERR_MAX -11251
+#define MCPP_ERR_MIN -11500
+
+// Current Experiment
+#define MCEX_ERR_TITLE "Current Experiment Error"
+#define MCEX_ERR_MAX -11501
+#define MCEX_ERR_MIN -11750
+
+/***********************************************************
+*  														   *
+*            		Data Saving Errors					   *
+* 														   *
+***********************************************************/
+// Return values
+#define MCD_ERR_NOFILENAME -11000
+#define MCD_ERR_NOFILE -11001
+#define MCD_ERR_NOPROG -11002
+#define MCD_ERR_FILEWRITE -11003
+#define MCD_ERR_FILEREAD -11004
+
+// Strings
+#define MCD_ERR_NOFILENAME_STR "No data filename provided."
+#define MCD_ERR_NOFILE_STR "No data file provided, or file name is broken."
+#define MCD_ERR_NOPROG_STR "No program provided."
+#define MCD_ERR_FILEWRITE_STR "Error writing data file."
+#define MCD_ERR_FILEREAD_STR "Error reading data file."
+
+/***********************************************************
+*  														   *
 *            Pulse Program Error Values					   *
 * 														   *
 ***********************************************************/
-// Span
-#define MCPP_ERR_MAX -11880
-#define MCPP_ERR_MIN -11905
-
 // Return values
-#define MCPP_ERR_NOFILE -11880
-#define MCPP_ERR_NOPROG -11881
-#define MCPP_ERR_NOSTRING -11882
-#define MCPP_ERR_TEMP_FILE_NAME -11883
-#define MCPP_ERR_TEMP_FILE -11884
-#define MCPP_ERR_FILE_MOVING -11885
-#define MCPP_ERR_FILEWRITE -11886
-#define MCPP_ERR_FILEREAD -11887
-#define MCPP_ERR_NOHEADER -11888
-#define MCPP_ERR_NOINSTRS -11889
-#define MCPP_ERR_NOAOUT -11890
-#define MCPP_ERR_NOND -11891
-#define MCPP_ERR_NOSKIP -11892
-#define MCPP_ERR_FLOC_NAME -11893
-#define MCPP_ERR_FLOC_TYPE -11894
-#define MCPP_ERR_FLOC_SIZE -11895
-#define MCPP_ERR_NOFLOCS -11896
-#define MCPP_ERR_MALFORMED_FNAME -11897
-#define MCPP_ERR_FILE_NOPROG -11898
-#define MCPP_ERR_FILE_NOPROPS -11899
-#define MCPP_ERR_FILE_NOINSTRS -11900
-#define MCPP_ERR_PROG_PROPS_LABELS -11901
-#define MCPP_ERR_CUST_NOENTRIES -11902
-#define MCPP_ERR_INVALID_TYPE -11903
-#define MCPP_ERR_INVALID_NC_STRING -11904
-#define MCPP_ERR_FIELDSMISSING -11905
+#define MCPP_ERR_NOFILE -11251
+#define MCPP_ERR_NOPROG -11252
+#define MCPP_ERR_NOSTRING -11253
+#define MCPP_ERR_TEMP_FILE_NAME -11254
+#define MCPP_ERR_TEMP_FILE -11255
+#define MCPP_ERR_FILE_MOVING -11256
+#define MCPP_ERR_FILEWRITE -11257
+#define MCPP_ERR_FILEREAD -11258
+#define MCPP_ERR_NOHEADER -11259
+#define MCPP_ERR_NOINSTRS -11260
+#define MCPP_ERR_NOAOUT -11261
+#define MCPP_ERR_NOND -11262
+#define MCPP_ERR_NOSKIP -11263
+#define MCPP_ERR_FLOC_NAME -11264
+#define MCPP_ERR_FLOC_TYPE -11265
+#define MCPP_ERR_FLOC_SIZE -11266
+#define MCPP_ERR_NOFLOCS -11267
+#define MCPP_ERR_MALFORMED_FNAME -11268
+#define MCPP_ERR_FILE_NOPROG -11269
+#define MCPP_ERR_FILE_NOPROPS -11270
+#define MCPP_ERR_FILE_NOINSTRS -11271
+#define MCPP_ERR_PROG_PROPS_LABELS -11272
+#define MCPP_ERR_CUST_NOENTRIES -11273
+#define MCPP_ERR_INVALID_TYPE -11274
+#define MCPP_ERR_INVALID_NC_STRING -11275
+#define MCPP_ERR_FIELDSMISSING -11276
+#define MCPP_ERR_INVALIDTMODE -11277
+#define MCPP_ERR_NOARRAY -11278
+
 
 // Strings
 #define MCPP_ERR_NOFILE_STR "No filename was provided."
@@ -62,3 +105,22 @@
 #define MCPP_ERR_INVALID_TYPE_STR "Invalid FSAVE type passed to function."
 #define MCPP_ERR_INVALID_NC_STRING_STR "Invalid linearized newline-delimited string array found."
 #define MCPP_ERR_FIELDSMISSING_STR "Necessary fields are missing from a required item in PPROGRAM."
+#define MCPP_ERR_INVALIDTMODE_STR "Invalid transient indexing mode in PPROGRAM"
+#define MCPP_ERR_NOARRAY_STR "Null array passed to pulse program function"
+
+/***********************************************************
+*  														   *
+*            	Experiment Running Errors				   *
+* 														   *
+***********************************************************/
+// Return values
+#define MCEX_ERR_NOCEXP -11501
+#define MCEX_ERR_NOPROG -11502
+#define MCEX_ERR_NOSTEPS -11503
+#define MCEX_ERR_INVALIDTMODE -11504
+
+// Strings
+#define MCEX_ERR_NOCEXP_STR "Missing or invalid CEXP structure passed to the function."
+#define MCEX_ERR_NOPROG_STR "Missing or invalid program in the current experiment."
+#define MCEX_ERR_NOSTEPS_STR "CEXP is missing the steps indexing array."
+#define MCEX_ERR_INVALIDTMODE_STR "Invalid transient indexing mode in CEXP"

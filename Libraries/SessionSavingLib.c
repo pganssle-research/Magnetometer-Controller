@@ -40,6 +40,7 @@
 #include <Magnetometer Controller.h>
 #include <General.h>
 #include <PPConversion.h>
+#include <Version.h>
 
 // Globals
 char *session_fname = "SavedSession";
@@ -675,7 +676,6 @@ void initialize_ce() {
 	// and the memory has not been freed. This mainly sets things to be NULL and such.
 	CmtGetLock(lock_ce);
 	
-	ce.ct = 0; 			// First transient
 	ce.nchan = -1;		// Allows for a test condition to see if this is set.
 	ce.ninst = -1;
 	ce.t_first = 1;	
@@ -695,7 +695,11 @@ void initialize_ce() {
 	ce.ochanson = NULL;
 	ce.ao_vals = NULL;
 	
+	ce.cind = 0;
+	ce.steps_size = 0;
 	ce.cstep = NULL;
+	ce.steps = NULL;
+	
 	ce.ilist = NULL;
 	
 	ce.fname = NULL;
@@ -808,11 +812,18 @@ int save_session(char *filename, int safe) { // Primary session saving function
 	
 	int i, ind, rv = 0;
 	
-	fname = malloc(strlen(fbuff)+strlen(".tdms")+1);
+	int flen = strlen(fbuff);
+	if(strlen("xml") > strlen(PPROG_EXTENSION)) {
+		flen += strlen("xml")+2;	
+	} else {
+		flen += strlen(PPROG_EXTENSION)+2;	
+	}
+	
+	fname = malloc(flen);
 	
 	// We're going to start by saving the program, because that has a ui_cleanup call in it
-	sprintf(fname, "%s.tdm", fbuff);
-	SavePulseProgramDDC(fname, safe, NULL);	// This is a thread-safe function - call as appropriate.
+	sprintf(fname, "%s.%s", fbuff, PPROG_EXTENSION);
+	SavePulseProgram(NULL, fname, safe);	// This is a thread-safe function - call as appropriate.
 	
 	sprintf(fname, "%s.xml", fbuff);
 	
@@ -1475,7 +1486,14 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	buff = malloc(g);
 	buff2 = malloc(g2);
 
-	fname = malloc(strlen(fbuff)+strlen(".tdms")+1);
+	int flen = strlen(fbuff);
+	if(strlen("xml") > strlen(PPROG_EXTENSION)) {
+		flen += strlen("xml")+2;
+	} else {
+		flen += strlen(PPROG_EXTENSION) + 2;
+	}
+	
+	fname = malloc(flen);
 	
 	if(safe) { 
 		CmtGetLock(lock_uidc);
@@ -2261,13 +2279,11 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	
 	
 	// Finally, we load the program
-	sprintf(fname, "%s.tdm", fbuff);
+	sprintf(fname, "%s.%s", fbuff, PPROG_EXTENSION);
 	if(FileExists(fname, NULL)) {
+		PPROGRAM *p = LoadPulseProgram(fname, safe, &rv);
 		
-		PPROGRAM *p = LoadPulseProgramDDC(fname, safe, &rv);	// Gets lock_tdm, no others.
-		
-		if(rv)
-			goto error;
+		if(rv) { goto error; }
 		
 		if(p != NULL) {
 			set_current_program(p);

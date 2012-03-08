@@ -380,7 +380,7 @@ struct {
 } uidc;
 
 // ce -> Structure containing information about the currently running experiment.
-struct {
+typedef struct CEXP {
 	TaskHandle aTask; 		// Signal acquisition task
 	TaskHandle cTask;		// Counter task.
 
@@ -407,8 +407,15 @@ struct {
 	int ctset;				// Whether or not the counter task has been set
 	int atset;				// Whether or not the acquisition task has been set.
 
-	int ct;					// Current transient
-	int *cstep;				// Current step
+	unsigned int cind;		// Current index
+	unsigned int steps_size;// Number of values in *steps
+	unsigned int *cstep;	// Same size as steps
+	unsigned int *steps;	// Maxsteps -> It will have one of three forms:
+							// 1: !p->varied -> steps = [nt]
+							// 2: MC_TMODE_ID [{dim1, ..., dimn}, nt]
+							// 3: MC_TMODE_TF [nt, {dim1, ... dimn}, nt]
+							// 4: MC_TMODE_PC [{pc1, ... , pcn}, {dim1, ..., dimn}, nt/npc]
+							
 
 	int ninst;				// Number of instructions in this run
 	PINSTR *ilist;			// List of instructions for this run.
@@ -426,12 +433,9 @@ struct {
 	int *ochanson;			// Analog output channels on. Size = nochans, Refers to indices in p->ao_chans
 	char **ocnames;			// Analog output channel names. Size = nochans.
 	float64 *ao_vals;		// Analog output values for each channel. Size = nochans;
-	
-	
-	// File saving info
-	int cind;					// Current index in acquisition
-	
-} ce;
+} CEXP;
+
+CEXP ce; // Make the ce struct
 
 // af - > Contains all the functions that have been set up.
 struct {

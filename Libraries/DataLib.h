@@ -1,4 +1,32 @@
 /********************************** Includes *********************************/
+// Data Date Stamp
+#define MCD_DATE_FORMAT "%y%m%d"
+#define MCD_DATESTAMP_MAXSIZE 6
+
+#define MCD_TIME_FORMAT "%H:%m:%s, %a, %b %d, %Y"
+#define MCD_TIMESTAMP_MAXSIZE 27
+
+// Data groups
+#define MCD_MAINDATA "[DataGroup]"
+#define MCD_AVGDATA "[AvgGroup]"
+
+// Data header
+#define MCD_DATAHEADER "[Data Header]"
+#define MCD_DATANUM 8
+
+#define MCD_EXPNAME "Experiment Name"
+#define MCD_EXPNUM "Experiment Number"
+#define MCD_NCHANS "NumChans"
+
+#define MCD_DATESTAMP "DateStamp"
+#define MCD_TIMESTART "TimeStarted"
+#define MCD_TIMEDONE "TimeDone"
+
+#define MCD_CIND "CurrentIndex"
+#define MCD_MAXSTEPS "MaxSteps"
+
+
+// TDM stuff
 #define MCTD_MAINDATA "DataGroup"			// The main data group name.
 #define MCTD_AVGDATA "AvgGroup"				// The group of data averages.
 
@@ -120,6 +148,10 @@ extern void change_chan(void);
 extern void change_range(void);
 extern void change_range_safe(void);
 
+
+/****************** Experiment Running *******************/
+extern int setup_cexp(CEXP *cexp);
+extern int get_ct(CEXP *ce);
 
 /****************** Device Interaction *******************/
 extern int setup_DAQ_task(void);

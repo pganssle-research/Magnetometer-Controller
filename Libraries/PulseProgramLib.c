@@ -307,7 +307,6 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	// Must be done before the AOut and Skip stuff
 	pl = glocs[MCPP_NDORD];
 	if(p->varied) {
-		
 		if(pl < 0) { rv = MCPP_ERR_NOPROG; goto error; }
 		
 		buff = malloc(fs[pl].size);
@@ -331,18 +330,31 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 			}
 		}
 		
-		char *ndnames[MCPP_NDNUM] = { MCPP_MAXSTEPS, MCPP_VINS, MCPP_VINSDIM, MCPP_VINSMODE, 
-									  MCPP_VINSLOCS, MCPP_DELAYEXPRS, MCPP_DATAEXPRS};
+		char *ndnames[MCPP_NDNUM] = { MCPP_MAXSTEPS, MCPP_STEPS, MCPP_VINS, MCPP_VINSDIM, 
+									  MCPP_VINSMODE, MCPP_VINSLOCS, MCPP_DELAYEXPRS, 
+									  MCPP_DATAEXPRS };
 		plocs = strings_in_array(names, ndnames, nsize, MCPP_NDNUM);
 		
 		if(plocs == NULL) { rv = MCPP_ERR_FIELDSMISSING; goto error; }    	
 		
-		int msl = plocs[0], vinsl = plocs[1], vidiml = plocs[2], vimodel = plocs[3];
-		int vill = plocs[4], dexl = plocs[5], daxl = plocs[6];
+		int i = 0;
+		int msl = plocs[i++], sl = plocs[i++], vinsl = plocs[i++], vidiml = plocs[i++], 
+			vimodel = plocs[i++], vill = plocs[i++], dexl = plocs[i++], 
+			daxl = plocs[i++];
 		
 		if(msl < 0) { rv = MCPP_ERR_FIELDSMISSING; goto error; }
+		memcpy(p->maxsteps, bfs[msl].val.i, bfs[msl].size);	// Print the maxsteps array
 		
-		memcpy(p->maxsteps, bfs[msl].val.i, (p->nDims+p->nCycles)*si);	// Print the maxsteps array
+		if(sl < 0) { 
+			int *steps = get_steps_array(p->tmode, p->maxsteps, p->nCycles, p->nDims, p->nt);
+			if(steps != NULL) {
+				memcpy(p->steps, steps, (p->steps_size)*sizeof(unsigned int));
+			} else {
+				p->steps = NULL;
+			}
+		} else {
+			memcpy(p->steps, bfs[sl].val.ui, bfs[sl].size);
+		}
 		
 		if(p->nVaried > 0) { // We only need to do this if it's varied along a dimension or cycle
 			if(vinsl < 0 || vidiml < 0 || vimodel < 0 || vill < 0) { rv = MCPP_ERR_FIELDSMISSING; goto error; }
@@ -381,9 +393,7 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 		
 		free(plocs);
 		plocs = NULL;
-		
 	}
-	
 	
 	// Read out things related to analog outputs (if necessary)
 	pl = glocs[MCPP_AOORD];
@@ -634,24 +644,25 @@ PINSTR *read_pinstr_from_char(char *array, int n_inst, int *ev) {
 	return in;
 }
 
-int SavePulseProgram(PPROGRAM *p, char *filename) {
+int SavePulseProgram(PPROGRAM *p, char *filename, int safe) {
 	// Save a program to file
-	// 
-	// Errors:
-	// -11880: No filename provided.
-	// -11881: No program provided.
-	// -11882: Failed to create temporary file.
-	// -11883: Failed to open temporary file.
-	
+
 	// Try to open the file
-	int rv = 0;
+	int rv = 0, locked = 0;
 	FILE *f = NULL;
 	char *tname = NULL;
 	char *new_fname = NULL;
 	char *fname = NULL, *ext = NULL;
 	
 	if(filename == NULL) { return MCPP_ERR_NOFILE; }
-	if(p == NULL) { return MCPP_ERR_NOPROG; }
+	
+	if(p == NULL) { 
+		p = safe?get_current_program_safe():get_current_program();
+		if(p == NULL) {
+			rv = MCPP_ERR_NOPROG;
+			goto error;
+		}
+	}
 	
 	// Make sure it's got the right extension.
 	ext = get_extension(filename);
@@ -665,7 +676,7 @@ int SavePulseProgram(PPROGRAM *p, char *filename) {
 		strcat(fname, ".");
 		strcat(fname, PPROG_EXTENSION);
 	} else {
-		fname = malloc(strlen(filename));
+		fname = malloc(strlen(filename)+1);
 		strcpy(fname, filename);
 	}
 	
@@ -673,7 +684,7 @@ int SavePulseProgram(PPROGRAM *p, char *filename) {
 	tname = temp_file(PPROG_EXTENSION);
 	
 	if(tname == NULL) { 
-		rv -MCPP_ERR_TEMP_FILE_NAME;
+		rv MCPP_ERR_TEMP_FILE_NAME;
 		goto error;
 	}
 	
@@ -684,6 +695,10 @@ int SavePulseProgram(PPROGRAM *p, char *filename) {
 		goto error; 
 	}
 	
+	if(safe) {
+		CmtGetLock(lock_tdm);
+		locked = 1;
+	}
 	
 	rv = save_pprogram(p, f);
 	
@@ -722,6 +737,10 @@ int SavePulseProgram(PPROGRAM *p, char *filename) {
 		err = rename(tname, new_fname);
 		free(new_fname);
 		new_fname = NULL;
+	}
+	
+	if(safe && locked) {
+		CmtReleaseLock(lock_tdm);	
 	}
 	
 	error:
@@ -930,7 +949,7 @@ fsave generate_header(PPROGRAM *p, int *ev) {
 	char *header = NULL;
 
 	if(p == NULL) { 
-		rv = -200;
+		rv = MCPP_ERR_NOPROG;
 		goto error; 
 	}
 	
@@ -1073,8 +1092,7 @@ fsave generate_instr_array(PPROGRAM *p) {
 		ucbuff = (unsigned char)(p->instrs[i]->trigger_scan);
 		memcpy(pos, &ucbuff, si8);
 		pos += si8;
-		
-		
+
 		memcpy(pos, &(p->instrs[i]->instr_time), sd);
 		pos += sd;
 		
@@ -1082,7 +1100,6 @@ fsave generate_instr_array(PPROGRAM *p) {
 		memcpy(pos, &ucbuff, si8);
 		pos += si8;
 	}
-	
 	
 	fsave fs = make_fs(MCPP_INSTHEADER);
 	put_fs_custom(&fs, c, MCPP_INSTNUMFIELDS, types, names, n_instr);
@@ -1211,6 +1228,9 @@ fsave generate_nd(PPROGRAM *p, int *ev) {
 	// Maxsteps (Int array, size p->nVaried)
 	fs[cf] = make_fs(MCPP_MAXSTEPS);
 	if(rv = put_fs(&fs[cf], p->maxsteps, FS_INT, p->nDims + p->nCycles)) { goto error; }
+	
+	fs[++cf] = make_fs(MCPP_STEPS);
+	if(rv = put_fs(&fs[cf], p->steps, FS_UINT, p->steps_size)) { goto error; } 
 	
 	if(p->nVaried > 0) { 
 		// Varied instructions (Int array, size: p->nVaried)
@@ -1507,13 +1527,13 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	ui_cleanup(0); // Clean up the interface and uipc variable so that we can trust it.
 
 	// Grab what statics we can from the uipc variable
-
 	p->n_inst = uipc.ni;								// Number of instructions
 	p->nCycles = uipc.nc;								// Number of cycles
 	p->nDims = uipc.nd;									// Number of indirect dimensions
 	p->nAout = uipc.anum;
 	
 	int i;
+	int *steps = NULL;
 	
 	p->n_ao_var = 0;
 	for(i = 0; i < uipc.anum; i++) {
@@ -1672,16 +1692,16 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	p->nFuncs = nFuncs;
 	
 	// Now before we allocate the arrays, just the other statics we know.
-	if(p->skip)									
+	if(p->skip) {									
 		p->real_n_steps = uipc.real_n_steps;
-	else
+	} else {
 		p->real_n_steps = p->max_n_steps;
+	}
 	
 	// Whether or not there's a scan.
 	for(i = 0; i<uipc.ni; i++) {
 		GetCtrlVal(pc.inst[i], pc.scan, &p->scan);
-		if(p->scan)
-			break;
+		if(p->scan) { break; }
 	}
 	
 	GetCtrlVal(pc.np[1], pc.np[0], &p->np);
@@ -1689,13 +1709,18 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	GetCtrlVal(pc.trig_ttl[1], pc.trig_ttl[0], &p->trigger_ttl);
 	p->total_time = uipc.total_time;
 	
-	
 	// Now allocate the arrays.
 	create_pprogram(p);
 	
 	// Now we can assign what arrays we've got already.
-	for(i=0; i<nDims+nCycles; i++) 
-		p->maxsteps[i] = maxsteps[i];
+	memcpy(p->maxsteps, maxsteps, sizeof(int)*(p->nDims+p->nCycles));
+	
+	steps = get_steps_array(p->tmode, p->maxsteps, p->nCycles, p->nDims, p->nt);
+	if(steps != NULL) {
+		memcpy(p->steps, steps, p->steps_size);
+		free(steps);
+		steps = NULL;
+	}
 	
 	// Add in the analog outputs
 	if(p->nAout) {
@@ -1911,6 +1936,35 @@ PPROGRAM *get_current_program_safe() {
 	return p;
 }
 
+int *get_steps_array(int tmode, int *maxsteps, int nc, int nd, int nt) {
+	int *steps = NULL;
+	int size = get_steps_array_size(tmode, nc, nd);
+	
+	if(size <= 0) { goto error; }
+	
+	error:
+	
+	return steps;
+}
+
+int get_steps_array_size(int tmode, int nc, int nd) {
+	// Determine the size of the steps array
+	
+	if(tmode == MC_TMODE_PC && nc <= 0) {
+		tmode = MC_TMODE_ID;
+	}
+	
+	switch(tmode) {
+		case MC_TMODE_ID:
+		case MC_TMODE_TF:
+			return nd + 1;
+		case MC_TMODE_PC:
+			return nd+nc+1;
+		default:
+			return MCPP_ERR_INVALIDTMODE;
+	}	
+}
+
 void set_current_program(PPROGRAM *p) { // Set the current program to the program p
 	// Sets the UI and uipc variables as necessary.
 	if(p == NULL)
@@ -1962,9 +2016,10 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 	SetCtrlVal(pc.np[1], pc.np[0], p->np);
 	change_np_or_sr(0);
 	
-	if(p->tmode >= 0)
+	if(p->tmode >= 0) {
 		SetCtrlVal(pc.tfirst[1], pc.tfirst[0], p->tmode);
-
+	}
+	
 	// Turn on the instructions if they should be on.
 	int *cstep = NULL, len;
 	int *nd_data, *nd_units;
@@ -2196,17 +2251,32 @@ void set_current_program_safe(PPROGRAM *p) {
 void load_prog_popup() {
 	// Function that generates a popup and allows the user to load a program from file.
 	char *path = malloc(MAX_FILENAME_LEN+MAX_PATHNAME_LEN);
-	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", "*.tdm", ".tdm;.tdms", "Load Program From File", VAL_LOAD_BUTTON, 0, 0, 1, 1, path);
+	char *dfs = malloc(strlen(PPROG_EXTENSION)+3);
+	sprintf(dfs, "*.%s", PPROG_EXTENSION);
+	
+	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", dfs, PPROG_ALLEXTS, "Load Program From File", VAL_LOAD_BUTTON, 0, 0, 1, 1, path);
 
+	free(dfs);
+	
 	if(rv == VAL_NO_FILE_SELECTED) {
 		free(path);
 		return;
-	} else 
+	} else {
 		add_prog_path_to_recent_safe(path);
+	}
 
 	int err_val = 0;
-	PPROGRAM *p = LoadPulseProgramDDC(path, 1, &err_val);
-
+	PPROGRAM *p = NULL;
+	
+	char *ext = get_extension(path);
+	if(ext != NULL && strcmp(ext, ".tdm") == 0) {
+		p = LoadPulseProgramDDC(path, 1, &err_val);	
+	} else {
+		p = LoadPulseProgram(path, 1, &err_val);	
+	}
+	
+	if(ext != NULL) { free(ext); }
+	
 	if(err_val != 0)
 		display_ddc_error(err_val);
 
@@ -2220,8 +2290,13 @@ void load_prog_popup() {
 
 void save_prog_popup() {
 	char *path = malloc(MAX_FILENAME_LEN+MAX_PATHNAME_LEN);
-	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", "*.tdm", ".tdm", "Save Program To File", VAL_SAVE_BUTTON, 0, 0, 1, 1, path);
+	char *dfs = malloc(strlen(PPROG_EXTENSION)+3);
+	sprintf(dfs, "*.%s", PPROG_EXTENSION);
 
+	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", dfs, PPROG_ALLEXTS, "Save Program To File", VAL_SAVE_BUTTON, 0, 0, 1, 1, path);
+
+	free(dfs);
+	
 	if(rv == VAL_NO_FILE_SELECTED) {
 		free(path);
 		return;
@@ -2230,7 +2305,7 @@ void save_prog_popup() {
 
 	PPROGRAM *p = get_current_program_safe();
 
-	int err_val = SavePulseProgramDDC(path, 1, p);
+	int err_val = SavePulseProgram(p, path, 1);
 
 	if(err_val != 0) 
 		display_ddc_error(err_val);
@@ -6412,8 +6487,17 @@ void create_pprogram(PPROGRAM *p) { // Initially allocates the PPROGRAM space
 
 	if(p->varied) {
 		p->maxsteps = malloc(sizeof(int)*(p->nDims+p->nCycles)); 				// Allocate the maximum position point
+		
+		p->steps_size = get_steps_array_size(p->tmode, p->nCycles, p->nDims);
+		
+		if(p->steps_size > 0) {
+			p->steps = malloc(p->steps_size*sizeof(unsigned int));
+		} else {
+			p->steps = NULL;	
+		}
 	} else {
 		p->maxsteps = NULL;
+		p->steps = NULL;
 	}
 	
 	if(p->nVaried) {
@@ -6589,15 +6673,18 @@ PINSTR *copy_pinstr(PINSTR *instr_in, PINSTR *instr_out) {
 	return instr_out;
 }
 
-PINSTR *generate_instructions(PPROGRAM *p, int *cstep, int *n_inst) {
+PINSTR *generate_instructions(PPROGRAM *p, int cind, int *n_inst) {
 	// Generates the list of instructions that you want for the given cstep.
 	// Return value is a list of instructions. Outputs the new number of instructions
 	// to n_inst, which need not be set to the right initial value. The return value
 	// is dynamically allocated, and must be freed.
-	
+
+	*n_inst = -1;
 	if(p == NULL) { return NULL; }
 	
-	int lindex = get_lindex(cstep, p->maxsteps, p->nCycles+p->nDims);
+	int lindex = get_var_ind(p, cind);
+	if(lindex < 0) { return NULL; }
+	
 	int ni = p->n_inst;
 	
 	PINSTR *ilist = malloc(sizeof(PINSTR)*ni), *inst;
@@ -6658,7 +6745,83 @@ PINSTR *generate_instructions(PPROGRAM *p, int *cstep, int *n_inst) {
 	return NULL;
 }
 
+int get_dim_step(PPROGRAM *p, int cind, int *dim_step) {
+	if(p == NULL) { return MCPP_ERR_NOPROG; }
+	
+	int *cs = malloc(p->steps_size*sizeof(int));
+	int *ds = dim_step;
+	
+	get_cstep(cind, cs, p->steps, p->steps_size);
 
+	if(p->tmode == MC_TMODE_ID) {
+		memcpy(ds, cs, p->nDims * sizeof(int));
+	} else if (p->tmode == MC_TMODE_TF) {
+		memcpy(ds, cs + 1, p->nDims * sizeof(int));
+	} else if (p->tmode == MC_TMODE_PC) {
+		memcpy(ds, cs + p->nCycles, p->nDims * sizeof(int));
+	} else {
+		free(cs);
+		return MCPP_ERR_INVALIDTMODE;
+	}
+	
+	free(cs);
+	return 0;
+}
+
+int get_cyc_step(PPROGRAM *p, int cind, int *cyc_step) {
+	if(p == NULL) { return MCPP_ERR_NOPROG; }
+	if(p->nCycles <= 0) { return 1; }
+	
+	if(cyc_step == NULL) { return MCPP_ERR_NOARRAY; }
+	
+	int *cs = malloc(p->steps_size*sizeof(int));
+	int *ds = cyc_step;
+	
+	get_cstep(cind, cs, p->steps, p->steps_size);
+	int ct;
+	
+	if(p->tmode == MC_TMODE_ID) {
+		ct = cs[p->steps_size - 1];
+	} else if (p->tmode == MC_TMODE_TF) {
+		ct = cs[0];
+	} else if (p->tmode == MC_TMODE_PC) {
+		cs[p->nCycles] = cs[p->steps_size-1];
+		int *as = malloc((p->nCycles+1)*sizeof(int));
+		memcpy(as, p->steps, (p->nCycles)*sizeof(int));
+		
+		as[p->steps_size] = p->nt;
+		ct = get_lindex(cs, as, p->nCycles+1);
+		free(as);
+		
+		memcpy(ds, cs, (p->nCycles+1)*sizeof(int));
+	} else {
+		free(cs);
+		return MCPP_ERR_INVALIDTMODE;
+	}
+	
+	free(cs);
+	return 0;	
+}
+
+int get_var_ind(PPROGRAM *p, int cind) {
+	int rv = -1;
+	int *cs = malloc(p->nCycles+p->nDims);
+	
+	if(p->nCycles) {
+		if(rv = get_cyc_step(p, cind, cs)) { goto error; }	
+	}
+	
+	if(p->nDims) {
+		if(rv = get_dim_step(p, cind, cs + p->nCycles)) { goto error; } 
+	}
+	
+	rv = get_lindex(cs, p->maxsteps, p->nDims+p->nCycles);
+	
+	error:
+	
+	free(cs);
+	return rv;
+}
 //////////////////////////////////////////////////////////////
 // 															//
 //					General Utilities						//

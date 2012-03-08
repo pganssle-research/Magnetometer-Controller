@@ -28,11 +28,10 @@ typedef struct PPROGRAM // This is a structure for containing information about 
 	int nt;					// Number of transients
 	int trigger_ttl; 		// According to this program, which flag corresponds to the trigger TTL?
 	
-	int tmode;				// Three options: 	0 -> ID first, then advance transients. (Data acquisition)
-							//					1 -> All transients first, then ID
-							//					2 -> Phase Cycles first, then IDs, then repeat as necessary
-							// This does NOT effect p->maxsteps or linear indexing.
-
+	int tmode;				// Three options: 	MC_TMODE_ID	-> ID first, then advance transients. (Data acquisition)
+							//					MC_TMODE_TF -> All transients first, then ID
+							//					MC_TMODE_PC -> Phase Cycles first, then IDs, then repeat as necessary
+	
 	
 	int scan; 				// Does this program have a scan argument in it?
 	int varied; 			// Is it varied?
@@ -50,6 +49,7 @@ typedef struct PPROGRAM // This is a structure for containing information about 
 	int nVaried; 			// Number of varied instructions (phase cycles or dimensions)
 	int max_n_steps;		// Maximum number of steps possible  This is maxsteps[0]*maxsteps[1]*...*maxsteps[end]
 	int real_n_steps;		// Actual number of steps, taking into account the skip condition
+
 	int	skip;				// A boolean indicating if a skip condition is implemented
 	char *skip_expr;		// A string containing the expression used to generate the skip file
 	
@@ -59,8 +59,13 @@ typedef struct PPROGRAM // This is a structure for containing information about 
 	
 	// The following two indices are little-endian and of size numDims+1
 	// They are of the form [{position in transient space} {position in indirect sampling space}]
+	int steps_size;			// Size of steps
 	int *maxsteps; 			// Maximum position in the sampling space
-
+	int *steps;				// Linear indexing dimension sizes based on tmode.
+							// MC_TMODE_ID: [{dim1, ..., dimn}, nt]
+							// MC_TMODE_TF: [nt, {dim1, ..., dimn}]
+							// MC_TMODE_PC: [{pc1, ..., pcn}, {dim1, ..., dimn}, nt/(prod(pc[:]))]
+	
 	int *v_ins; 			// Index of which instructions are varied.
 	int *v_ins_dim;			// Dimension/cycle along which it's varied. Encoded bitwise, cycles first
 	int *v_ins_mode;		// The mode in which they are varied. PP_V_ID = indirect, PP_V_PC = phase cycling, PP_V_BOTH = both.

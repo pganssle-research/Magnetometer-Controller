@@ -126,23 +126,23 @@ Descrip	: Since changing over to this new system, you've broken all the
 #include <errno.h>
 #include <ctype.h>
 #include <string.h>
+#include <cviddc.h>
 
 #include <spinapi.h>					// Then the external libraries
 #include <NIDAQmx.h>
 
 #include <Magnetometer Controller.h>	// Then the libraries specific to
 #include <PulseProgramTypes.h>			// this software.
-#include <MathParserLib.h>
 #include <FileSave.h>
-#include <cvitdms.h>
-#include <cviddc.h>
+#include <UIControls.h>
+#include <MathParserLib.h>
+
 #include <MCUserDefinedFunctions.h>
 #include <MC10.h> 
 #include <DataLib.h>
 #include <PulseProgramLib.h>
 #include <SaveSessionLib.h>
 #include <General.h>
-#include <UIControls.h>
 #include <PPConversion.h>
 
 static TaskHandle acquireSignal, counterTask;    

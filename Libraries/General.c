@@ -469,7 +469,7 @@ char *get_extension(char *pathname) {
 	if(i == 0) { return NULL; }
 	
 	c = malloc(l-i+1);
-	strcpy(c, pathname+l);
+	strcpy(c, pathname+i);
 	
 	return c;
 }

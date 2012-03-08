@@ -27,12 +27,12 @@
 #include <ansi_c.h>
 #include <formatio.h>  
 #include <spinapi.h>					// SpinCore functions
+#include <cviddc.h> 
 
 #include <PulseProgramTypes.h>
 #include <FileSave.h>
-#include <cvitdms.h>
-#include <cviddc.h> 
 #include <UIControls.h>					// For manipulating the UI controls
+
 #include <MathParserLib.h>				// For parsing math
 #include <DataLib.h>
 #include <MCUserDefinedFunctions.h>		// Main UI functions
@@ -40,6 +40,9 @@
 #include <PulseProgramLib.h>			// Prototypes and type definitions for this file
 #include <SaveSessionLib.h>
 #include <General.h>
+#include <Version.h>
+#include <ErrorDefs.h>
+#include <ErrorLib.h>
 
 //////////////////////////////////////////////////////////////
 // 															//
@@ -127,6 +130,7 @@ int run_experiment(PPROGRAM *p) {
 	int scan = p->scan;
 	int ev = 0, done = 0;
 	int ce_locked = 0, daq_locked = 0;
+	int ct = 0;
 	int cont_mode = 1;		// If cont_mode is on, it is checked in the first iteration of the loop anyway.
 							// This will be more relevant when cont_run in ND is implemented
 	
@@ -146,17 +150,17 @@ int run_experiment(PPROGRAM *p) {
 	// Initialize ce
 	CmtGetLock(lock_ce);
 	ce_locked = 1;
-	ce.ct = 0;
+	ce.cind = 0;
 	ce.p = p;
 	
-	if(ce.cstep != NULL) {			// In case this has been allocated already.
+/*	if(ce.cstep != NULL) {			// In case this has been allocated already.
 		free(ce.cstep);
 		ce.cstep = NULL;
-	}
+	}  */
 	
 	if(p->varied) {
-		ce.cstep = malloc(sizeof(int)*(p->nCycles+p->nDims));
-		get_cstep(0, ce.cstep, p->maxsteps, p->nCycles+p->nDims); 
+//		ce.cstep = malloc(sizeof(int)*(p->nCycles+p->nDims));
+//		get_cstep(0, ce.cstep, p->maxsteps, p->nCycles+p->nDims); 
 	}
 	
 	if(scan) {
@@ -196,22 +200,32 @@ int run_experiment(PPROGRAM *p) {
 	if(cont_mode && p->varied) {  SetCtrlVal(pc.rc[1], pc.rc[0], 0); }
 	
 	// Main loop to keep track of where we're at in the experiment, etc.
-	while(!GetQuitIdle() && ce.ct <= p->nt) {
+	while(!GetQuitIdle() && ct <= p->nt) {
 		if(cont_mode) { GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode); }
 			
 		if(done = prepare_next_step_safe(p) != 0)
 		{
-			if(cont_mode && done == 1) {
+			/* if(cont_mode && done == 1) {
 				CmtGetLock(lock_ce);		// No possibility of break/goto, don't need to set ce_locked
-				ce.ct--;
+				ct--;
 				p->nt++;
 				done = prepare_next_step(p);
 				CmtReleaseLock(lock_ce);
-			}
+			}  */ // Fix this a bit later
 			
 			if(done < 0) { ev = done; }
 		}
-
+		
+		CmtGetLock(lock_ce);
+		ce_locked = 1;
+		
+		ct = get_ct(&ce);
+		if(ct < 0) { ev = ct; goto error; }
+		
+		CmtReleaseLock(lock_ce);
+		ce_locked = 0;
+		
+	
 		if(!done) {
 			// This is the part where data acquisition takes place.
 			
@@ -305,7 +319,7 @@ int run_experiment(PPROGRAM *p) {
 			
 				if(uidc.disp_update < 2) {	// We're plotting stuff for 0 (Avg) or 1 (Latest)
 					CmtGetLock(lock_ce);
-					if(uidc.disp_update && ce.ct > 1) { 
+					if(uidc.disp_update && ct > 1) { 
 						plot_data(avg_data, p->np, p->sr, ce.nchan);
 					} else {
 						plot_data(data, p->np, p->sr, ce.nchan);
@@ -372,6 +386,7 @@ int run_experiment(PPROGRAM *p) {
 
 	return ev;
 }
+
 
 double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error, int safe) {
 	// This is the main function dealing with getting data from the DAQ.
@@ -479,75 +494,100 @@ int prepare_next_step (PPROGRAM *p) {
 	// ct/nt counters are 1-based indices.
 
 	// It's all the same if you aren't using varied instructions
+	ce.cind++;
+	int ct = get_ct(&ce);
+	
 	if(!p->varied) {
-		ce.cind = ++ce.ct;
-		if(ce.ct <= p->nt) {
-			if(ce.ilist == NULL) {
+		if(ct <= p->nt) {
+			if(ce.ilist == NULL) { 
 				ce.ilist = generate_instructions(p, NULL, &ce.ninst);
 			}
 			return 0;
-		} else
-			return 1;
+		} else {
+			return 1;	
+		}
 	}
-
+	
 	// Free the old ilist
 	if(ce.ilist != NULL) {
 		free(ce.ilist);
 		ce.ilist = NULL;
 	}
 	
-	// Get linear indexes for the phase cycles and the dimensions, plus the maximum linear indexes of each one.
-	int i, cli, dli;
+	int end = get_cstep(ce.cind, ce.cstep, ce.steps, ce.steps_size);
 	
-	if(++ce.ct > 1)
-		dli = p->nDims?get_lindex(&ce.cstep[p->nCycles], &p->maxsteps[p->nCycles], p->nDims):-1;
-	else
-		dli = 0;
-	
-	int mcli = 1, mdli = 1;
-	
-	for(i = 0; i < p->nCycles; i++) {
-		mcli *= p->maxsteps[i];
-	}
-	
-	for(i = 0; i < p->nDims; i++) {
-		mdli *= p->maxsteps[p->nCycles+i];
-	}
-	
-	if(p->nt%mcli != 0) { return -1; }
-	
-	// First check -> Have we finished all the transients?
-	if(ce.ct > p->nt) {
-		if(dli >= --mdli) {		// Done condition.
-			return 1;	
-		} else {
-			// Reset the transients and increase the dimension index.
-			ce.ct = 1;
-			cli = 0;
-			dli++;
-		}
-	} else 
-		cli = (ce.ct-1)%mcli;	// Transients are 1-based index, so we need to convert.
-	
-	// Update the cstep vars.
-	if(p->nCycles) { get_cstep(cli, ce.cstep, p->maxsteps, p->nCycles); }
-	if(p->nDims) { get_cstep(dli, &ce.cstep[p->nCycles], &p->maxsteps[p->nCycles], p->nDims); }
-	
-	// Keep going (recursive function call - probably a bad idea) if this is in the skips.
-	int lind = get_lindex(ce.cstep, p->maxsteps, p->nCycles+p->nDims);
-	if(p->skip & 1) {
-		if(p->skip_locs[lind]) {
-			prepare_next_step(p);
-		}
+	if(end != 1) {
+		return 1;	
+	} else if(p->skip) {
+		if(p->skip_locs[ce.cind]) {
+			return prepare_next_step(p);
+		}	
 	}
 	
 	ce.ilist = generate_instructions(p, ce.cstep, &ce.ninst); // Generate the next instructions list.
 	
 	if(ce.ilist == NULL) { return -2; }
 	
-	ce.cind = dli*p->nt+ce.ct-1;	// Current index in [nt {dim1, ... , dimn}] space
-	
 	return 0;
+}
+
+
+int setup_cexp(CEXP *cexp) {
+	// Initializes the CEXP for proper linear indexing
+	if(cexp == NULL) { return MCEX_ERR_NOCEXP; }
+	if(cexp->p == NULL) { return MCEX_ERR_NOPROG; }
+
+	int rv = 0; 
+	PPROGRAM *p = cexp->p;
+	CEXP c = *cexp;
+	
+	c.cind = 0;
+	
+	if(c.cstep != NULL) {
+		free(c.cstep);
+		c.cstep = NULL;
+	}
+	
+	if(c.steps != NULL) {
+		free(c.steps);
+		c.steps = NULL;
+	}
+	
+	c.steps_size = 0;
+	if(p->varied) { 
+		c.cstep = calloc(p->steps_size, sizeof(unsigned int));
+	}
+	
+	*cexp = c;
+	return rv;
+}
+
+int get_ct(CEXP *cexp) {
+	CEXP c = *cexp;
+	if(!c.p->varied) {
+		return c.cind;
+	} else if (c.cstep == NULL || c.steps_size == 0) {
+		return MCEX_ERR_NOSTEPS;
+	}
+	
+	int ct = 0;
+	
+	unsigned int tmode, npc, nd;
+	tmode = c.p->tmode;
+	npc = c.p->nCycles;
+	nd = c.p->nDims;
+	
+	if(tmode == MC_TMODE_ID || (tmode == MC_TMODE_PC && npc == 0)) {
+		ct = c.cstep[c.steps_size-1];
+	} else if (tmode == MC_TMODE_TF) {
+		ct = c.cstep[0];	
+	} else if (tmode == MC_TMODE_PC) {
+		ct = get_lindex(&(c.cstep[nd]), &(c.steps[nd]), npc+1);
+	} else {
+		return MCEX_ERR_INVALIDTMODE;
+	}
+	
+	return ct;
 }
 
 int prepare_next_step_safe(PPROGRAM *p) {
@@ -676,7 +716,155 @@ int initialize_tdm_safe(int CE_lock, int TDM_lock) {
 	return rv;
 }
 
-int save_data(double *data, double **avg) {
+int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, unsigned int nc, time_t tstart) {
+	// Creates the proper headers for the data file.
+	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
+	if(p == NULL) { return MCD_ERR_NOPROG; }
+	
+	int rv = 0;
+	FILE *f = NULL;
+	char *ext = NULL, *fbuff = NULL, *ds = NULL, *buff = NULL;
+	fsave *fs = NULL, header = null_fs();
+	int fs_size = 0;
+	
+	
+	// Enforce valid extension
+	ext = get_extension(fname);
+	if(ext != NULL || strcmp(ext, MCD_EXTENSION) != 0) {
+		int elen = (ext != NULL)?strlen(ext):0;
+		elen = strlen(fname)-elen;
+		
+		fbuff = calloc(elen+strlen(MCD_EXTENSION)+2, 1);
+		
+		strncpy(fbuff, fname, elen);
+		strcat(fbuff, ".");
+		strcat(fbuff, MCD_EXTENSION);
+	} else {
+		fbuff = malloc(strlen(fname)+1);
+		strcpy(fbuff, fname);
+	}
+	
+	fname = fbuff;		// C is pass-by-value, so this is just a pointer
+	
+	// Create the file - this WILL overwrite if it exists.
+	f = fopen(fname, "wb+");
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	
+	// Create the data header first.
+	fs_size = MCD_DATANUM;
+	fs = calloc(MCD_DATANUM, sizeof(fsave));
+	int cf = 0;
+	
+	// Experiment name
+	fs[cf] = make_fs(MCD_EXPNAME);
+	if(rv = put_fs(&(fs[cf]), basename, FS_CHAR, strlen(basename)+1)) { goto error; }
+	
+	// Experiment number
+	fs[++cf] = make_fs(MCD_EXPNUM);
+	if(rv = put_fs(&(fs[cf]), &num, FS_UINT, 1)) { goto error; }
+	
+	// Number of channels
+	fs[++cf] = make_fs(MCD_NCHANS);
+	if(rv = put_fs(&(fs[cf]), &nc, FS_UINT, 1)) { goto error; }
+	
+	// Date stamp
+	time_t ts;			// Get the time first
+	time(&ts);
+	
+	struct tm *tptr;	// Get local time
+	tptr = localtime(&ts);
+	
+	ds = malloc(MCD_DATESTAMP_MAXSIZE+1);	// Get the string
+	strftime(ds, MCD_DATESTAMP_MAXSIZE, MCD_DATE_FORMAT, tptr);
+	
+	fs[++cf] = make_fs(MCD_DATESTAMP);
+	if(rv = put_fs(&(fs[cf]), ds, FS_CHAR, strlen(ds)+1)) { goto error; }
+	
+	free(ds);
+	ds = NULL;
+	
+	// Timestamps - both the same for now
+	ds = calloc(MCD_TIMESTAMP_MAXSIZE+1, 1);
+	strftime(ds, MCD_TIMESTAMP_MAXSIZE, MCD_TIME_FORMAT, tptr);
+	
+	fs[++cf] = make_fs(MCD_TIMESTART);	// Time started
+	if(rv = put_fs(&(fs[cf]), ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
+	
+	fs[++cf] = make_fs(MCD_TIMEDONE);	// Time completed
+	if(rv = put_fs(&(fs[cf]), ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
+	
+	// Current step
+	unsigned int cind = 0;
+	fs[++cf] = make_fs(MCD_CIND);
+	if(rv = put_fs(&(fs[cf]), &cind, FS_UINT, 1)) { goto error; }
+	
+	// Max steps
+	fs[++cf] = make_fs(MCD_MAXSTEPS);
+	if(rv = put_fs(&(fs[cf]), p->maxsteps, FS_INT, p->nDims + p->nCycles)) { goto error; }
+	
+	// Generate the container
+	header = make_fs(MCD_DATAHEADER);
+	if(rv = put_fs_container(&header, fs, cf)) { goto error; }
+	
+	// Print the container.
+	size_t count = get_fs_strlen(&header), written = 0;
+	buff = malloc(count);
+	print_fs(buff, &header);
+	
+	written = fwrite(buff, 1, count, f);
+	if(written != count) {
+		rv = MCD_ERR_FILEWRITE;
+		goto error;
+	}
+	
+	free(buff);
+	buff = NULL;
+
+	
+	// Finally, save the program
+	rv = save_pprogram(p, f);
+	if(rv != 0) { goto error; }
+	
+	error:
+	if(ext != NULL) { free(ext); }
+	if(buff != NULL) { free(buff); }
+	if(fbuff != NULL) { free(fbuff); }
+	if(ds != NULL) { free(ds); }
+	
+	free_fsave(&header);
+	if(fs != NULL) { free_fsave_array(fs, fs_size); }
+	
+	if(f != NULL) { fclose(f); }
+	
+	return rv;
+}
+
+
+
+/*int save_data(char *fname, PPROGRAM *p, double *data, double **avg, int nc, int cind, time_t tdone) {
+	// This is for appending data, returns an error if the file doesn't exist.
+	
+	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
+	if(p == NULL) { return MCD_ERR_NOPROG; }
+	
+	int rv = 0;
+	FILE *f = NULL;
+	char *ext = NULL;
+	
+	
+	
+	
+	error:
+	
+	
+	if(ext != NULL) { free(ext); }
+	
+	if(f != NULL) { fclose(f); }
+	
+	return rv;
+} */
+ 
+int save_data_ddc(double *data, double **avg) {
 	// In order for this to work, the ce variable needs to be set up appropriately. This function is
 	// used to write data to an existing and open file. If for whatever reason 
 	
@@ -718,7 +906,8 @@ int save_data(double *data, double **avg) {
 	if(rv = DDC_SetChannelGroupProperty(mcg, MCTD_CSTEP, ce.cind)) { goto error; }
 	
 	csstr = malloc(12*(p->nDims+2)+3); // Signed maxint is 10 digits, plus - and delimiters.
-	sprintf(csstr, "[%d", ce.ct-1);
+	int ct = get_ct(&ce);
+	sprintf(csstr, "[%d", ct-1);
 	for(i = 0; i < p->nDims; i++) {
 		sprintf(csstr, "%s; %d", csstr, ce.cstep[i+p->nCycles]);	
 	}
@@ -748,7 +937,10 @@ int save_data(double *data, double **avg) {
 		achans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
 		if(rv = DDC_GetChannels(acg, achans, ce.nchan)) { goto error; }
 
-		if(ce.ct == 1) {	// First run.
+		ct = get_ct(&ce);
+		if(ct < 0) { rv = ct; goto error; }
+		
+		if(ct == 1) {	// First run.
 			for(i = 0; i < ce.nchan; i++) {
 				if(rv = DDC_AppendDataValues(achans[i], &data[i*np], np)) { goto error;}
 			}
@@ -761,7 +953,7 @@ int save_data(double *data, double **avg) {
 			
 			// Now update the average.
 			for(i = 0; i < (p->np*ce.nchan); i++) {
-				avg_data[i] = ((avg_data[i]*(ce.ct-1))+data[i])/ce.ct;
+				avg_data[i] = ((avg_data[i]*(ct-1))+data[i])/ct;
 			}
 			
 			// And write it to file again.
