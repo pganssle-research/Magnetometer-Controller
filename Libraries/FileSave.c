@@ -87,7 +87,11 @@ int put_fs_container(fsave *cont, fsave *fs, unsigned int NumElements) {
 	}
 	
 	cont->size = cs;
-	c = malloc(cs);
+	
+	if(fs != NULL && NumElements >= 1) {
+		c = malloc(cs);
+	}
+	
 	char *pos = c;
 	
 	for(int i = 0; i < NumElements; i++) { 
@@ -101,7 +105,6 @@ int put_fs_container(fsave *cont, fsave *fs, unsigned int NumElements) {
 	cont->val.c = c;
 	
 	error:
-	
 	if(rv) { 
 		if(c != NULL) { free(c); }
 		cont->val.c = NULL;

@@ -47,6 +47,10 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCD_ERR_FILEWRITE_STR;
 					case MCD_ERR_FILEREAD:
 						return MCD_ERR_FILEREAD_STR;
+					case MCD_ERR_NODATA:
+						return MCD_ERR_NODATA_STR;
+					case MCD_ERR_NOAVGDATA:
+						return MCD_ERR_NOAVGDATA_STR;
 				}
 				break;
 			case MCPP_ERR:

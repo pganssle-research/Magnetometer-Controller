@@ -500,7 +500,7 @@ int prepare_next_step (PPROGRAM *p) {
 	if(!p->varied) {
 		if(ct <= p->nt) {
 			if(ce.ilist == NULL) { 
-				ce.ilist = generate_instructions(p, NULL, &ce.ninst);
+				ce.ilist = generate_instructions(p, ce.cind, &ce.ninst);
 			}
 			return 0;
 		} else {
@@ -524,7 +524,7 @@ int prepare_next_step (PPROGRAM *p) {
 		}	
 	}
 	
-	ce.ilist = generate_instructions(p, ce.cstep, &ce.ninst); // Generate the next instructions list.
+	ce.ilist = generate_instructions(p, ce.cind, &ce.ninst); // Generate the next instructions list.
 	
 	if(ce.ilist == NULL) { return -2; }
 	
@@ -835,6 +835,153 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	if(fs != NULL) { free_fsave_array(fs, fs_size); }
 	
 	if(f != NULL) { fclose(f); }
+	
+	return rv;
+}
+
+int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time_t done) {
+	// Save data to existing file, with the header already written.
+	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
+	if(data == NULL) { return MCD_ERR_NODATA; }
+	if(p == NULL) { return MCD_ERR_NOPROG; }
+	
+	if(!file_exists(fname)) {
+		return MCD_ERR_NOFILE;	
+	}
+	
+	int i, rv = 0;
+	int *dim_step = NULL;
+	FILE *f = NULL;
+	fsave mg = null_fs(), ag = null_fs();
+	fsave md = null_fs(), ad = null_fs();
+	flocs fl = null_flocs();
+	char *step_title = NULL, *title_format = NULL, *buff = NULL;
+	char *astitle = NULL;
+	int *steps = NULL;
+	
+	f = fopen(fname, "rb");
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+
+	// If it's the first time, need to create the groups as well
+	steps = calloc(p->steps_size, sizeof(unsigned int));
+	if(p->varied) {
+		get_cstep(cind, steps, p->steps, p->steps_size);
+	} else {
+		steps[0] = cind;
+	}
+	
+	
+	// Create the data array.
+	int max = 0;
+	for(i = 0; i < p->steps_size; i++) {
+		if(p->steps[i] > max) {
+			max = p->steps[i];
+		}
+	}
+	
+	int ndigits = (max > 0)?(((int)log10(max))+1):1;	// Number of digits per step
+	
+	step_title = malloc(p->steps_size*(ndigits+1)+2);
+	title_format = malloc(6);
+	buff = malloc(ndigits+2);
+	
+	sprintf(title_format, "%%0%dd,", ndigits);
+	strcpy(step_title, "[");
+	
+	// Create the title format for sprintf
+	sprintf(title_format, "[%%0%dd", ndigits);
+	for(i = 1; i < p->steps_size; i++) {		   
+		sprintf(buff, title_format, p->steps[i]);
+		strcat(step_title, buff);
+	}
+	strcat(step_title, "]");
+	
+	if(p->nt > 1) {
+		if(!p->nDims) {
+			astitle = malloc(strlen("[0]")+1);
+			astitle = strcpy(astitle, "[0]");	
+		} else {
+			dim_step = malloc(p->nDims*sizeof(unsigned int));
+			get_dim_step(p, cind, dim_step);
+			
+			astitle = malloc(p->nDims*(ndigits+1)+2);
+			strcpy(astitle, "[");
+			
+			for(i = 0; i < p->nDims; i++) {
+				sprintf(buff, title_format, dim_step[i]);
+				strcat(astitle, buff);
+			}
+			
+			strcat(astitle, "]");
+		}
+	}
+	
+	free(title_format);
+	free(buff);
+	title_format = NULL;
+	buff = NULL;
+	
+	// Generate the data fsave.
+	md = make_fs(step_title);
+	if(rv = put_fs(&md, data, FS_DOUBLE, p->np*nc)) { goto error; }
+	
+	
+	if(cind == 0) {
+		mg = make_fs(MCD_MAINDATA);
+		if(rv = put_fs_container(&mg, &md, 1)) { goto error; } // Create a placeholder and print it to file.
+		
+		int bufflen = get_fs_strlen(&mg);
+		
+		if(p->nt > 1) {
+			ag = make_fs(MCD_AVGDATA);
+			if(rv = put_fs_container(&ag, &md, 1)) { goto error; }
+		
+			bufflen += get_fs_strlen(&ag);
+		}
+		
+		buff = malloc(bufflen);
+		char *pos = buff;
+		pos = print_fs(pos, &mg);
+		
+		if(p->nt > 1) {
+			pos = print_fs(pos, &ag);
+		}
+	} else {
+		fl = read_flocs_from_file(f, &rv);
+		if(rv != 0) { goto error; }
+	
+		// Get the average group if necessary.
+		if(p->nt > 1) {
+			for(i = 0; i < fl.num; i++) {
+				if(strcmp(fl.name[i], MCD_AVGDATA) == 0) {
+					break;
+				}
+			}
+			
+			// Set the file to the relevant group
+			fseek(f, fl.pos[i], SEEK_SET);
+		}
+	}
+	
+	
+	error:
+	
+	if(f != NULL) { fclose(f); }
+	if(fl.num > 0) { free_flocs(&fl); }
+	
+	if(mg.size > 0) { free_fsave(&mg); }
+	if(ag.size > 0) { free_fsave(&ag); }
+	if(md.size > 0) { free_fsave(&md); }
+	if(ad.size > 0) { free_fsave(&ad); }
+	
+	
+	if(dim_step != NULL) { free(dim_step); }
+	
+	if(step_title != NULL) { free(step_title); }
+	if(title_format != NULL) { free(title_format); }
+	if(buff != NULL) { free(buff); }
+	if(astitle != NULL) { free(astitle); }
+	if(steps != NULL) { free(steps); }
 	
 	return rv;
 }
