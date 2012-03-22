@@ -80,7 +80,9 @@
 #define MCPP_ERR_FIELDSMISSING -11276
 #define MCPP_ERR_INVALIDTMODE -11277
 #define MCPP_ERR_NOARRAY -11278
-
+#define MCPP_ERR_FS_NOTYPE -11279
+#define MCPP_ERR_FS_NOSIZE -11280
+#define MCPP_ERR_FS_BADCONTENTS -11281
 
 // Strings
 #define MCPP_ERR_NOFILE_STR "No filename was provided."
@@ -111,6 +113,9 @@
 #define MCPP_ERR_FIELDSMISSING_STR "Necessary fields are missing from a required item in PPROGRAM."
 #define MCPP_ERR_INVALIDTMODE_STR "Invalid transient indexing mode in PPROGRAM"
 #define MCPP_ERR_NOARRAY_STR "Null array passed to pulse program function"
+#define MCPP_ERR_FS_NOTYPE_STR "No type was found for the fsave structure."
+#define MCPP_ERR_FS_NOSIZE_STR "No size was found for the fsave structure."
+#define MCPP_ERR_FS_BADCONTENTS_STR "The contents of the fsave structure were not properly read."
 
 /***********************************************************
 *  														   *

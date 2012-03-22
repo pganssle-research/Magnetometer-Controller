@@ -1,3 +1,14 @@
+#define MCG_EOF -1
+
+#define MCG_DFLT_BUFF_SIZE 128000 // 128kB 
+
+#define MCG_ERR_INVALID_FILE -10000
+#define MCG_ERR_INVALID_INPUT -10001
+#define MCG_ERR_TEMP_FILE -10002
+
+#define MCG_ERR_INVALID_FILE_STR "Invalid file passed to function."
+
+
 /************** Array Utilities *************/ 
 extern int string_in_array(char **array, char *string, int size);
 extern int *strings_in_array(char **array, char **strings, int size1, int size2);
@@ -24,7 +35,10 @@ extern char **free_string_array(char **array, int size);
 extern double **free_doubles_array(double **array, int size);
 extern int **free_ints_array(int **array, int size);
 
-/************** File I/O *************/     
+/************** File I/O *************/ 
+extern int insert_into_file(FILE *f, void *data, unsigned int bytes, long buff_size);
+extern int buffered_copy(FILE *source_file, FILE *target_file, long buff_size, long max_bytes);
+
 extern int get_name(char *pathname, char *name, char *ending);
 extern char *get_extension(char *pathname);
 

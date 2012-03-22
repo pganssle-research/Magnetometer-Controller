@@ -352,6 +352,10 @@ void *realloc_if_needed(void *array, int *len, int new_len, int inc) {
 		l += ((int)((new_len-l)/inc)+1)*inc;
 	}
 	
+	if(array == NULL) {
+		array = malloc(l);
+	}
+	
 	array = realloc(array, l);
 	*len = l;
 	return array;
@@ -419,6 +423,102 @@ int **free_ints_array (int **array, int size) {
 //					File I/O								//
 // 															//
 //////////////////////////////////////////////////////////////
+int insert_into_file(FILE *f, void *data, unsigned int num_bytes, long buff_size) {
+	// Pass this a file, a position, some data, the number of bytes in the data array
+	// and the size of the buffer and this will insert the data in-place.
+	
+	if(f == NULL) { return MCG_ERR_INVALID_FILE; }
+	if(data == NULL) { return MCG_ERR_INVALID_INPUT; }
+	
+	char *tmp_name = NULL;
+	FILE *tf = NULL;
+	
+	if(buff_size <= 0) {
+		buff_size = MCG_DFLT_BUFF_SIZE;	
+	}
+	
+	long pos1 = ftell(f);
+	fseek(f, 0, SEEK_END);
+	
+	long pos2 = ftell(f);
+	fseek(f, pos1, SEEK_SET);
+	int rv = 0;
+	
+	long bytes = pos2-pos1;
+	
+	if(bytes < buff_size) {
+		void *buffer = malloc(bytes);
+		
+		size_t b_read = fread(buffer, 1, bytes, f);
+		fseek(f, pos1, SEEK_SET);
+		
+		fwrite(data, 1, num_bytes, f);
+		fwrite(buffer, 1, b_read, f);
+	} else { 
+		tmp_name = temp_file("tmp");
+		if(tf = fopen(tmp_name, "wb+")) {
+			rv = MCG_ERR_TEMP_FILE;
+			goto error;
+		}
+		
+		if(rv = buffered_copy(f, tf, buff_size, MCG_EOF) < 0) { goto error;	}
+		
+		fseek(f, pos1, SEEK_SET);
+		
+		fwrite(data, 1, num_bytes, f);
+		
+		if(rv = buffered_copy(tf, f, buff_size, MCG_EOF) < 0) { goto error; }
+	}
+	
+	fseek(f, pos1, SEEK_SET);
+	
+	error:
+	
+	if(tf != NULL) { fclose(tf); }
+	
+	if(tmp_name != NULL) {
+		if(file_exists(tmp_name)) {
+			remove(tmp_name);
+		}
+		
+		free(tmp_name);
+	}
+	
+	return rv;
+}
+
+int buffered_copy(FILE *source_file, FILE *target_file, long buff_size, long max_bytes) {
+	// Makes a buffered copy of all the bits starting at the position of
+	// f, into the source, target. Target will be opened as a binary file.
+	
+	FILE *s = source_file, *t = target_file;
+	
+	if(s == NULL || t == NULL) {
+		return MCG_ERR_INVALID_FILE;
+	}
+	
+	if(buff_size < 0) {
+		buff_size = MCG_DFLT_BUFF_SIZE;	
+	}
+	
+	unsigned char buffer[buff_size];
+	size_t b_read;
+	unsigned long total_b = 0;
+	
+	while(!feof(s)) {
+		b_read = fread(buffer, 1, buff_size, s);
+		total_b += b_read;
+		
+		if(max_bytes > 0 && total_b >= max_bytes) {
+			fwrite(buffer, 1, b_read-(total_b-max_bytes), t);
+			break;
+		} else {
+			fwrite(buffer, 1, b_read, t);	
+		}
+	}
+	
+	return 0;
+}
 
 int get_name(char *pathname, char *name, char *ending) {
 	// Gets the base name without the ending. Pass NULL if you don't

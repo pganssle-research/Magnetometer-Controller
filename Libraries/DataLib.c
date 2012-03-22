@@ -850,15 +850,24 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	}
 	
 	int i, rv = 0;
+	long ad_pos = -1;
 	int *dim_step = NULL;
+	unsigned int data_size = p->np*nc;
+	
 	FILE *f = NULL;
+	FILE *tf = NULL;
 	fsave mg = null_fs(), ag = null_fs();
 	fsave md = null_fs(), ad = null_fs();
 	flocs fl = null_flocs();
+	flocs afl = null_flocs();
 	char *step_title = NULL, *title_format = NULL, *buff = NULL;
 	char *astitle = NULL;
+	char *tmp_buff = NULL;
+	char *tname = NULL;
 	int *steps = NULL;
 	
+	size_t tmp_read = 0;
+
 	f = fopen(fname, "rb");
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 
@@ -870,6 +879,7 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 		steps[0] = cind;
 	}
 	
+	int ct = get_transient_from_step(p, steps);
 	
 	// Create the data array.
 	int max = 0;
@@ -925,7 +935,6 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	md = make_fs(step_title);
 	if(rv = put_fs(&md, data, FS_DOUBLE, p->np*nc)) { goto error; }
 	
-	
 	if(cind == 0) {
 		mg = make_fs(MCD_MAINDATA);
 		if(rv = put_fs_container(&mg, &md, 1)) { goto error; } // Create a placeholder and print it to file.
@@ -946,8 +955,14 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 		if(p->nt > 1) {
 			pos = print_fs(pos, &ag);
 		}
+		
+		// Now we can write to the file.
+		if(fwrite(buff, 1, bufflen, f) < bufflen) {
+			rv = MCD_ERR_FILEWRITE;
+			goto error;
+		}
 	} else {
-		fl = read_flocs_from_file(f, &rv);
+		fl = read_flocs_from_file(f, &rv, MCF_EOF);
 		if(rv != 0) { goto error; }
 	
 		// Get the average group if necessary.
@@ -957,10 +972,86 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 					break;
 				}
 			}
-			
+		
 			// Set the file to the relevant group
 			fseek(f, fl.pos[i], SEEK_SET);
+		
+			ad_pos = find_fsave_in_file(f, astitle, fl.size[i]);
+			if(ad_pos == MCF_ERR_FSAVE_NOT_FOUND) {
+				// This means we need to create the group.
+				fseek(f, fl.pos[i], SEEK_SET);
+				
+				afl = read_flocs_from_file(f, &rv, fl.size[i]);
+				if(rv < 0) { goto error; }
+				
+				fseek(f, afl.pos[afl.num-1]+afl.size[afl.num-1], SEEK_SET);
+				
+				long pos1 = ftell(f);
+				fseek(f, 0, SEEK_END);
+				
+				long pos2 = ftell(f);
+				fseek(f, pos1, SEEK_SET);
+				
+				if(pos2>pos1) { 
+					if(pos2-pos1 < MCG_DFLT_BUFF_SIZE) {
+						tmp_buff = malloc(MCG_DFLT_BUFF_SIZE);
+						tmp_read = fread(tmp_buff, 1, MCG_DFLT_BUFF_SIZE, f);
+					} else {
+						tname = temp_file(MCD_EXTENSION);
+						if((tf = fopen(tname, "wb+")) == NULL) {
+							rv = MCPP_ERR_TEMP_FILE;
+							goto error;
+						}
+						
+						if(rv = buffered_copy(f, tf, -1, -1)) { goto error; }
+					}
+					fseek(f, pos1, SEEK_SET);
+				}
+				
+				ad = make_fs(astitle);
+				if(rv = put_fs(&ad, data, FS_DOUBLE, data_size)) { goto error; }
+				
+				buff = malloc(get_fs_strlen(&ad));
+				print_fs(buff, &ad);
+				
+				fwrite(buff, 1, ad.size, f);
+				
+				if(pos2 > pos1) {
+					if(pos2-pos1 < MCG_DFLT_BUFF_SIZE) {
+						fwrite(tmp_buff, 1, tmp_read, f);
+						free(tmp_buff);
+						tmp_buff = NULL;
+					} else {
+						rewind(tf);
+						if(rv = buffered_copy(tf, f, -1, -1)) { goto error; }
+						
+						fclose(tf);
+						tf = NULL;
+					}
+				}
+			} else if(ad_pos < 0) {
+				rv = ad_pos;
+				goto error;
+			} else {
+				fseek(f, ad_pos, SEEK_SET);
+		
+				ad = read_fsave_from_file(f, &rv);
+				if(rv != 0) {
+					goto error;
+				}
+		
+				// Perform the averaging now.
+				for(i = 0; i < data_size; i++) {
+					ad.val.d[i] = (ad.val.d[i]*ct + data[i])/(ct+1);	// ct is zero-based index.
+				}
+		
+				// Overwrite the previous thing.
+				fseek(f, ad_pos, SEEK_SET);
+				overwrite_fsave_in_file(f, &ad);
+			}
 		}
+		
+		// Add the data to the main data group if it doesn't exist.
 	}
 	
 	

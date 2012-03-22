@@ -110,6 +110,12 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCPP_ERR_INVALIDTMODE_STR;
 					case MCPP_ERR_NOARRAY:
 						return MCPP_ERR_NOARRAY_STR;
+					case MCPP_ERR_FS_NOTYPE:
+						return MCPP_ERR_FS_NOTYPE_STR;
+					case MCPP_ERR_FS_NOSIZE:
+						return MCPP_ERR_FS_NOSIZE_STR;
+					case MCPP_ERR_FS_BADCONTENTS:
+						return MCPP_ERR_FS_BADCONTENTS_STR;
 				}
 				break;
 			case MCEX_ERR:

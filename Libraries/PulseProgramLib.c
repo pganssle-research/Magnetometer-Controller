@@ -135,7 +135,7 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	size_t count, si = sizeof(unsigned int), si8 = sizeof(unsigned char), sd = sizeof(double);
 	unsigned int fs_size = 0, bfs_size = 0;
 	
-	flocs fl = read_flocs_from_file(f, &rv);
+	flocs fl = read_flocs_from_file(f, &rv, -1);
 	if(rv != 0) { goto error; }
 	
 	if(fl.num == 0) {
@@ -6743,6 +6743,49 @@ PINSTR *generate_instructions(PPROGRAM *p, int cind, int *n_inst) {
 	free(ilist);
 	
 	return NULL;
+}
+
+int get_transient(PPROGRAM *p, int cind) {
+	if(p == NULL) { return MCPP_ERR_NOPROG; }
+	
+	int ct = cind;
+	
+	if(p->varied) {
+		int *cs = malloc(p->steps_size*sizeof(int));
+	
+		get_cstep(cind, cs, p->steps, p->steps_size);
+		
+		ct = get_transient_from_step(p, cs);
+		
+		free(cs);
+	}
+	
+	return ct;
+}
+
+int get_transient_from_step(PPROGRAM *p, int *step) {
+	// Get the current transient from a step variable.
+	// This is the kind of variable you'd get from get_cstep
+	// on the p->steps array.
+	
+	if(p == NULL) { return MCPP_ERR_NOPROG; }
+	if(step == NULL) { return MCPP_ERR_NOARRAY; }
+	
+	int ct;
+
+	if(!p->varied || p->tmode == MC_TMODE_TF) {
+		ct = step[0];
+	} else {	// This is also the starting point for MC_TMODE_PC
+		ct = step[p->steps_size-1];
+	}
+	
+	if(p->tmode == MC_TMODE_PC) {
+		for(int i = 0; i < p->nCycles; i++) {
+			ct *= step[i];
+		}
+	}
+	
+	return ct;
 }
 
 int get_dim_step(PPROGRAM *p, int cind, int *dim_step) {

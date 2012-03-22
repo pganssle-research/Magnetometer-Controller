@@ -315,6 +315,8 @@ extern int pinstr_cmp(PINSTR *pi1, PINSTR *pi2);
 extern PINSTR *copy_pinstr(PINSTR *instr_in, PINSTR *instr_out);
 
 extern PINSTR *generate_instructions(PPROGRAM *p, int cind, int *n_inst);
+extern int get_transient(PPROGRAM *p, int cind);
+extern int get_transient_from_step(PPROGRAM *p, int *step);
 extern int get_cyc_step(PPROGRAM *p, int cind, int *cyc_step);
 extern int get_dim_step(PPROGRAM *p, int cind, int *dim_step);
 extern int get_var_ind(PPROGRAM *p, int cind);
