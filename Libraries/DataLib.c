@@ -981,54 +981,14 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 				// This means we need to create the group.
 				fseek(f, fl.pos[i], SEEK_SET);
 				
-				afl = read_flocs_from_file(f, &rv, fl.size[i]);
-				if(rv < 0) { goto error; }
-				
-				fseek(f, afl.pos[afl.num-1]+afl.size[afl.num-1], SEEK_SET);
-				
-				long pos1 = ftell(f);
-				fseek(f, 0, SEEK_END);
-				
-				long pos2 = ftell(f);
-				fseek(f, pos1, SEEK_SET);
-				
-				if(pos2>pos1) { 
-					if(pos2-pos1 < MCG_DFLT_BUFF_SIZE) {
-						tmp_buff = malloc(MCG_DFLT_BUFF_SIZE);
-						tmp_read = fread(tmp_buff, 1, MCG_DFLT_BUFF_SIZE, f);
-					} else {
-						tname = temp_file(MCD_EXTENSION);
-						if((tf = fopen(tname, "wb+")) == NULL) {
-							rv = MCPP_ERR_TEMP_FILE;
-							goto error;
-						}
-						
-						if(rv = buffered_copy(f, tf, -1, -1)) { goto error; }
-					}
-					fseek(f, pos1, SEEK_SET);
-				}
-				
 				ad = make_fs(astitle);
 				if(rv = put_fs(&ad, data, FS_DOUBLE, data_size)) { goto error; }
 				
-				buff = malloc(get_fs_strlen(&ad));
+				size_t bsize = get_fs_strlen(&ad);
+				buff = malloc(bsize);
 				print_fs(buff, &ad);
 				
-				fwrite(buff, 1, ad.size, f);
-				
-				if(pos2 > pos1) {
-					if(pos2-pos1 < MCG_DFLT_BUFF_SIZE) {
-						fwrite(tmp_buff, 1, tmp_read, f);
-						free(tmp_buff);
-						tmp_buff = NULL;
-					} else {
-						rewind(tf);
-						if(rv = buffered_copy(tf, f, -1, -1)) { goto error; }
-						
-						fclose(tf);
-						tf = NULL;
-					}
-				}
+				insert_into_file(f, buff, bsize, -1);
 			} else if(ad_pos < 0) {
 				rv = ad_pos;
 				goto error;
@@ -1036,9 +996,7 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 				fseek(f, ad_pos, SEEK_SET);
 		
 				ad = read_fsave_from_file(f, &rv);
-				if(rv != 0) {
-					goto error;
-				}
+				if(rv != 0) { goto error;	}
 		
 				// Perform the averaging now.
 				for(i = 0; i < data_size; i++) {
@@ -1052,6 +1010,13 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 		}
 		
 		// Add the data to the main data group if it doesn't exist.
+		for(i = 0; i < fl.num; i++) {
+			if(strcmp(fl.name[i], MCD_MAINDATA) == 0) {
+				break;	
+			}
+		}
+		
+		
 	}
 	
 	
