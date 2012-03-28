@@ -29,15 +29,8 @@
 #include <spinapi.h>					// SpinCore functions
 #include <cviddc.h> 
 
-
-#ifndef UICONTROLS_H
 #include <UIControls.h>					// For manipulating the UI controls
-#endif
-
-#ifndef FILE_SAVE_H
 #include <FileSave.h>
-#endif
-
 #include <MathParserLib.h>				// For parsing math
 #include <DataLib.h>
 #include <MCUserDefinedFunctions.h>		// Main UI functions
@@ -536,9 +529,9 @@ int prepare_next_step (PPROGRAM *p) {
 	return 0;
 }
 
-
 int setup_cexp(CEXP *cexp) {
 	// Initializes the CEXP for proper linear indexing
+	// If filename is not null, this also sets up the hash.
 	if(cexp == NULL) { return MCEX_ERR_NOCEXP; }
 	if(cexp->p == NULL) { return MCEX_ERR_NOPROG; }
 
@@ -565,6 +558,10 @@ int setup_cexp(CEXP *cexp) {
 	
 	*cexp = c;
 	return rv;
+}
+
+int add_hash_to_cexp(CEXP *cexp) {
+	return 0;	
 }
 
 int get_ct(CEXP *cexp) {
@@ -1144,29 +1141,6 @@ int save_data(double *data, double **avg) {
 	return 0;	
 }
 
-
-/*int save_data(char *fname, PPROGRAM *p, double *data, double **avg, int nc, int cind, time_t tdone) {
-	// This is for appending data, returns an error if the file doesn't exist.
-	
-	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
-	if(p == NULL) { return MCD_ERR_NOPROG; }
-	
-	int rv = 0;
-	FILE *f = NULL;
-	char *ext = NULL;
-	
-	
-	
-	
-	error:
-	
-	
-	if(ext != NULL) { free(ext); }
-	
-	if(f != NULL) { fclose(f); }
-	
-	return rv;
-}*/
  
 int save_data_ddc(double *data, double **avg) {
 	// In order for this to work, the ce variable needs to be set up appropriately. This function is
@@ -2977,9 +2951,10 @@ void update_spec_fft_chan_safe() {
 
 /********* Device Interaction Settings ********/
 
-int get_current_fname (char *path, char *fname, int next) {
-	// Make sure that fname has been allocated to the length of the fname + 4 chars.
-	// Output is "fname", which is overwritten.
+int get_current_fname (char *path, char *fname, int next, time_t *cdate) {
+	// Output is "fname", which must be pre-allocated.
+	// Passing NULL to path returns the length of the new filename.
+	// This will NOT check if the new filename will be valid, clearly
 	// 
 	// If "next" is TRUE, passes the next available one. Otherwise it
 	// passes the most recent one.
@@ -2989,61 +2964,118 @@ int get_current_fname (char *path, char *fname, int next) {
 	// -2: Malformed path or fname
 	// -3: Maximum number of filenames used
 	//
-	// Success returns 1;
+	// Success returns 0 or positive;
 	
-	if(path == NULL || fname == NULL) { return -1; }
+	if(fname == NULL) { return -1; }
+	char *ext = MCD_EXTENSION, *str_format = NULL, *npath = NULL;
+	char *dstr = NULL;
+	time_t d = time(cdate);
+	
+	int i, rv = 0;
 	
 	// Allocate space for the full pathname.
-	char *npath = malloc(strlen(path)+strlen(fname)+11);
+	int flen = strlen(fname);
+	if(flen < 1) { rv = -2; goto error; }
 	
+	// Make sure there are no instances of special characters in the filename
+	// and terminate any trailing '\' characters.
+	for(i = 0; i < flen; i++) {
+		if(fname[i] != '\\') { break; }	
+	}
+	
+	if(i > 0) {
+		int ld = flen-i+1; // Also copy the null bit
+		memcpy(fname, fname+i, ld);
+		flen = strlen(fname);
+		if(flen < 1) { rv = -2; goto error; }
+	}
+	
+	flen += MCD_FNAME_FIXED_LEN + 1; // Not including extension, but including null.
+	
+	if(path == NULL) { 
+		rv =  flen;
+		goto error;
+	}
+	
+	npath = malloc(strlen(path)+flen+strlen(ext)+2);  // +2 is for the dot and file separator
 	strcpy(npath, path);
 	
 	// Make sure that there's no path separator at the end of path
 	// or at the beginning or end of fname.
-	while(strlen(npath) > 1 && path[strlen(npath)-1] == '\\') {
-		npath[strlen(npath)-1] = '\0';
+	int nlen = strlen(path);
+	for(i = nlen-1; i >= 0; i--) {
+		if(npath[i] != '\\') {
+			break;
+		}
 	}
+	npath[i+1] = '\0';
 	
-	if(strlen(npath) < 1 || !FileExists(npath, NULL)) {
-		free(npath);
-		return -2;
-	}
-	
-	while(strlen(fname) > 1 && fname[strlen(fname)-1] == '\\') {
-		fname[strlen(fname)-1] = '\0';
-	}
-	
-	if(strlen(fname) < 1) {
-		free(npath);
-		return -2;
-	}
-	
-	int i = 0, l = strlen(fname);
-	while(fname[i] == '\\' && i < l) {
-		i++;
-	}
-	
-	if(i > 0) {
-		strcpy(fname, &fname[i]);
-		fname[l-i+1] = '\0';
-	}
-	
+	if(strlen(npath) < 1 || !FileExists(npath, NULL)) { rv = -2; goto error; }
+
 	strcpy(path, npath);
 	
-	// Check which ones are available.
+	// Create the mechanism for generating filenames.
+	str_format = malloc(strlen("%s.%s")+strlen(MCD_FNAME_FORMAT)+2);
+	sprintf(str_format, "%%s\\%s.%%s", MCD_FNAME_FORMAT);
+	
+	struct tm *tptr = localtime(&d);
+	dstr = malloc(MCD_FNAME_DATE_LEN+1);
+	strftime(dstr, MCD_FNAME_DATE_LEN+1, MCD_FNAME_DATE_FORMAT, tptr);
+	
 	for(i = 0; i < 10000; i++) {
-		sprintf(npath, "%s\\%s%04d.tdm", path, fname, i);
+		sprintf(npath, str_format, path, dstr, fname, i, ext);
 		if(!FileExists(npath, NULL))
 			break;
 	}
 	
-	free(npath);
+	if(i >= 10000) {
+		rv = -3;
+		goto error;
+	}
 	
-	if(i >= 10000)
-		return -3;
+	char *buff = malloc(flen);
+	strcpy(buff, fname);
+	sprintf(fname, MCD_FNAME_FORMAT, dstr, buff, i-((next)?0:1)); // The output    	
 	
-	sprintf(fname, "%s%04d", fname, i-((next)?0:1)); // The output
-	return 1; 
+	free(buff);
+	
+	error:
+	if(npath != NULL) { free(npath); }
+	if(dstr != NULL) { free(dstr); }
+	if(str_format != NULL) { free(str_format); }
+
+	return rv; 
+}
+
+char *get_full_path(char *path, char *fname, char *ext, int *ev) {
+	// Gets the full path from the fname. Output is malloced, so
+	// must be freed. Input path cannot have a file separator
+	// at the end.
+	
+	int rv = 0;
+	char *npath = NULL;
+	if(ext == NULL) {
+		ext = MCD_EXTENSION; 
+	}
+	
+	if(path == NULL || !file_exists(path)) { rv = MCD_ERR_NOPATH; goto error; }
+	if(fname == NULL) { rv = MCD_ERR_NOFILENAME; goto error; }
+	
+	// Path + / + fname + . + ext + \0
+	int nplen = strlen(path) + 1 + strlen(fname) + 1 +  strlen(ext) + 1;
+	npath = malloc(nplen);
+	
+	sprintf(npath, "%s\\%s.%s", path, fname, ext);
+	
+	error:
+	if(rv != 0 && npath != NULL) {
+		free(npath);
+		npath = NULL;
+	}
+	
+	if(ev != NULL) { *ev = rv; }
+	
+	return npath;
 }
 
 int get_devices () {		

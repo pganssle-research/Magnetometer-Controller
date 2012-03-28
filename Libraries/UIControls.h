@@ -1,11 +1,13 @@
 // Includes
 #include <NIDAQmx.h>
-
-#define UICONTROLS_H
-
-#ifndef PULSE_PROGRAM_TYPES
 #include <PulseProgramTypes.h>
+
+#ifndef int64
+#define int64 __int64
 #endif
+
+#ifndef UI_CONTROLS_H
+#define UICONTROLS_H
 
 /******************* Constant Definitions *******************/
 #define MC_FID	0
@@ -382,7 +384,7 @@ struct {
 	
 	float range[8];			// Ranges for each channel - 8 possible values.
 	
-	char *dlpath;					// Default data directory.
+	char *dlpath;			// Default data directory.
 } uidc;
 
 // ce -> Structure containing information about the currently running experiment.
@@ -402,6 +404,8 @@ typedef struct CEXP {
 	
 	char *path;				// Full pathname of where to save the data
 	char *fname;			// Experiment filename.
+	char *bfname;			// Base filename
+	unsigned int num;		// Experiment number. 
 	char *desc;				// Description of the experiment.
 	
 	char *ctname;			// Counter task name
@@ -439,6 +443,9 @@ typedef struct CEXP {
 	int *ochanson;			// Analog output channels on. Size = nochans, Refers to indices in p->ao_chans
 	char **ocnames;			// Analog output channel names. Size = nochans.
 	float64 *ao_vals;		// Analog output values for each channel. Size = nochans;
+	
+	int64 hash;				// Current experiment hash - generated from the experiment name.
+	
 } CEXP;
 
 CEXP ce; // Make the ce struct
@@ -450,3 +457,5 @@ struct {
 	int nFuncs;				// Number of user defined functions
 	int *func_locs;			// An index from instruction index to function 
 } af; 
+
+#endif

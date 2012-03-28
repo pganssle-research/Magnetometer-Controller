@@ -13,6 +13,15 @@
 #include <UIControls.h>
 #endif
 
+// Filename format
+#define MCD_FNAME_DATE_FORMAT "%y%m%d"
+#define MCD_FNAME_DATE_LEN 6
+
+#define MCD_FNAME_NUM_LEN 4
+#define MCD_FNAME_FORMAT "%s-%s-%04d"
+
+#define MCD_FNAME_FIXED_LEN MCD_FNAME_DATE_LEN + MCD_FNAME_NUM_LEN + 2 // Doesn't include null-termination or extension. 
+
 // Experiment hash
 #define MCEX_HASH "ce_hash"
 
@@ -153,7 +162,8 @@ extern void update_spec_chan_box_safe(void);
 extern void update_spec_fft_chan(void);
 extern void update_spec_fft_chan_safe(void);
 
-extern int get_current_fname(char *path, char *fname, int next);
+extern int get_current_fname(char *path, char *fname, int next, time_t *cdate);
+extern char *get_full_path(char *path, char *fname, char *ext, int *ev);
 
 extern int get_devices(void);
 extern int get_devices_safe(void);

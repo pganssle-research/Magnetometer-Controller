@@ -149,6 +149,7 @@ Descrip	: Since changing over to this new system, you've broken all the
 #include <SaveSessionLib.h>
 #include <General.h>
 #include <PPConversion.h>
+#include <Version.h>
 
 static TaskHandle acquireSignal, counterTask;    
 extern PVOID RtlSecureZeroMemory(PVOID ptr, SIZE_T cnt);
@@ -242,6 +243,7 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			// is waiting for a trigger, it sends a software trigger.
 			
 			// Send a software trigger if it's waiting for one.
+			/*
 			int status = update_status_safe(0);
 			if(status & PB_WAITING) {
 				pb_start_safe(1);
@@ -250,16 +252,21 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			
 			// Don't do anything if we're running.
 			if(status & PB_RUNNING || GetRunning())  { break; }
-			
+						   */
 			// Get the filename and description.
-			int len, len2;
-			char *path = NULL, *fname = NULL, *desc = NULL;
+			int len, len2, ev = 0;
+			char *path = NULL, *fname = NULL, *bfname = NULL, *desc = NULL, *npath = NULL;
+			char *ext = MCD_EXTENSION;
 			
 			// Pathname first
 			GetCtrlValStringLength(mc.path[1], mc.path[0], &len);
 			GetCtrlValStringLength(mc.basefname[1], mc.basefname[0], &len2);
-			path = malloc(len+len2+11);
+			
+			path = malloc(len+1);
+			bfname = malloc(len2+1);
+			
 			GetCtrlVal(mc.path[1], mc.path[0], path);
+			GetCtrlVal(mc.basefname[1], mc.basefname[0], bfname);
 			
 			if(!FileExists(path, NULL)) {
 				MessagePopup("Directory Not Found", "The data storage directory was not found. Please create it and get back to me.");
@@ -267,27 +274,40 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			}
 		
 			// Now the current filename.
-			fname = malloc(len2+5);
-			GetCtrlVal(mc.basefname[1], mc.basefname[0], fname);
-			if(get_current_fname(path, fname, 1) != 1) { goto error; }
-			
-			SetCtrlVal(mc.cdfname[1], mc.cdfname[0], fname);
-			if(path[strlen(path)-1] != '\\') {
-				sprintf(path, "%s\\", path);
+			int fns = get_current_fname(NULL, bfname, 1, NULL);
+			if(fns < 0) {
+				goto error;
+			} else {
+				fname = malloc(fns);
+				strcpy(fname, bfname);
 			}
 			
-			sprintf(path, "%s%s.tdm", path, fname);	// Update the path with the full filename
+			if(get_current_fname(path, fname, 1, NULL) < 0) { goto error; }
+			
+			SetCtrlVal(mc.cdfname[1], mc.cdfname[0], fname);
+			
+			// Get the full path, put it in path.
+			npath = get_full_path(path, fname, NULL, &ev);
+			if(ev != 0) { goto error; }
+			
+			free(path);
+			path = npath;
+			npath = NULL;
 			
 			// Copy these into the current experiment structure
 			CmtGetLock(lock_ce);
 			if(ce.path != NULL) { free(ce.path); }
 			if(ce.fname != NULL) { free(ce.fname); }
+			if(ce.bfname != NULL) { free(ce.bfname); }
 			
 			ce.path = malloc(strlen(path)+1);
 			strcpy(ce.path, path);
 			
 			ce.fname = malloc(strlen(fname)+1);
 			strcpy(ce.fname, fname);
+			
+			ce.bfname = malloc(strlen(bfname)+1);
+			strcpy(ce.bfname, bfname);
 			
 			SetCtrlVal(mc.cdfname[1], mc.cdfname[0], ce.fname);  // Update the UI appropriately
 			
@@ -302,13 +322,17 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			strcpy(ce.desc, desc);
 			CmtReleaseLock(lock_ce);
 			
+			/*
 			// Start an asynchronous thread to run the experiment.
 			CmtScheduleThreadPoolFunctionAdv(DEFAULT_THREAD_POOL_HANDLE, IdleAndGetData, NULL, 0, discardIdleAndGetData, EVENT_TP_THREAD_FUNCTION_END, NULL, RUN_IN_SCHEDULED_THREAD, NULL); 
+			*/
 			
 			error:
 			
+			if(npath != NULL) { free(npath); }
 			if(path != NULL) { free(path); }
 			if(fname != NULL) { free(fname); }
+			if(bfname != NULL) { free(bfname); }
 			if(desc != NULL) { free(desc); }
 			
 			break;
@@ -512,16 +536,23 @@ int CVICALLBACK ChangeLoadInfoMode (int panel, int control, int event,
 				name = malloc(len+5);
 				GetCtrlVal(mc.basefname[1], mc.basefname[0], name);
 				
-				GetCtrlValStringLength(mc.path[1], mc.path[0], &len);
-				path = malloc(len+strlen(name)+10);
-				GetCtrlVal(mc.path[1], mc.path[0], path); 
+				int fns = get_current_fname(NULL, name, 1, NULL);
 				
-				get_current_fname(path, name, 1);
-				
-				SetCtrlVal(mc.cdfname[1], mc.cdfname[0], name);
-				
+				if(fns > 0) {
+					name = realloc(name, fns);
+					
+					GetCtrlValStringLength(mc.path[1], mc.path[0], &len);
+					path = malloc(len+1);
+					GetCtrlVal(mc.path[1], mc.path[0], path); 
+					
+					if(get_current_fname(path, name, 1, NULL) == 0) {
+						SetCtrlVal(mc.cdfname[1], mc.cdfname[0], name);
+					}
+					
+					free(path);
+				}
+
 				free(name);
-				free(path);
 			}
 				
 				

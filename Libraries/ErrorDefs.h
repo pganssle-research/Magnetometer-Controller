@@ -98,6 +98,7 @@
 #define MCD_ERR_NODATA -11006
 #define MCD_ERR_NOAVGDATA -11007
 #define MCD_ERR_BADCIND -11008
+#define MCD_ERR_NOPATH -11009
 
 // Strings
 #define MCD_ERR_NOFILENAME_STR "No data filename provided."
@@ -108,6 +109,7 @@
 #define MCD_ERR_NODATA_STR "No data were provided to the file for writing."
 #define MCD_ERR_NOAVGDATA_STR "No average data found in existing file."
 #define MCD_ERR_BADCIND_STR "Malformed current index passed to function."
+#define MCD_ERR_NOPATH_STR "No path was provided to a function that requires one."
 
 /***********************************************************
 *  														   *

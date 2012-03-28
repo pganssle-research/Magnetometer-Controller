@@ -134,9 +134,11 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	CmtReleaseLock(lock_uidc);
 	
 	// Initialize the data navigation box
-	int len;
-	GetCtrlValStringLength(mc.datafbox[1], mc.datafbox[0], &len);
-	char *path = malloc(len+1);
+	int len, len1, len2;
+	GetCtrlValStringLength(mc.datafbox[1], mc.datafbox[0], &len1);
+	GetCtrlValStringLength(mc.path[1], mc.path[0], &len2);
+	
+	char *path = malloc(((len1 > len2)?len1:len2)+1);
 	GetCtrlVal(mc.path[1], mc.path[0], path);
 	select_directory(path);
 	
@@ -147,16 +149,20 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	
 	int ldm;
 	GetCtrlVal(mc.ldatamode[1], mc.ldatamode[0], &ldm);
+	int fns = get_current_fname(NULL, fname, !ldm, NULL);
 	
-	get_current_fname(path, fname, !ldm);
-
-	if(path[strlen(path)-1] == '\\') { path[strlen(path)-1] = '\0'; }
+	if(fns > 0) {
+		fname = realloc(fname, fns);
+	}
 	
-	path = realloc(path, strlen(path)+strlen(fname)+6);
-	
-	strcat(path, "\\");
-	strcat(path, fname);
-	strcat(path, ".tdm");
+	if(get_current_fname(path, fname, !ldm, NULL) == 0) {
+		int rv = 0;
+		char *npath = get_full_path(path, fname, NULL, &rv);
+		if(npath != NULL) {
+			free(path);
+			path = npath;
+		}
+	}
 	
 	SetCtrlVal(mc.datafbox[1], mc.datafbox[0], path);
 	
@@ -709,6 +715,7 @@ void initialize_ce() {
 	ce.ilist = NULL;
 	
 	ce.fname = NULL;
+	ce.bfname = NULL;
 	ce.path = NULL;
 	ce.desc = NULL;
 	
