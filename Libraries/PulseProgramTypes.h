@@ -37,6 +37,7 @@ typedef struct PPROGRAM // This is a structure for containing information about 
 	
 	
 	int scan; 				// Does this program have a scan argument in it?
+	int use_pb;				// Does it use the pulseblaster
 	int varied; 			// Is it varied?
 	
 	int n_inst;				// How many instructions are we looking at

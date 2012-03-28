@@ -243,16 +243,18 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			// is waiting for a trigger, it sends a software trigger.
 			
 			// Send a software trigger if it's waiting for one.
-			/*
-			int status = update_status_safe(0);
-			if(status & PB_WAITING) {
-				pb_start_safe(1);
-				break;
+			
+			if(uipc.uses_pb) {
+				int status = update_status_safe(0);
+				if(status & PB_WAITING) {
+					pb_start_safe(1);
+					break;
+				}
+			
+				// Don't do anything if we're running.
+				if(status & PB_RUNNING || GetRunning())  { break; }
 			}
 			
-			// Don't do anything if we're running.
-			if(status & PB_RUNNING || GetRunning())  { break; }
-						   */
 			// Get the filename and description.
 			int len, len2, ev = 0;
 			char *path = NULL, *fname = NULL, *bfname = NULL, *desc = NULL, *npath = NULL;
@@ -322,10 +324,8 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			strcpy(ce.desc, desc);
 			CmtReleaseLock(lock_ce);
 			
-			/*
 			// Start an asynchronous thread to run the experiment.
 			CmtScheduleThreadPoolFunctionAdv(DEFAULT_THREAD_POOL_HANDLE, IdleAndGetData, NULL, 0, discardIdleAndGetData, EVENT_TP_THREAD_FUNCTION_END, NULL, RUN_IN_SCHEDULED_THREAD, NULL); 
-			*/
 			
 			error:
 			
@@ -2469,6 +2469,22 @@ int CVICALLBACK TestCallback (int panel, int control, int event,
 				free_pprog(gp);
 				gp = NULL;
 			}
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeUsePB (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			CmtGetLock(lock_uipc);
+			
+			GetCtrlVal(panel, control, &(uipc.uses_pb));
+			
+			CmtReleaseLock(lock_uipc);
 			break;
 	}
 	return 0;

@@ -27,16 +27,11 @@
 #include <spinapi.h>					// SpinCore functions
 #include <NIDAQmx.h>
 
-#ifndef FILE_SAVE_H
 #include <FileSave.h>
-#endif
+#include <UIControls.h>					// For manipulating the UI controls
 
 #include <cvitdms.h>
 #include <cviddc.h>
-
-#ifndef UICONTROLS_H
-#include <UIControls.h>					// For manipulating the UI controls
-#endif
 
 #include <MathParserLib.h>
 #include <MCUserDefinedFunctions.h>
@@ -301,7 +296,6 @@ void initialize_program() {
 	uipc.ppath = NULL;
 	CmtReleaseLock(lock_uipc);
 
-	
 	//	Now allocate memory for the instruction arrays, then create one of each
 	pc.inst = malloc(sizeof(int));
 	pc.cinst = malloc(sizeof(int));
@@ -527,6 +521,7 @@ void initialize_uicontrols() {
 	pc.trig_ttl[0] = PulseProg_Trigger_TTL;
 	pc.ninst[0] = PulseProg_NumInst;
 	pc.rc[0] = PulseProg_ContinuousRun;
+	pc.uses_pb[0] = PulseProg_UsePulseBlaster;
 	pc.numcycles[0] = PulseProg_PhaseCycles;
 	pc.trans[0] = PulseProg_TransientNum;
 
@@ -534,6 +529,7 @@ void initialize_uicontrols() {
 	pc.trig_ttl[1] = pc.PProgPan;
 	pc.ninst[1] = pc.PProgPan;
 	pc.rc[1] = pc.PProgPan;
+	pc.uses_pb[1] = pc.PProgPan;
 	pc.numcycles[1] = pc.PProgPan;
 	pc.trans[1] = pc.PProgPan;
 

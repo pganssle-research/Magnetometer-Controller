@@ -61,15 +61,9 @@ Desrip	: Need to add a few things to PPROGRAM that I did not consider at
 #include <spinapi.h>					// SpinCore functions
 #include <NIDAQmx.h>
 
-#ifndef FILE_SAVE_H
 #include <FileSave.h>
-#endif
-
 #include <MathParserLib.h>				// For parsing math
-
-#ifndef UI_CONTROLS_H
 #include <UIControls.h>					// For manipulating the UI controls
-#endif
 
 #include <MCUserDefinedFunctions.h>		// Main UI functions
 #include <MC10.h>
@@ -242,12 +236,15 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	// We need to make the PPROGRAM now.
 	p = calloc(1, sizeof(PPROGRAM));
 	
+	// Initializations for legacy reasons:
+	p->use_pb = 1;
+	
 	char *props[MCPP_PROPSNUM] = {MCPP_VERSION, MCPP_NP, MCPP_SR, MCPP_NT, MCPP_TRIGTTL, MCPP_TMODE, 
-								 MCPP_SCAN, MCPP_VARIED, MCPP_NINST, MCPP_TOTALTIME, MCPP_NUINSTRS, 
+								 MCPP_SCAN, MCPP_USE_PB, MCPP_VARIED, MCPP_NINST, MCPP_TOTALTIME, MCPP_NUINSTRS, 
 								 MCPP_NDIMS, MCPP_NCYCS, MCPP_NVARIED, MCPP_MAXNSTEPS, MCPP_REALNSTEPS, 
 								 MCPP_SKIP, MCPP_NAOUT, MCPP_NAOVAR};
 	void *pfields[MCPP_PROPSNUM] = {NULL, &(p->np), &(p->sr), &(p->nt), &(p->trigger_ttl), &(p->tmode),
-									&(p->scan), &(p->varied), &(p->n_inst), &(p->total_time),
+									&(p->scan), &(p->use_pb), &(p->varied), &(p->n_inst), &(p->total_time),
 									&(p->nUniqueInstrs), &(p->nDims), &(p->nCycles), &(p->nVaried),
 									&(p->max_n_steps), &(p->real_n_steps), &(p->skip), &(p->nAout), 
 									&(p->n_ao_var)};
@@ -784,6 +781,7 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 	int s = 0;
 	size_t written;
 	size_t sd = sizeof(double), si = sizeof(int), si8 = sizeof(unsigned char);
+	
 	// First the main "Pulse Program" header
 	char *hstr = MCPP_PROGHEADER;
 	int len = strlen(hstr)+1;
@@ -808,19 +806,7 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 	header = generate_header(p, &rv);
 	if(rv != 0) { goto error; }
 	
-	int blen = get_fs_strlen(&header), ilen = 1; 
-	buff = malloc(blen);
-	unsigned int count = blen;
-	
-	print_fs(buff, &header);
-	
-	written = 0;
-	if(buff != NULL) { written = fwrite(buff, 1, count, f); }
-	
-	if(count != written) {
-		rv = MCPP_ERR_FILEWRITE;
-		goto error;
-	}
+	if(rv = fwrite_fs(f, &header)) { goto error; }
 	
 	header = free_fsave(&header);
 	
@@ -833,17 +819,7 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 		goto error;
 	}
 	
-	count = get_fs_strlen(&instrs);
-	buff = realloc_if_needed(buff, &blen, count, ilen);  
-	print_fs(buff, &instrs);
-	
-	written = 0;
-	if(buff != NULL) { written = fwrite(buff, 1, count, f); }
-	
-	if(count != written) {
-		rv = MCPP_ERR_FILEWRITE;
-		goto error;
-	}
+	if(rv = fwrite_fs(f, &instrs)) { goto error; }
 	
 	instrs = free_fsave(&instrs);
 	
@@ -855,17 +831,7 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 			goto error;
 		}
 		
-		count = get_fs_strlen(&ao);
-		buff = realloc_if_needed(buff, &blen, count, ilen);
-		print_fs(buff, &ao);
-		
-		written = 0;
-		if(buff != NULL) { written = fwrite(buff, 1, count, f); }
-		
-		if(count != written) {
-			rv = MCPP_ERR_FILEWRITE;
-			goto error;
-		}
+		if(rv = fwrite_fs(f, &ao)) { goto error; }
 		
 		ao = free_fsave(&ao);
 	}
@@ -878,18 +844,7 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 			goto error;
 		}
 		
-		count = get_fs_strlen(&nd);
-		buff = realloc_if_needed(buff, &blen, count, ilen);
-		
-		print_fs(buff, &nd);
-		
-		written = 0;
-		if(buff != NULL) { written = fwrite(buff, 1, count, f); }
-		
-		if(count != written) {
-			rv = MCPP_ERR_FILEWRITE;
-			goto error;
-		}
+		if(rv = fwrite_fs(f, &nd)) { goto error; }
 		
 		nd = free_fsave(&nd);
 	}
@@ -902,18 +857,7 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 			goto error;
 		}
 		
-		count = get_fs_strlen(&skip);
-		buff = realloc_if_needed(buff, &blen, count, ilen);
-		
-		print_fs(buff, &skip);
-		
-		written = 0;
-		if(buff != NULL) { written = fwrite(buff, 1, count, f); }
-		
-		if(count != written) {
-			rv = -11884;
-			goto error;
-		}
+		if(rv = fwrite_fs(f, &skip)) { goto error; }
 		
 		skip = free_fsave(&skip);
 	}
@@ -930,8 +874,7 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 	
 	fwrite(&size, sizeof(unsigned int), 1, f);	// This will break for programs bigger than
 												// 4GB. Be aware of this extremely common scenario.
-	
-	
+
 	error:
 	if(buff != NULL) { free(buff); }
 	
@@ -991,6 +934,10 @@ fsave generate_header(PPROGRAM *p, int *ev) {
 	fs[++cf] = make_fs(MCPP_SCAN);
 	if(rv = put_fs(&fs[cf], &(p->scan), FS_UCHAR, 1)) { goto error; }
 	
+	// Use PB (UChar)
+	fs[++cf] = make_fs(MCPP_USE_PB);
+	if(rv = put_fs(&fs[cf], &(p->use_pb), FS_UCHAR, 1)) { goto error; }
+	
 	// Varied (UChar)
 	fs[++cf] = make_fs(MCPP_VARIED);
 	if(rv = put_fs(&fs[cf], &(p->varied), FS_UCHAR, 1)) { goto error; }
@@ -1043,16 +990,11 @@ fsave generate_header(PPROGRAM *p, int *ev) {
 	out = make_fs(MCPP_PROPHEADER);
 	if(rv = put_fs_container(&out, fs, h_f)) { goto error; }
 
-   	
 	error:
 	if(fs != NULL) { free_fsave_array(fs, h_f); }
 	if(header != NULL) { free(header); }
 	*ev = rv;
-	
-	if(rv != 0 && header != NULL) { 
-		
-	}
-	
+
 	return out;
 }
 
@@ -1536,6 +1478,7 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	p->nCycles = uipc.nc;								// Number of cycles
 	p->nDims = uipc.nd;									// Number of indirect dimensions
 	p->nAout = uipc.anum;
+	p->use_pb = uipc.uses_pb;
 	
 	int i;
 	int *steps = NULL;
@@ -1704,9 +1647,10 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	}
 	
 	// Whether or not there's a scan.
+	p->scan = !p->use_pb;
 	for(i = 0; i<uipc.ni; i++) {
+		if(p->scan) { break; }  
 		GetCtrlVal(pc.inst[i], pc.scan, &p->scan);
-		if(p->scan) { break; }
 	}
 	
 	GetCtrlVal(pc.np[1], pc.np[0], &p->np);
@@ -2020,6 +1964,10 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 	SetCtrlVal(pc.sr[1], pc.sr[0], p->sr);
 	SetCtrlVal(pc.np[1], pc.np[0], p->np);
 	change_np_or_sr(0);
+	
+	// Whether or not to use the PulseBlaster
+	uipc.uses_pb = p->use_pb;
+	SetCtrlVal(pc.uses_pb[1], pc.uses_pb[0], p->use_pb);
 	
 	if(p->tmode >= 0) {
 		SetCtrlVal(pc.tfirst[1], pc.tfirst[0], p->tmode);

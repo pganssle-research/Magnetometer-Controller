@@ -294,6 +294,7 @@
 #define  PulseProg_ContinuousRun          24      /* callback function: ContinuousRunCallback */
 #define  PulseProg_PhaseCycles            25      /* callback function: ChangeNumCycles */
 #define  PulseProg_ResetDims              26      /* callback function: ResetIDPos */
+#define  PulseProg_UsePulseBlaster        27      /* callback function: ChangeUsePB */
 
      /* tab page panel controls */
 #define  Spectrum_Graph                   2       /* callback function: SpectrumCallback */
@@ -441,6 +442,7 @@ int  CVICALLBACK ChangeSpectrumOffset(int panel, int control, int event, void *c
 int  CVICALLBACK ChangeTransients(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK ChangeTransientView(int menubar, int menuItem, void *callbackData, int panel);
 int  CVICALLBACK ChangeTUnits(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeUsePB(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeViewingTransient(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK CollapsePhaseCycle(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ColorVal(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);

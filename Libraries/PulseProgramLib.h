@@ -1,9 +1,9 @@
 /******************************** Includes *******************************/
+#ifndef PULSE_PROGRAM_LIB_H
 #define PULSE_PROGRAM_LIB_H
 
-#ifndef PULSE_PROGRAM_TYPES_H
 #include <PulseProgramTypes.h>
-#endif
+
 
 // Some defines that are useful for read_status
 #define PB_STOPPED 1		// Bit 0 = Stopped
@@ -49,6 +49,7 @@
 #define MCPP_TRIGTTL "trigger_ttl"
 #define MCPP_TMODE "tmode"
 #define MCPP_SCAN "scan"
+#define MCPP_USE_PB "use_pb"
 #define MCPP_VARIED "varied"
 #define MCPP_NINST "n_inst"
 #define MCPP_TOTALTIME "total_time"
@@ -62,7 +63,7 @@
 #define MCPP_NAOUT "nAout"
 #define MCPP_NAOVAR "n_ao_var"
 
-#define MCPP_PROPSNUM 19
+#define MCPP_PROPSNUM 20
 #define MCPP_PROPORD 0
 
 // Instructions
@@ -363,3 +364,5 @@ extern int pb_read_status_or_error(int verbose);
 extern int pb_read_status_safe(int verbose);
 extern int pb_start_safe(int verbose);
 extern int pb_stop_safe(int verbose);
+
+#endif

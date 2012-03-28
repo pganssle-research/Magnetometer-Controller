@@ -181,12 +181,13 @@ int run_experiment(PPROGRAM *p) {
 	}
 	
 	int aouts = ce.nochans?1:0;
+	ce.cind = -1; // Initialize to -1 so that prepare_next_step will work.
 	
 	CmtReleaseLock(lock_ce);
 	ce_locked = 0;
 	
 	// Make sure the pulseblaster is initiated.
-	if(!GetInitialized()) {
+	if(!GetInitialized() && p->use_pb) {
 		ev = pb_init_safe(1);
 		if(ev < 0) { goto error; }
 	}
@@ -254,29 +255,33 @@ int run_experiment(PPROGRAM *p) {
 				daq_locked = 0;
 			}
 			//  Program and start the pulseblaster.
-			if(program_pulses_safe(ce.ilist, ce.ninst, 1) < 0) { goto error; }
-			if(pb_start_safe(1) < 0) { goto error; }
+			if(p->use_pb) {
+				if(program_pulses_safe(ce.ilist, ce.ninst, 1) < 0) { goto error; }
+				if(pb_start_safe(1) < 0) { goto error; }
+			}
 			
 			// Check the status once now.
 			update_status_safe(0);
 			
 			// Start checking for updates in another thread.
-			CmtGetLock(lock_ce);
-			ce_locked = 1;
-			if(ce.update_thread == -1)
-				CmtScheduleThreadPoolFunction(DEFAULT_THREAD_POOL_HANDLE, UpdateStatus, NULL, &ce.update_thread);
-			else {
-				int threadstat;
-				CmtGetThreadPoolFunctionAttribute(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, ATTR_TP_FUNCTION_EXECUTION_STATUS, &threadstat);
-				if(threadstat > 1) 
-					CmtWaitForThreadPoolFunctionCompletion(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, 0);
-			}
-			CmtReleaseLock(lock_ce);
-			ce_locked = 0;
+			if(p->use_pb) {
+				CmtGetLock(lock_ce);
+				ce_locked = 1;
+				if(ce.update_thread == -1)
+					CmtScheduleThreadPoolFunction(DEFAULT_THREAD_POOL_HANDLE, UpdateStatus, NULL, &ce.update_thread);
+				else {
+					int threadstat;
+					CmtGetThreadPoolFunctionAttribute(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, ATTR_TP_FUNCTION_EXECUTION_STATUS, &threadstat);
+					if(threadstat > 1) 
+						CmtWaitForThreadPoolFunctionCompletion(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, 0);
+				}
+				CmtReleaseLock(lock_ce);
+				ce_locked = 0;
 			
-			// Chill out and wait for the next step.
-			while( !GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
-				Delay(0.01);
+				// Chill out and wait for the next step.
+				while( !GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
+					Delay(0.01);
+				}
 			}
 			
 			if(scan) {
@@ -497,8 +502,10 @@ int prepare_next_step (PPROGRAM *p) {
 	
 	if(!p->varied) {
 		if(ct <= p->nt) {
-			if(ce.ilist == NULL) { 
-				ce.ilist = generate_instructions(p, ce.cind, &ce.ninst);
+			if(p->use_pb) {
+				if(ce.ilist == NULL) { 
+					ce.ilist = generate_instructions(p, ce.cind, &ce.ninst);
+				}
 			}
 			return 0;
 		} else {
@@ -522,9 +529,11 @@ int prepare_next_step (PPROGRAM *p) {
 		}	
 	}
 	
-	ce.ilist = generate_instructions(p, ce.cind, &ce.ninst); // Generate the next instructions list.
+	if(p->use_pb) {
+		ce.ilist = generate_instructions(p, ce.cind, &ce.ninst); // Generate the next instructions list.
 	
-	if(ce.ilist == NULL) { return -2; }
+		if(ce.ilist == NULL) { return -2; }
+	}
 	
 	return 0;
 }
@@ -4058,13 +4067,19 @@ int setup_DAQ_task() {
 	GetCtrlVal(pc.trige[1], pc.trige[0], &edge);	// Trigger edge (rising or falling)
 	
 	// Set up the trigger - use a 6.425 microsecond trigger.
+	int ctype;
 	if(rv = DAQmxCfgDigEdgeStartTrig(ce.cTask, tc_name, (int32)edge)) { goto error; }
 	if(rv = DAQmxCfgImplicitTiming(ce.cTask, DAQmx_Val_FiniteSamps, np)) { goto error; }
 	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_StartTrig_Retriggerable, TRUE)) { goto error; }
-	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_Enable, 1)) { goto error; }
-	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_MinPulseWidth, 6.425e-6)) { goto error; }
+	
+	// Only available for digital inputs.
+	if(strncmp(tc_name, "PFI", 3) == 0) { 
+		if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_Enable, 1)) { goto error; }
+		if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_MinPulseWidth, 6.425e-6)) { goto error; }
+	}
 	
 	// Set the counter output channel as the clock foro the analog task
+	
 	if(rv = DAQmxCfgSampClkTiming(ce.aTask, ce.ccname, (float64)sr, DAQmx_Val_Rising, DAQmx_Val_ContSamps, np)) { goto error;}
 	
 	// Set the buffer for the input. Currently there is no programmatic protection against overruns

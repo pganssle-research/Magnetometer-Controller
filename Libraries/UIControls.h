@@ -103,6 +103,7 @@ struct {
 	int trig_ttl[2]; 	// Trigger TTL control
 	int ninst[2];		// Number of instructions control
 	int	rc[2];			// Run continuously control
+	int uses_pb[2];		// Uses PB LED.
 	int numcycles[2];	// Number of phase cycles
 	int trans[2];		// Current transient control
 	int idlabs[8][2];	// ID labels
@@ -347,7 +348,7 @@ struct {
 
 	// Other
 	char *ppath;				// The default directory for the base program.
-	
+	int uses_pb;				// Whether or not to use the pulseblaster.
 } uipc;
 
 // uidc - > Not necessarily visible information about the ui.
@@ -426,7 +427,6 @@ typedef struct CEXP {
 							// 3: MC_TMODE_TF [nt, {dim1, ... dimn}, nt]
 							// 4: MC_TMODE_PC [{pc1, ... , pcn}, {dim1, ..., dimn}, nt/npc]
 							
-
 	int ninst;				// Number of instructions in this run
 	PINSTR *ilist;			// List of instructions for this run.
 
@@ -445,7 +445,6 @@ typedef struct CEXP {
 	float64 *ao_vals;		// Analog output values for each channel. Size = nochans;
 	
 	int64 hash;				// Current experiment hash - generated from the experiment name.
-	
 } CEXP;
 
 CEXP ce; // Make the ce struct
