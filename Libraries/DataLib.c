@@ -273,13 +273,22 @@ int run_experiment(PPROGRAM *p) {
 			
 				// Stop the tasks qhen you are done with them. They can be started again
 				// later. Clear them when you are really done.
-				if(ev = DAQmxStopTask(ce.cTask)) { goto error; }
-				if(ev = DAQmxStopTask(ce.aTask)) { goto error; }			
+				ev = DAQmxStopTask(ce.cTask);
+				
+				if(ev == 200010) { ev = 0; 
+				} else if(ev) {
+					goto error;
+				}
+				
+				
+				if(ev = DAQmxStopTask(ce.aTask) == 200010) {
+					ev = 0;
+				} else if(ev) {
+					goto error;
+				}
 			
 				CmtReleaseLock(lock_DAQ);
 				daq_locked = 0;
-				
-				if(ev)  { goto error; }
 			
 				// Update the navigation controls.
 				if(ce.p->nDims) { update_experiment_nav(); }
@@ -363,7 +372,7 @@ int run_experiment(PPROGRAM *p) {
 		}
 		
 	}
-
+							 
 	return ev;
 }
 
@@ -605,7 +614,6 @@ int initialize_tdm() {
 		if(rv = DDC_AddChannelGroup(data_file, MCTD_AVGDATA, "", &acg)) { goto error; }
 	}
 	
-	free(vname);
 	free(desc);
 	free(name);
 	vname = desc = name = NULL;
@@ -651,7 +659,6 @@ int initialize_tdm() {
 	
 	if(name != NULL) { free(name); }
 	if(desc != NULL) { free(desc); }
-	if(vname != NULL) { free(vname); }
 	if(chans != NULL) { free(chans); }
 	if(achans != NULL) { free(achans); }
 	
@@ -909,6 +916,7 @@ int load_experiment(char *filename) {
 	// Now we want to plot the data and set up the experiment navigation.
 	plot_data(data, p->np, p->sr, ce.nchan);
 	free(data);
+	data = NULL;
 	
 	update_experiment_nav();
 
@@ -3529,7 +3537,7 @@ int setup_DAQ_task() {
 	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_MinPulseWidth, 6.425e-6)) { goto error; }
 	
 	// Set the counter output channel as the clock foro the analog task
-	if (rv = DAQmxCfgSampClkTiming(ce.aTask, cc_out_name, (float64)sr, DAQmx_Val_Rising, DAQmx_Val_ContSamps, np)) { goto error;}
+	if (rv = DAQmxCfgSampClkTiming(ce.aTask, ce.ccname, (float64)sr, DAQmx_Val_Rising, DAQmx_Val_ContSamps, np)) { goto error;}
 	
 	// Set the buffer for the input. Currently there is no programmatic protection against overruns
 	rv = DAQmxSetBufferAttribute(ce.aTask, DAQmx_Buf_Input_BufSize, (np*nc)+1000); // Extra 1000 in case

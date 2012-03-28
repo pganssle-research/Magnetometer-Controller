@@ -364,6 +364,8 @@ struct {
 	float sgain[8];			// Gains for the spectrum
 	float foff[8];			// Offsets for the FID.
 	float soff[8];			// Offsets for the spectrum
+	
+	int polysuborder; 		// Polynomial subtraction order
 
 	int devindex;			// Device index
 	
