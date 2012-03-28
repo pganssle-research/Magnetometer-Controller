@@ -9,7 +9,7 @@ CVI Pub Local Dir = "/C/ProgramData/National Instruments/CVI90"
 CVI Pub Global Dir = "/C/ProgramData/National Instruments/CVI"
 IVI Standard Root Dir = "/C/Program Files (x86)/IVI"
 VXIplug&play Framework Dir = "/c/vxipnp/winnt"
-Number of Files = 31
+Number of Files = 32
 Target Type = "Executable"
 Flags = 16
 Copied From Locked InstrDrv Directory = False
@@ -24,7 +24,7 @@ Path Is Rel = True
 Path Rel To = "CVI"
 Path Rel To Override = "CVI"
 Path Rel Path = "toolslib/toolbox/cvixml.fp"
-Path = "/c/Program Files (x86)/National Instruments/CVI90/toolslib/toolbox/cvixml.fp"
+Path = "/c/program files (x86)/national instruments/cvi90/toolslib/toolbox/cvixml.fp"
 Exclude = False
 Project Flags = 0
 Folder = "Instrument Files"
@@ -98,7 +98,7 @@ Path Is Rel = True
 Path Rel To = "CVI"
 Path Rel To Override = "CVI"
 Path Rel Path = "toolslib/custctrl/FileBrowser.fp"
-Path Line0001 = "/c/Program Files (x86)/National Instruments/CVI90/toolslib/custctrl/FileBrowser."
+Path Line0001 = "/c/program files (x86)/national instruments/cvi90/toolslib/custctrl/FileBrowser."
 Path Line0002 = "fp"
 Exclude = False
 Project Flags = 0
@@ -130,8 +130,20 @@ Project Flags = 0
 Folder = "Include Files"
 
 [File 0010]
-File Type = "CSource"
+File Type = "Include"
 Res Id = 10
+Path Is Rel = True
+Path Rel To = "Project"
+Path Rel Path = "Libraries/FileSaveTypes.h"
+Path Line0001 = "/c/Users/Omega/Documents/SugarSync Shared Folders/Paul Ganssle/MC20/Libraries/Fi"
+Path Line0002 = "leSaveTypes.h"
+Exclude = False
+Project Flags = 0
+Folder = "Include Files"
+
+[File 0011]
+File Type = "CSource"
+Res Id = 11
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/General.c"
@@ -142,9 +154,9 @@ Compile Into Object File = False
 Project Flags = 0
 Folder = "Source Files"
 
-[File 0011]
+[File 0012]
 File Type = "Include"
-Res Id = 11
+Res Id = 12
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/General.h"
@@ -154,9 +166,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0012]
+[File 0013]
 File Type = "Include"
-Res Id = 12
+Res Id = 13
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Magnetometer Controller.h"
@@ -166,9 +178,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0013]
+[File 0014]
 File Type = "User Interface Resource"
-Res Id = 13
+Res Id = 14
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Magnetometer Controller.uir"
@@ -178,9 +190,9 @@ Exclude = False
 Project Flags = 0
 Folder = "User Interface Files"
 
-[File 0014]
+[File 0015]
 File Type = "CSource"
-Res Id = 14
+Res Id = 15
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/MathParserLib.c"
@@ -191,9 +203,9 @@ Compile Into Object File = False
 Project Flags = 0
 Folder = "Source Files"
 
-[File 0015]
+[File 0016]
 File Type = "Include"
-Res Id = 15
+Res Id = 16
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/MathParserLib.h"
@@ -203,9 +215,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0016]
+[File 0017]
 File Type = "CSource"
-Res Id = 16
+Res Id = 17
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "MC10.c"
@@ -215,9 +227,9 @@ Compile Into Object File = False
 Project Flags = 0
 Folder = "Source Files"
 
-[File 0017]
+[File 0018]
 File Type = "Include"
-Res Id = 17
+Res Id = 18
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "MC10.h"
@@ -226,9 +238,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0018]
+[File 0019]
 File Type = "Include"
-Res Id = 18
+Res Id = 19
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/MCUserDefinedFunctions.h"
@@ -238,21 +250,21 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0019]
+[File 0020]
 File Type = "Function Panel"
-Res Id = 19
+Res Id = 20
 Path Is Rel = True
 Path Rel To = "CVI"
 Path Rel To Override = "CVI"
 Path Rel Path = "toolslib/toolbox/msxmldom.fp"
-Path = "/c/Program Files (x86)/National Instruments/CVI90/toolslib/toolbox/msxmldom.fp"
+Path = "/c/program files (x86)/national instruments/cvi90/toolslib/toolbox/msxmldom.fp"
 Exclude = False
 Project Flags = 0
 Folder = "Instrument Files"
 
-[File 0020]
+[File 0021]
 File Type = "CSource"
-Res Id = 20
+Res Id = 21
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/PPConversion.c"
@@ -263,9 +275,9 @@ Compile Into Object File = False
 Project Flags = 0
 Folder = "Source Files"
 
-[File 0021]
+[File 0022]
 File Type = "Include"
-Res Id = 21
+Res Id = 22
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/PPConversion.h"
@@ -275,9 +287,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0022]
+[File 0023]
 File Type = "CSource"
-Res Id = 22
+Res Id = 23
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/PulseProgramLib.c"
@@ -288,9 +300,9 @@ Compile Into Object File = False
 Project Flags = 0
 Folder = "Source Files"
 
-[File 0023]
+[File 0024]
 File Type = "Include"
-Res Id = 23
+Res Id = 24
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/PulseProgramLib.h"
@@ -300,9 +312,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0024]
+[File 0025]
 File Type = "Include"
-Res Id = 24
+Res Id = 25
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/PulseProgramTypes.h"
@@ -312,9 +324,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0025]
+[File 0026]
 File Type = "Include"
-Res Id = 25
+Res Id = 26
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/SaveSessionLib.h"
@@ -324,9 +336,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0026]
+[File 0027]
 File Type = "CSource"
-Res Id = 26
+Res Id = 27
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/SessionSavingLib.c"
@@ -337,9 +349,9 @@ Compile Into Object File = False
 Project Flags = 0
 Folder = "Source Files"
 
-[File 0027]
+[File 0028]
 File Type = "DLL"
-Res Id = 27
+Res Id = 28
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "../../../../../../SpinCore/SpinAPI/dll/spinapi.dll"
@@ -348,9 +360,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Not In A Folder"
 
-[File 0028]
+[File 0029]
 File Type = "Include"
-Res Id = 28
+Res Id = 29
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "../../../../../../SpinCore/SpinAPI/dll/spinapi.h"
@@ -359,9 +371,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0029]
+[File 0030]
 File Type = "Library"
-Res Id = 29
+Res Id = 30
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "../../../../../../SpinCore/SpinAPI/dll/spinapi.lib"
@@ -370,9 +382,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Not In A Folder"
 
-[File 0030]
+[File 0031]
 File Type = "Include"
-Res Id = 30
+Res Id = 31
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/UIControls.h"
@@ -382,9 +394,9 @@ Exclude = False
 Project Flags = 0
 Folder = "Include Files"
 
-[File 0031]
+[File 0032]
 File Type = "Include"
-Res Id = 31
+Res Id = 32
 Path Is Rel = True
 Path Rel To = "Project"
 Path Rel Path = "Libraries/Version.h"

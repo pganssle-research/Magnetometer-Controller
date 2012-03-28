@@ -322,6 +322,53 @@ char *generate_expression_error_message(char *err_message, int *pos, int size) {
 	return output;
 }
 
+unsigned int64 basic_string_hash(char *string) {
+	// Given a null-terminated string, we'll generate an extremely basic hash.
+	// This is in no way secure, but hopefully it's got minimal collisions.
+	
+	unsigned int slen = strlen(string);
+	unsigned int len = 1;
+	
+	unsigned char *p = NULL;
+	
+	// Pad this to the nearest 64-bit chunk
+	if(slen > 0) {
+		len = (unsigned int)(slen/16) + ((slen % 16 == 0)?0:1);
+	}
+	
+	p = malloc(len*16);
+	memcpy(p, string, slen);
+	memset(p+slen, 1, len*16-slen);
+	slen = len * 16;
+	p[slen-1] = '\0';
+	
+	// Go through and generate an array of hashes
+	unsigned int64 hash = MCG_HASH_SEED;
+	for(p; *p != '\0'; p++) {
+		hash = MCG_HASH_MULTIPLIER * (hash * (*p) + *p);
+		hash += hash << 32;
+	} 
+	
+	return hash;
+	
+}
+
+unsigned int64 basic_string_hash_fast(char *string) {
+		unsigned int slen = strlen(string);
+	unsigned int len = 1;
+	
+	unsigned char *p = NULL;
+
+	// Go through and generate an array of hashes
+	int64 hash = MCG_HASH_SEED;
+	for(p = string; *p != '\0'; p++) {
+		hash = MCG_HASH_MULTIPLIER * (hash * (*p)+*p);
+		hash += hash << 32;
+	}
+	
+	return hash;
+}
+
 //////////////////////////////////////////////////////////////
 // 															//
 //					Memory Allocation						//
@@ -426,6 +473,8 @@ int **free_ints_array (int **array, int size) {
 int insert_into_file(FILE *f, void *data, unsigned int num_bytes, long buff_size) {
 	// Pass this a file, a position, some data, the number of bytes in the data array
 	// and the size of the buffer and this will insert the data in-place.
+	//
+	// Moves file position doesn't change.
 	
 	if(f == NULL) { return MCG_ERR_INVALID_FILE; }
 	if(data == NULL) { return MCG_ERR_INVALID_INPUT; }

@@ -1,5 +1,7 @@
 /************************* Structure Definitions *************************/
-typedef struct PINSTR // This is a structure for containing individual instructions.
+#define PULSE_PROGRAM_TYPES_H
+
+typedef struct // This is a structure for containing individual instructions.
 {
 	int flags;				// TTL flags. If a TTL is on, then flags & (TTL number) == 2^(TTL number), else 0
 	int instr;				// The instruction

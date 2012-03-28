@@ -3,6 +3,8 @@
 *            		Error Indexing						   *
 * 														   *
 ***********************************************************/
+#define ERROR_DEFS_H
+
 // Index
 #define MCD_ERR 1
 #define MCPP_ERR 2
@@ -36,6 +38,7 @@
 #define MCD_ERR_FILEREAD -11004
 #define MCD_ERR_NODATA -11005
 #define MCD_ERR_NOAVGDATA -11006
+#define MCD_ERR_BADCIND -11007
 
 // Strings
 #define MCD_ERR_NOFILENAME_STR "No data filename provided."
@@ -45,6 +48,7 @@
 #define MCD_ERR_FILEREAD_STR "Error reading data file."
 #define MCD_ERR_NODATA_STR "No data were provided to the file for writing."
 #define MCD_ERR_NOAVGDATA_STR "No average data found in existing file."
+#define MCD_ERR_BADCIND_STR "Malformed current index passed to function."
 
 /***********************************************************
 *  														   *

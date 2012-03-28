@@ -1,6 +1,7 @@
 /************************************************
 *            Version Information                *
 ************************************************/
+#define VERSION_H
 
 // Program version number and string.
 #define MC_VERSION 1.1			

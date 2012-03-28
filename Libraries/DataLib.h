@@ -1,4 +1,21 @@
 /********************************** Includes *********************************/
+#define DATA_LIB_H
+
+#ifndef int64
+#define int64 __int64
+#endif
+
+#ifndef PULSE_PROGRAM_TYPES_H
+#include <PulseProgramTypes.h>
+#endif
+
+#ifndef UICONTROLS_H
+#include <UIControls.h>
+#endif
+
+// Experiment hash
+#define MCEX_HASH "ce_hash"
+
 // Data Date Stamp
 #define MCD_DATE_FORMAT "%y%m%d"
 #define MCD_DATESTAMP_MAXSIZE 6
@@ -41,6 +58,7 @@
 
 #define MCTD_CSTEP "CurrentStep"			// Current step as a linear index
 #define MCTD_CSTEPSTR "CurrentStepString"	// Current step as a string
+
 /*************************** Function Declarations ***************************/
 
 /************** Running Experiment Functions *************/
@@ -58,6 +76,10 @@ extern int initialize_tdm(void);
 extern int initialize_tdm_safe(int CE_lock, int TDM_lock);
 extern int save_data(double *data, double **avg);
 extern int save_data_safe(double *data, double **avg);
+
+extern int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int hash, int cind, int nc);
+extern int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time_t done);
+
 
 extern int load_experiment(char *filename);
 extern int load_experiment_safe(char *filename);

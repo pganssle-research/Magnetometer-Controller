@@ -1,4 +1,6 @@
 /******************************** Includes *******************************/
+#define PULSE_PROGRAM_LIB_H
+
 // Some defines that are useful for read_status
 #define PB_STOPPED 1		// Bit 0 = Stopped
 #define PB_RESET 2			// Bit 1 = Reset

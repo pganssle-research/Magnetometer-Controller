@@ -1,6 +1,12 @@
 // Includes
 #include <NIDAQmx.h>
 
+#define UICONTROLS_H
+
+#ifndef PULSE_PROGRAM_TYPES
+#include <PulseProgramTypes.h>
+#endif
+
 /******************* Constant Definitions *******************/
 #define MC_FID	0
 #define MC_FFT	1

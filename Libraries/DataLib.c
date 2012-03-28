@@ -29,9 +29,14 @@
 #include <spinapi.h>					// SpinCore functions
 #include <cviddc.h> 
 
-#include <PulseProgramTypes.h>
-#include <FileSave.h>
+
+#ifndef UICONTROLS_H
 #include <UIControls.h>					// For manipulating the UI controls
+#endif
+
+#ifndef FILE_SAVE_H
+#include <FileSave.h>
+#endif
 
 #include <MathParserLib.h>				// For parsing math
 #include <DataLib.h>
@@ -839,8 +844,263 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	return rv;
 }
 
+char *make_cstep_str(PPROGRAM *p, int cind, int avg, int *ev) {
+	// Create a cstep string for indexing mcd files. 
+	// If avg evaluates true, transients will be collapsed.
+	// Output must be freed.
+	
+	int i, rv = 0;
+	int *steps = NULL;
+	char *out = NULL;
+	char *title_format = NULL;
+	char *buff = NULL;
+	
+	
+	if(p == NULL) { rv = MCD_ERR_NOPROG; goto error; }
+	if(cind < 0) { rv = MCD_ERR_BADCIND; goto error; }
+	
+	// Create the data array.
+	int max = 0;
+	for(i = 0; i < p->steps_size; i++) {
+		if(p->steps[i] > max) {
+			max = p->steps[i];
+		}
+	}
+	
+	int ndigits = (max > 0)?(((int)log10(max))+1):1;	// Number of digits per step
+	
+	int nsteps = 1;
+	
+	if(avg) {
+		if(!p->nDims) {
+			steps = malloc(sizeof(int)*1);
+			steps[0] = 0;
+			ndigits = 1;
+		} else {
+			nsteps = p->nDims;
+			steps = malloc(p->nDims*sizeof(unsigned int));
+			get_dim_step(p, cind, steps);
+		}
+	} else {
+		nsteps = p->steps_size;
+		steps = malloc(sizeof(unsigned int) * p->steps_size);
+		memcpy(steps, p->steps, p->steps_size * sizeof(unsigned int));
+	}
+	
+	out = malloc(nsteps*(ndigits+1)+2);
+	
+	title_format = malloc(6);
+	buff = malloc(ndigits+2);
+	
+	sprintf(title_format, "%%0%dd,", ndigits);
+	strcpy(out, "[");
+	
+	for(i = 1; i < nsteps; i++) {		   
+		sprintf(buff, title_format, steps[i]);
+		strcat(out, buff);
+	}
+	out[strlen(out)-1] = ']';
+
+	error:
+	if(rv != 0 && out != NULL) { 
+		free(out);
+		out = NULL;
+	}
+	
+	if(buff != NULL) { free(buff); }
+	if(title_format != NULL) { free(title_format); }
+	if(steps != NULL) { free(steps); }
+	
+	*ev = rv;
+	return out;
+}
+
+int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int hash, int cind, int nc) {
+	// This is basically for cacheing average data in a local file.
+	// First call will create a file (overwrites when cind == 0)
+	// Subsequent calls will update it with the new data.
+	
+	int i, rv = 0;
+
+	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
+	if(data == NULL) { return MCD_ERR_NODATA; }
+	if(p == NULL) { return MCD_ERR_NOPROG; }
+	
+	FILE *f = NULL;
+	char *item_title = NULL, *buff = NULL;
+	flocs fl = null_flocs();
+	fsave ag = null_fs(), dg = null_fs(), chash = null_fs();
+	
+	if(!file_exists(fname) && cind > 0) {
+		return MCD_ERR_NOFILE;
+	}
+	
+	if(cind == 0) {
+		f = fopen(fname, "wb+");
+		
+		// Write the hash to make sure it's the same thing.
+		chash = make_fs(MCEX_HASH);
+		if(rv = put_fs(&chash, &hash, FS_INT, 1)) { goto error; }
+		
+		unsigned int bsize = get_fs_strlen(&chash);
+		
+		buff = malloc(bsize);
+		print_fs(buff, &chash);
+
+		if(fwrite(buff, 1, bsize, f) < bsize) { 
+			rv = MCD_ERR_FILEWRITE;
+			goto error;
+		}
+		
+		free(buff);
+		buff = NULL;
+	} else {
+		f = fopen(fname, "rb+");
+		
+		// This file must open with the hash.
+		long hoff = find_fsave_in_file(f, MCEX_HASH, MCF_EOF);
+		
+		fseek(f, hoff, SEEK_SET);
+		
+		chash = read_fsave_from_file(f, &rv);
+		if(rv != 0) { goto error; }
+		
+		if(*chash.val.i != hash) {
+			rv = MCD_ERR_NOAVGDATA;		// Not the right file!
+			goto error;
+		}
+		
+	}
+	
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	
+	item_title = make_cstep_str(p, cind, 1, &rv);
+	if(rv != 0) { goto error; }
+	
+	int itlen;
+	if(item_title != NULL) {
+		itlen = strlen(item_title);	
+	} else {
+		rv = MCD_ERR_NOAVGDATA;
+		goto error;
+	}
+	
+	int bufflen = 0;
+	unsigned int data_size = p->np * nc;
+	int ct = get_transient(p, cind);
+	if(ct < 0) { rv = ct; goto error; }
+	
+	
+	if(cind == 0) {
+		// Create the AVGDATA group
+		dg = make_fs(item_title);
+		if(rv = put_fs(&dg, data, FS_DOUBLE, data_size)) { goto error; }
+		
+		ag = make_fs(MCD_AVGDATA);
+		if(rv = put_fs_container(&ag, &dg, 1)) { goto error; }
+		
+		bufflen = get_fs_strlen(&ag);
+		
+		buff = malloc(bufflen);
+		char *pos = buff;
+		pos = print_fs(pos, &ag);
+		
+		// Write to file.
+		if(fwrite(buff, 1, bufflen, f) < bufflen) {
+			rv = MCD_ERR_FILEWRITE;
+			goto error;
+		}
+	} else {
+		// In this case we have to find the AVGDATA group
+		// and either append the data or replace it.
+		flocs fl = read_flocs_from_file(f, &rv, MCF_EOF);
+		if(rv != 0) { goto error; }
+		
+		for(i = 0; i < fl.num; i++) {
+			if(strcmp(fl.name[i], MCD_AVGDATA) == 0) { break; }	
+		}
+		
+		if(i >= fl.num) {
+			rv = MCD_ERR_NOAVGDATA;
+			goto error;
+		}
+		
+		// Set the file to the relevant group
+		fseek(f, fl.pos[i], SEEK_SET);
+		
+		long ad_pos = find_fsave_in_file(f, item_title, fl.size[i]);
+		if(ad_pos == MCF_ERR_FSAVE_NOT_FOUND) {
+			// This means we need to insert the group at the end.
+			fseek(f, fl.pos[i]-sizeof(unsigned int), SEEK_SET); // Update the size.
+			
+			dg = make_fs(item_title);
+			if(rv = put_fs(&dg, data, FS_DOUBLE, data_size));
+			
+			unsigned int a_size = get_fs_strlen(&dg);
+			unsigned int n_size = fl.size[i] + a_size;
+			
+			if(fwrite(&n_size, sizeof(unsigned int), 1, f) < 1) {
+				rv = MCD_ERR_FILEREAD;
+				goto error;
+			}
+			
+			// Insert the data at the end.
+			buff = malloc(a_size);
+			print_fs(buff, &dg);
+			
+			fseek(f, fl.size[i], SEEK_CUR);
+			
+			if(rv = insert_into_file(f, buff, a_size, -1)) { goto error; }
+		} else if(ad_pos < 0) {
+			rv = ad_pos;
+			goto error;
+		} else {
+			fseek(f, ad_pos, SEEK_SET);
+			
+			dg = read_fsave_from_file(f, &rv);
+			if(rv != 0) { goto error; }
+			
+			unsigned int data_size = dg.size/sizeof(double);
+			
+			// Perform the averaging now.
+			for(i = 0; i < data_size; i++) {
+				dg.val.d[i] = (dg.val.d[i]*ct + data[i])/(ct+1);
+			}
+		}
+	}
+	
+	error:
+	
+	if(f != NULL) { fclose(f); }
+	if(item_title != NULL) { free(item_title); }
+	if(buff != NULL) { free(buff); }
+	
+	free_flocs(&fl);
+	free_fsave(&ag);
+	free_fsave(&dg);
+	free_fsave(&chash);
+	
+	return rv;
+}
+															 
 int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time_t done) {
-	// Save data to existing file, with the header already written.
+	// Save data to existing file, with the header already written
+	// 
+	// New specification:
+	// Files will contain ONLY parameters and main data files, no averages.
+	// The headers are written ahead of tiem and save_data_mcd basically appends data to the
+	// existing group, in a linear-indexed fashion. Based on the nature of the serialization
+	// format, even for very long files it should be fairly quick to navigate between points.
+	//
+	// Since average data will be updated frequently, we'll generate "current buffer" files 
+	// which contain the running average for the currently loaded file.
+	//
+	// The reasoning behind this is that if we have one file, our only options will be to 
+	// pre-allocate all arrays or to risk frequently changing the size of TWO arrays. Since 
+	// there's no good way to "insert" data into a file without simply buffering the remainder
+	// of the file and writing it afterwards, this seems excessive.
+	
+	
 	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
 	if(data == NULL) { return MCD_ERR_NODATA; }
 	if(p == NULL) { return MCD_ERR_NOPROG; }
@@ -868,7 +1128,7 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	
 	size_t tmp_read = 0;
 
-	f = fopen(fname, "rb");
+	f = fopen(fname, "rb+");
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 
 	// If it's the first time, need to create the groups as well
@@ -1015,8 +1275,6 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 				break;	
 			}
 		}
-		
-		
 	}
 	
 	
@@ -1043,6 +1301,10 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 }
 
 
+int save_data(double *data, double **avg) {
+	return 0;	
+}
+
 
 /*int save_data(char *fname, PPROGRAM *p, double *data, double **avg, int nc, int cind, time_t tdone) {
 	// This is for appending data, returns an error if the file doesn't exist.
@@ -1065,7 +1327,7 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	if(f != NULL) { fclose(f); }
 	
 	return rv;
-} */
+}*/
  
 int save_data_ddc(double *data, double **avg) {
 	// In order for this to work, the ce variable needs to be set up appropriately. This function is

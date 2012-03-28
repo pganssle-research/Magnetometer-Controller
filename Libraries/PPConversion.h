@@ -1,4 +1,5 @@
 // PPConversion library
+#define PP_CONVERSION_H
 
 // Includes
 #include <cvitdms.h>
