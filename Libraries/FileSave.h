@@ -2,27 +2,17 @@
 
 #include <stdio.h>
 #include <time.h>
-
-#ifndef FILE_SAVE_TYPES
 #include <FileSaveTypes.h>
-#endif
 
 #define MCF_EOF -1
 #define MCF_WRAP -2
 
-
-#define MCF_ERR_INVALID_MAX_BYTES -10500
-#define MCF_ERR_FSAVE_NOT_FOUND -10501
-#define MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME -10502;
-#define MCF_ERR_FSAVE_TYPE_MISMATCH -10503;
-#define MCF_ERR_FSAVE_SIZE_MISMATCH -10504;
-#define MCF_ERR_CANNOT_TRUNCATE -10505;
-
-#define MCF_ERR_INVALID_MAX_BYTES_STR "Invalid maximum bytes paramater passed."
-#define MCF_ERR_FSAVE_NOT_FOUND_STR "Requested fsave not found. This may not be an error."
-#define MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME_STR "FSAVE names do not match, cannot replace safely!"
-#define MCF_ERR_FSAVE_TYPE_MISMATCH_STR "FSAVE types do not match. This may not be an error."
-#define MCF_ERR_FSAVE_SIZE_MISMATCH_STR "FSAVE sizes do not matc. This may not be an error."
+// File I/O
+extern int fwrite_fs(FILE *f, fsave *fs);
+extern int fadd_fs_to_container(FILE *f, fsave *fs);
+extern int fappend_data_to_fs(FILE *f, void *data, unsigned int data_size);
+extern int overwrite_fsave_in_file(FILE *f, fsave *fs);
+extern int find_and_overwrite_fsave_in_file(FILE *f, fsave *fs, unsigned int max_bytes);
 
 /************ FSave Functions *************/
 extern fsave make_fs(char *name);
@@ -35,8 +25,6 @@ extern int get_fs_header_from_file(FILE *f, fsave *fs);
 extern int get_fs_header_size_from_ns(int ns);
 extern int get_fs_header_size_from_file(FILE *f);
 extern int get_fs_header_size_from_char(char *array);
-
-extern int overwrite_fsave_in_file(FILE *f, fsave *fs);
 
 extern long find_fsave_in_file(FILE *f, char *fs_name, long max_bytes);
 extern fsave read_fsave_from_file(FILE *f, int *ev);

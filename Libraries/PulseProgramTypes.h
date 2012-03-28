@@ -1,4 +1,5 @@
 /************************* Structure Definitions *************************/
+#ifndef PULSE_PROGRAM_TYPES_H
 #define PULSE_PROGRAM_TYPES_H
 
 typedef struct // This is a structure for containing individual instructions.
@@ -99,3 +100,4 @@ typedef struct PPROGRAM // This is a structure for containing information about 
 	pfunc **funcs;			// The functions themselves. 
 	
 } PPROGRAM;
+#endif

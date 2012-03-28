@@ -10,10 +10,160 @@
 //////////////////////////////////////////////////////////////////////
 
 #include <ansi_c.h>
+
+
 #include <FileSave.h>
 #include <ErrorDefs.h>
 #include <ErrorLib.h>
 #include <General.h>
+
+
+/*************** File Read-Write ********************/
+int fwrite_fs(FILE *f, fsave *fs) {
+	if(f == NULL) { return MCF_ERR_NOFILE; }
+	if(fs == NULL) { return MCF_ERR_NOFSAVE; }
+	
+	int rv = 0;
+	unsigned int bsize = get_fs_strlen(fs);
+	char *buff = NULL;
+	
+	if(bsize > 0) {
+		buff = malloc(bsize);	
+	} else {
+		rv = MCF_ERR_NOFSAVE;
+		goto error;
+	}
+	
+	print_fs(buff, fs);
+	
+	if(fwrite(buff, 1, bsize, f) < bsize) {
+		rv = MCF_ERR_FILEWRITE;
+		goto error;
+	}
+	
+	error:
+	
+	if(buff != NULL) { free(buff); }
+	
+	return rv;
+}
+
+int fadd_fs_to_container(FILE *f, fsave *fs) {
+	// Point file to an existing container fsave and pass this a new
+	// fsave to be contained within the container. This function will
+	// append the new fsave at the end of the container.
+	
+	if(f == NULL) { return MCF_ERR_NOFILE; }
+	if(fs == NULL) { return MCF_ERR_NOFSAVE; }
+	
+	int rv = 0;
+	char *buff = NULL;
+	
+	unsigned int bsize = get_fs_strlen(fs);
+	if(bsize > 0) {
+		buff = malloc(bsize);
+		print_fs(buff, fs);
+		
+		if(rv = fappend_data_to_fs(f, buff, bsize)) { goto error; }
+	} else {
+		rv = MCF_ERR_NODATA;
+		goto error;
+	}
+	
+	error:
+	if(buff != NULL) { free(buff); }
+	
+	return rv;
+}
+
+int fappend_data_to_fs(FILE *f, void *data, unsigned int data_size) {
+	// Append data to an existing fsave. In this case, the file must
+	// be pointing at the beginning of the fsave header.
+	//
+	// File pointer is returned to original position.
+	
+	if(f == NULL) { return MCF_ERR_NOFILE; }
+	if(data == NULL || data_size == 0) { return MCF_ERR_NODATA; }
+	
+	int rv = 0;
+	fsave bfs = null_fs();
+	
+	long pos = ftell(f);
+	
+	// Get the header - afterwards pointer will be at the beginning of the data.
+	if((rv = get_fs_header_from_file(f, &bfs)) != 0) { goto error; }
+	fseek(f, -1*sizeof(unsigned int), SEEK_CUR);
+	unsigned int new_size = bfs.size + data_size;
+	
+	if(fwrite(&new_size, sizeof(unsigned int), 1, f)) { 
+		rv = MCF_ERR_FILEWRITE;
+		goto error;
+	}
+	
+	fseek(f, bfs.size, SEEK_CUR);
+	
+	if(rv = insert_into_file(f, data, data_size, -1)) { goto error; }
+	
+	error:
+	free_fsave(&bfs);		
+	fseek(f, pos, SEEK_SET);
+	
+	return rv;
+}
+
+int overwrite_fsave_in_file(FILE *f, fsave *fs) {
+	// Pointer must be a pointer to the beginning of the fsave, so that
+	// fsave checking can be done.
+	// 
+	// File will not be rewound.
+	
+	if(f == NULL) { return MCF_ERR_NOFILE;	}
+	if(fs == NULL) { return MCF_ERR_NODATA; }
+	
+	int rv = 0;
+	fsave fs_buff = null_fs();
+	size_t si = sizeof(unsigned int), si8 = sizeof(unsigned char);
+	
+	if(rv = get_fs_header_from_file(f, &fs_buff)) { goto error; }
+	
+	if(fs->name == NULL || fs_buff.name == NULL || strcmp(fs->name, fs_buff.name) != 0) {
+		rv = MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME;
+		goto error;
+	}
+	
+	if(fs->type != fs_buff.type) {
+		rv = MCF_ERR_FSAVE_TYPE_MISMATCH;
+		goto error;
+	}
+	
+	if(fs->size != fs_buff.size) {
+		rv = MCF_ERR_FSAVE_SIZE_MISMATCH;
+		goto error;
+	}
+
+	fwrite(fs->val.c, 1, fs->size, f); 
+
+	error:
+
+	fs_buff = free_fsave(&fs_buff);
+	return rv;
+}
+
+int find_and_overwrite_fsave_in_file(FILE *f, fsave *fs, unsigned int max_bytes) {
+	// Same as overwrite_fsave_in_file, but it will first find the fsave
+	// in the file. Does not do a tree search, so it must be a top-level
+	// fsave.
+
+	long pos = find_fsave_in_file(f, fs->name, max_bytes);
+	
+	if(pos < 0) {	// Error condition
+		return pos;	
+	}
+	
+	fseek(f, pos, SEEK_SET);
+	return overwrite_fsave_in_file(f, fs);
+}
+
 
 /*************** FSave Functions ********************/
 fsave make_fs(char *name) {
@@ -124,8 +274,8 @@ int put_fs_custom(fsave *fs, void *val, unsigned int num_entries, unsigned int *
 	// names		-> The names of each field
 	// NumElements	-> The number of elements in the array.
 	
-	if(val == NULL) { return MCPP_ERR_NOSTRING; }
-	if(num_entries == 0) { return MCPP_ERR_CUST_NOENTRIES; } 
+	if(val == NULL) { return MCF_ERR_NODATA; }
+	if(num_entries == 0) { return MCF_ERR_CUST_NOENTRIES; } 
 	
 	int rv = 0, i;
 	unsigned int *ns = malloc(sizeof(unsigned int)*num_entries);
@@ -139,7 +289,7 @@ int put_fs_custom(fsave *fs, void *val, unsigned int num_entries, unsigned int *
 
 	// Figure out the base size of the element, plus the lengths of all the names.
 	for(i = 0; i < num_entries; i++) {
-		if(!is_valid_fs_type(types[i])) { rv = MCPP_ERR_INVALID_TYPE; goto error; }
+		if(!is_valid_fs_type(types[i])) { rv = MCF_ERR_INVALID_TYPE; goto error; }
 		
 		if(names[i] != NULL) { 
 			ns[i] = strlen(names[i])+1; 
@@ -208,9 +358,10 @@ long find_fsave_in_file(FILE *f, char *fs_name, long max_bytes) {
 	// Other negative values to max_bytes will be interpreted as errors.
 	//
 	// Returns MCF_ERR_FSAVE_NOT_FOUND on missing.
-	//
-	if(f == NULL) { return MCPP_ERR_NOFILE; }
-	if(fs_name == NULL) { return MCPP_ERR_FLOC_NAME; }
+
+
+	if(f == NULL) { return MCF_ERR_NOFILE; }
+	if(fs_name == NULL) { return MCF_ERR_FLOC_NAME; }
 	
 	if(max_bytes <= 0) {
 		if(max_bytes != MCF_EOF && max_bytes != MCF_WRAP) {
@@ -238,13 +389,13 @@ long find_fsave_in_file(FILE *f, char *fs_name, long max_bytes) {
 		pos = ftell(f);
 		
 		if(fread(&ns, si, 1, f) < 1 && !feof(f)) {
-			pos = MCPP_ERR_MALFORMED_FNAME;
+			pos = MCF_ERR_BADFNAME;
 			goto error;
 		}
 		
 		name = realloc_if_needed(name, &nlen, ns, 1);
 		if(fread(name, si8, ns, f) < ns && !feof(f)) {
-			pos = MCPP_ERR_MALFORMED_FNAME;
+			pos = MCF_ERR_BADFNAME;
 			goto error;
 		}
 		
@@ -275,30 +426,30 @@ long find_fsave_in_file(FILE *f, char *fs_name, long max_bytes) {
 }
 
 fsave read_fsave_from_file(FILE *f, int *ev) {
-	if(f == NULL) { *ev = MCPP_ERR_NOFILE; return null_fs(); }
+	if(f == NULL) { *ev = MCF_ERR_NOFILE; return null_fs(); }
 	
 	int rv = 0;
 	fsave fs = null_fs();
 	size_t si = sizeof(unsigned int), si8 = sizeof(unsigned char);
 	
 	if(fread(&(fs.ns), si, 1, f) < 1) {
-		rv = MCPP_ERR_MALFORMED_FNAME;
+		rv = MCF_ERR_BADFNAME;
 		goto error;
 	}
 	
 	fs.name = malloc(fs.ns);
 	if(fread(fs.name, 1, fs.ns, f) != fs.ns) { 
-		rv = MCPP_ERR_MALFORMED_FNAME;
+		rv = MCF_ERR_BADFNAME;
 		goto error;
 	}
 	
 	if(fread(&(fs.type), si8, 1, f) < 1) {
-		rv = MCPP_ERR_FS_NOTYPE;
+		rv = MCF_ERR_FS_NOTYPE;
 		goto error;
 	}
 	
 	if(fread(&(fs.size), si, 1, f) < 1) {
-		rv = MCPP_ERR_FS_NOSIZE;
+		rv = MCF_ERR_FS_NOSIZE;
 		goto error;
 	}
 	
@@ -307,7 +458,7 @@ fsave read_fsave_from_file(FILE *f, int *ev) {
 	} else {
 		fs.val.c = malloc(fs.size);
 		if(fread(fs.val.c, 1, fs.size, f) < fs.size) {
-			rv = MCPP_ERR_FS_BADCONTENTS;
+			rv = MCF_ERR_FS_BADCONTENTS;
 			goto error;
 		}
 	}
@@ -322,7 +473,7 @@ fsave read_fsave_from_file(FILE *f, int *ev) {
 }
 
 fsave read_fsave_from_char(char *array, int *ev) {
-	if(array == NULL) { *ev = MCPP_ERR_NOSTRING; return null_fs(); }
+	if(array == NULL) { *ev = MCF_ERR_NOARRAY; return null_fs(); }
 	
 	int rv = 0;
 	char *pos = array;
@@ -340,7 +491,7 @@ fsave read_fsave_from_char(char *array, int *ev) {
 		pos += fs.ns;
 		
 		if(fs.name[fs.ns-1] != '\0') {
-			rv = MCPP_ERR_MALFORMED_FNAME;
+			rv = MCF_ERR_BADFNAME;
 			goto error;
 		}
 		
@@ -375,7 +526,7 @@ fsave read_fsave_from_char(char *array, int *ev) {
 }
 
 fsave *read_all_fsaves_from_char(char *array, int *ev, unsigned int *fs_size, size_t size) {
-	if(array == NULL) { *ev = MCPP_ERR_NOSTRING; return NULL; }
+	if(array == NULL) { *ev = MCF_ERR_NOARRAY; return NULL; }
 	
 	int rv =0, i;
 	char *pos = array;
@@ -408,7 +559,7 @@ fsave *read_all_fsaves_from_char(char *array, int *ev, unsigned int *fs_size, si
 }
 
 fsave *read_all_fsaves_from_file(FILE *f, int *ev, unsigned int *fs_size, long max_bytes) {
-	if(f == NULL) { *ev = MCPP_ERR_NOFILE; return NULL; }
+	if(f == NULL) { *ev = MCF_ERR_NOFILE; return NULL; }
 	
 	int rv = 0, i;
 	fsave *fs = NULL;
@@ -567,19 +718,19 @@ int get_fs_header_from_file(FILE *f, fsave *fs) {
 	//
 	// Does not move the pointer back.
 	
-	if(f == NULL) { return MCPP_ERR_NOFILE; }
-	if(fs == NULL) { return MCPP_ERR_NOFLOCS; }
+	if(f == NULL) { return MCF_ERR_NOFILE; }
+	if(fs == NULL) { return MCF_ERR_NOFLOCS; }
 	
 	size_t si = sizeof(unsigned int), si8 = sizeof(unsigned char);
 	
 	if(fread(&(fs->ns), si, 1, f) < 1) {
-		return MCPP_ERR_MALFORMED_FNAME;		
+		return MCF_ERR_BADFNAME;		
 	}
 	
 	if(fs->ns > 0) {
 		fs->name = malloc(fs->ns);
 		if(fread(fs->name, si8, fs->ns, f) < fs->ns) {
-			return MCPP_ERR_MALFORMED_FNAME;	
+			return MCF_ERR_BADFNAME;	
 		}
 	} else {
 		fs->name = malloc(1);
@@ -587,11 +738,11 @@ int get_fs_header_from_file(FILE *f, fsave *fs) {
 	}
 	
 	if(fread(&(fs->type), si8, 1, f) < 1) {
-		return MCPP_ERR_FS_NOTYPE;	
+		return MCF_ERR_FS_NOTYPE;	
 	}
 	
 	if(fread(&(fs->size), si, 1, f) < 1) {
-		return MCPP_ERR_FS_NOSIZE;	
+		return MCF_ERR_FS_NOSIZE;	
 	}
 	
 	return 0;
@@ -605,14 +756,14 @@ int get_fs_header_size_from_ns(int ns) {
 int get_fs_header_size_from_file(FILE *f) {
 	// Must pass a file where the current position is the beginning of the fsave
 	// File will be rewound to initial position.
-	if(f == NULL) { return MCPP_ERR_NOFILE; }
+	if(f == NULL) { return MCF_ERR_NOFILE; }
 	
 	long pos = ftell(f);
 	int rv = 0;
 	
 	int size;
 	if(fread(&size, sizeof(unsigned int), 1, f) < 1 || size < 0) {
-		rv = MCPP_ERR_MALFORMED_FNAME;
+		rv = MCF_ERR_BADFNAME;
 		goto error;
 	}
 	
@@ -625,55 +776,16 @@ int get_fs_header_size_from_file(FILE *f) {
 }
 
 int get_fs_header_size_from_char(char *array) {
-	if(array == NULL) { return MCPP_ERR_NOARRAY; }
+	if(array == NULL) { return MCF_ERR_NOARRAY; }
 	
 	int size;
 	memcpy(&size, array, sizeof(unsigned int));
 	
 	if(size < 0) {
-		return MCPP_ERR_MALFORMED_FNAME;	
+		return MCF_ERR_BADFNAME;	
 	}
 	
 	return get_fs_header_size_from_ns(size);
-}
-
-int overwrite_fsave_in_file(FILE *f, fsave *fs) {
-	// Pointer must be a pointer to the beginning of the fsave, so that
-	// fsave checking can be done.
-	// 
-	// File will not be rewound.
-	
-	if(f == NULL) { return MCPP_ERR_NOFILE;	}
-	if(fs == NULL) { return MCD_ERR_NODATA; }
-	
-	int rv = 0;
-	fsave fs_buff = null_fs();
-	size_t si = sizeof(unsigned int), si8 = sizeof(unsigned char);
-	
-	if(rv = get_fs_header_from_file(f, &fs_buff)) { goto error; }
-	
-	if(fs->name == NULL || fs_buff.name == NULL || strcmp(fs->name, fs_buff.name) != 0) {
-		rv = MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME;
-		goto error;
-	}
-	
-	if(fs->type != fs_buff.type) {
-		rv = MCF_ERR_FSAVE_TYPE_MISMATCH;
-		goto error;
-	}
-	
-	if(fs->size != fs_buff.size) {
-		rv = MCF_ERR_FSAVE_SIZE_MISMATCH;
-		goto error;
-	}
-
-	fwrite(fs->val.c, 1, fs->size, f); 
-
-	error:
-
-	fs_buff = free_fsave(&fs_buff);
-	return rv;
-	
 }
 
 flocs read_flocs_from_file(FILE *f, int *ev, long max_bytes) {
@@ -682,7 +794,7 @@ flocs read_flocs_from_file(FILE *f, int *ev, long max_bytes) {
 	flocs fl = null_flocs();
 	
 	if(f == NULL) {
-		rv = MCPP_ERR_NOFILE;
+		rv = MCF_ERR_NOFILE;
 		goto error;
 	}
 	
@@ -696,7 +808,7 @@ flocs read_flocs_from_file(FILE *f, int *ev, long max_bytes) {
 	unsigned long int pos;
 	size_t count = fread(&nlen, si, 1, f);
 	if(count != 1 || feof(f)) {
-		rv = MCPP_ERR_FILEREAD;
+		rv = MCF_ERR_FILEREAD;
 		goto error;
 	}
 
@@ -720,19 +832,19 @@ flocs read_flocs_from_file(FILE *f, int *ev, long max_bytes) {
 
 		count = fread(fl.name[i], 1, nlen, f);
 		if(count != nlen) {
-			rv = MCPP_ERR_FLOC_NAME;
+			rv = MCF_ERR_FLOC_NAME;
 			goto error;
 		}
 		
 		count = fread(&(fl.type[i]), si8, 1, f);
 		if(count != 1) { 
-			rv = MCPP_ERR_FLOC_TYPE;
+			rv = MCF_ERR_FLOC_TYPE;
 			goto error;
 		}
 		
 		count = fread(&(fl.size[i]),si, 1, f);
 		if(count != 1) {
-			rv = MCPP_ERR_FLOC_SIZE;
+			rv = MCF_ERR_FLOC_SIZE;
 			goto error;
 		}
 		
@@ -744,7 +856,7 @@ flocs read_flocs_from_file(FILE *f, int *ev, long max_bytes) {
 		
 		count = fread(&nlen, si, 1, f);
 		if(count != 1) {
-			rv MCPP_ERR_FILEREAD;
+			rv MCF_ERR_FILEREAD;
 			goto error;
 		}
 		
@@ -762,7 +874,7 @@ flocs read_flocs_from_file(FILE *f, int *ev, long max_bytes) {
 
 flocs read_flocs_from_char(char *array, int *ev, size_t size) {
 	// Generates flocs from a char array you've already read out.
-	if(array == NULL) { *ev = MCPP_ERR_NOSTRING; return null_flocs(); }
+	if(array == NULL) { *ev = MCF_ERR_NOSTRING; return null_flocs(); }
 	
 	// Indicator for reading from char array.
 	int rv = 0;
@@ -780,7 +892,7 @@ flocs read_flocs_from_char(char *array, int *ev, size_t size) {
 		cpos += si;
 		
 		if(nlen > cpos-array+size) {
-			rv = MCPP_ERR_MALFORMED_FNAME;
+			rv = MCF_ERR_BADFNAME;
 			goto error;
 		}
 		
@@ -799,7 +911,7 @@ flocs read_flocs_from_char(char *array, int *ev, size_t size) {
 		cpos += nlen;
 		
 		if(fl.name[nlen-1] != '\0') {
-			rv = MCPP_ERR_MALFORMED_FNAME;
+			rv = MCF_ERR_BADFNAME;
 			goto error;
 		}
 		

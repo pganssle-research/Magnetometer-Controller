@@ -27,11 +27,17 @@
 #include <spinapi.h>					// SpinCore functions
 #include <NIDAQmx.h>
 
-#include <PulseProgramTypes.h>
+#ifndef FILE_SAVE_H
 #include <FileSave.h>
+#endif
+
 #include <cvitdms.h>
 #include <cviddc.h>
+
+#ifndef UICONTROLS_H
 #include <UIControls.h>					// For manipulating the UI controls
+#endif
+
 #include <MathParserLib.h>
 #include <MCUserDefinedFunctions.h>
 #include <PulseProgramLib.h>			

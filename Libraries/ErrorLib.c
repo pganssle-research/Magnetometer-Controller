@@ -60,8 +60,6 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCPP_ERR_NOFILE_STR;
 					case MCPP_ERR_NOPROG:
 						return MCPP_ERR_NOPROG_STR;
-					case MCPP_ERR_NOSTRING:
-						return MCPP_ERR_NOSTRING_STR;
 					case MCPP_ERR_TEMP_FILE_NAME:
 						return MCPP_ERR_TEMP_FILE_NAME_STR;
 					case MCPP_ERR_TEMP_FILE:
@@ -82,14 +80,6 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCPP_ERR_NOND_STR;
 					case MCPP_ERR_NOSKIP:
 						return MCPP_ERR_NOSKIP_STR;
-					case MCPP_ERR_FLOC_NAME:
-						return MCPP_ERR_FLOC_NAME_STR;
-					case MCPP_ERR_FLOC_TYPE:
-						return MCPP_ERR_FLOC_TYPE_STR;
-					case MCPP_ERR_FLOC_SIZE:
-						return MCPP_ERR_FLOC_SIZE_STR;
-					case MCPP_ERR_NOFLOCS:
-						return MCPP_ERR_NOFLOCS_STR;
 					case MCPP_ERR_MALFORMED_FNAME:
 						return MCPP_ERR_MALFORMED_FNAME_STR;
 					case MCPP_ERR_FILE_NOPROG:
@@ -98,10 +88,6 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCPP_ERR_FILE_NOINSTRS_STR;
 					case MCPP_ERR_PROG_PROPS_LABELS:
 						return MCPP_ERR_PROG_PROPS_LABELS_STR;
-					case MCPP_ERR_CUST_NOENTRIES:
-						return MCPP_ERR_CUST_NOENTRIES_STR;
-					case MCPP_ERR_INVALID_TYPE:
-						return MCPP_ERR_INVALID_TYPE_STR;
 					case MCPP_ERR_INVALID_NC_STRING:
 						return MCPP_ERR_INVALID_NC_STRING_STR;
 					case MCPP_ERR_FIELDSMISSING:
@@ -110,12 +96,6 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCPP_ERR_INVALIDTMODE_STR;
 					case MCPP_ERR_NOARRAY:
 						return MCPP_ERR_NOARRAY_STR;
-					case MCPP_ERR_FS_NOTYPE:
-						return MCPP_ERR_FS_NOTYPE_STR;
-					case MCPP_ERR_FS_NOSIZE:
-						return MCPP_ERR_FS_NOSIZE_STR;
-					case MCPP_ERR_FS_BADCONTENTS:
-						return MCPP_ERR_FS_BADCONTENTS_STR;
 				}
 				break;
 			case MCEX_ERR:

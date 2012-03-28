@@ -61,11 +61,16 @@ Desrip	: Need to add a few things to PPROGRAM that I did not consider at
 #include <spinapi.h>					// SpinCore functions
 #include <NIDAQmx.h>
 
-#include <PulseProgramTypes.h>
-#include <FileSave.h> 
+#ifndef FILE_SAVE_H
+#include <FileSave.h>
+#endif
+
 #include <MathParserLib.h>				// For parsing math
 
+#ifndef UI_CONTROLS_H
 #include <UIControls.h>					// For manipulating the UI controls
+#endif
+
 #include <MCUserDefinedFunctions.h>		// Main UI functions
 #include <MC10.h>
 #include <PulseProgramLib.h>			// Prototypes and type definitions for this file
@@ -567,7 +572,7 @@ PINSTR *read_pinstr_from_char(char *array, int n_inst, int *ev) {
 	memcpy(&n_entries, pos, si);
 	pos += si;
 	
-	if(n_entries == 0) { rv = MCPP_ERR_CUST_NOENTRIES; goto error; }
+	if(n_entries == 0) { rv = MCF_ERR_CUST_NOENTRIES; goto error; } // TODO: Fix
 	
 	in = malloc(sizeof(PINSTR)*n_inst);
 	c = calloc(n_entries, sizeof(char *));

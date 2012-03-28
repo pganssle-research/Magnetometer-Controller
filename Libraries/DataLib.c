@@ -42,7 +42,7 @@
 #include <DataLib.h>
 #include <MCUserDefinedFunctions.h>		// Main UI functions
 #include <PPConversion.h>
-#include <PulseProgramLib.h>			// Prototypes and type definitions for this file
+#include <PulseProgramLib.h>
 #include <SaveSessionLib.h>
 #include <General.h>
 #include <Version.h>
@@ -721,7 +721,78 @@ int initialize_tdm_safe(int CE_lock, int TDM_lock) {
 	return rv;
 }
 
-int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, unsigned int nc, time_t tstart) {
+char *make_cstep_str(PPROGRAM *p, int cind, int avg, int *ev) {
+	// Create a cstep string for indexing mcd files. 
+	// If avg evaluates true, transients will be collapsed.
+	// Output must be freed.
+	
+	int i, rv = 0;
+	int *steps = NULL;
+	char *out = NULL;
+	char *title_format = NULL;
+	char *buff = NULL;
+	
+	
+	if(p == NULL) { rv = MCD_ERR_NOPROG; goto error; }
+	if(cind < 0) { rv = MCD_ERR_BADCIND; goto error; }
+	
+	// Create the data array.
+	int max = 0;
+	for(i = 0; i < p->steps_size; i++) {
+		if(p->steps[i] > max) {
+			max = p->steps[i];
+		}
+	}
+	
+	int ndigits = (max > 0)?(((int)log10(max))+1):1;	// Number of digits per step
+	
+	int nsteps = 1;
+	
+	if(avg) {
+		if(!p->nDims) {
+			steps = malloc(sizeof(int)*1);
+			steps[0] = 0;
+			ndigits = 1;
+		} else {
+			nsteps = p->nDims;
+			steps = malloc(p->nDims*sizeof(unsigned int));
+			get_dim_step(p, cind, steps);
+		}
+	} else {
+		nsteps = p->steps_size;
+		steps = malloc(sizeof(unsigned int) * p->steps_size);
+		memcpy(steps, p->steps, p->steps_size * sizeof(unsigned int));
+	}
+	
+	out = malloc(nsteps*(ndigits+1)+2);
+	
+	title_format = malloc(6);
+	buff = malloc(ndigits+2);
+	
+	sprintf(title_format, "%%0%dd,", ndigits);
+	strcpy(out, "[");
+	
+	for(i = 1; i < nsteps; i++) {		   
+		sprintf(buff, title_format, steps[i]);
+		strcat(out, buff);
+	}
+	out[strlen(out)-1] = ']';
+
+	error:
+	if(rv != 0 && out != NULL) { 
+		free(out);
+		out = NULL;
+	}
+	
+	if(buff != NULL) { free(buff); }
+	if(title_format != NULL) { free(title_format); }
+	if(steps != NULL) { free(steps); }
+	
+	*ev = rv;
+	return out;
+}
+
+int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, unsigned int nc, time_t tstart, int64 hash) {
 	// Creates the proper headers for the data file.
 	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
 	if(p == NULL) { return MCD_ERR_NOPROG; }
@@ -844,78 +915,7 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	return rv;
 }
 
-char *make_cstep_str(PPROGRAM *p, int cind, int avg, int *ev) {
-	// Create a cstep string for indexing mcd files. 
-	// If avg evaluates true, transients will be collapsed.
-	// Output must be freed.
-	
-	int i, rv = 0;
-	int *steps = NULL;
-	char *out = NULL;
-	char *title_format = NULL;
-	char *buff = NULL;
-	
-	
-	if(p == NULL) { rv = MCD_ERR_NOPROG; goto error; }
-	if(cind < 0) { rv = MCD_ERR_BADCIND; goto error; }
-	
-	// Create the data array.
-	int max = 0;
-	for(i = 0; i < p->steps_size; i++) {
-		if(p->steps[i] > max) {
-			max = p->steps[i];
-		}
-	}
-	
-	int ndigits = (max > 0)?(((int)log10(max))+1):1;	// Number of digits per step
-	
-	int nsteps = 1;
-	
-	if(avg) {
-		if(!p->nDims) {
-			steps = malloc(sizeof(int)*1);
-			steps[0] = 0;
-			ndigits = 1;
-		} else {
-			nsteps = p->nDims;
-			steps = malloc(p->nDims*sizeof(unsigned int));
-			get_dim_step(p, cind, steps);
-		}
-	} else {
-		nsteps = p->steps_size;
-		steps = malloc(sizeof(unsigned int) * p->steps_size);
-		memcpy(steps, p->steps, p->steps_size * sizeof(unsigned int));
-	}
-	
-	out = malloc(nsteps*(ndigits+1)+2);
-	
-	title_format = malloc(6);
-	buff = malloc(ndigits+2);
-	
-	sprintf(title_format, "%%0%dd,", ndigits);
-	strcpy(out, "[");
-	
-	for(i = 1; i < nsteps; i++) {		   
-		sprintf(buff, title_format, steps[i]);
-		strcat(out, buff);
-	}
-	out[strlen(out)-1] = ']';
-
-	error:
-	if(rv != 0 && out != NULL) { 
-		free(out);
-		out = NULL;
-	}
-	
-	if(buff != NULL) { free(buff); }
-	if(title_format != NULL) { free(title_format); }
-	if(steps != NULL) { free(steps); }
-	
-	*ev = rv;
-	return out;
-}
-
-int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int hash, int cind, int nc) {
+int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, int64 hash) {
 	// This is basically for cacheing average data in a local file.
 	// First call will create a file (overwrites when cind == 0)
 	// Subsequent calls will update it with the new data.
@@ -927,8 +927,7 @@ int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int hash, int ci
 	if(p == NULL) { return MCD_ERR_NOPROG; }
 	
 	FILE *f = NULL;
-	char *item_title = NULL, *buff = NULL;
-	flocs fl = null_flocs();
+	char *step_title = NULL, *buff = NULL;
 	fsave ag = null_fs(), dg = null_fs(), chash = null_fs();
 	
 	if(!file_exists(fname) && cind > 0) {
@@ -941,19 +940,7 @@ int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int hash, int ci
 		// Write the hash to make sure it's the same thing.
 		chash = make_fs(MCEX_HASH);
 		if(rv = put_fs(&chash, &hash, FS_INT, 1)) { goto error; }
-		
-		unsigned int bsize = get_fs_strlen(&chash);
-		
-		buff = malloc(bsize);
-		print_fs(buff, &chash);
-
-		if(fwrite(buff, 1, bsize, f) < bsize) { 
-			rv = MCD_ERR_FILEWRITE;
-			goto error;
-		}
-		
-		free(buff);
-		buff = NULL;
+		if(rv = fwrite_fs(f, &chash)) { goto error; }
 	} else {
 		f = fopen(fname, "rb+");
 		
@@ -965,92 +952,63 @@ int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int hash, int ci
 		chash = read_fsave_from_file(f, &rv);
 		if(rv != 0) { goto error; }
 		
-		if(*chash.val.i != hash) {
+		if(*(chash.val.i) != hash) {
 			rv = MCD_ERR_NOAVGDATA;		// Not the right file!
 			goto error;
 		}
-		
 	}
 	
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 	
-	item_title = make_cstep_str(p, cind, 1, &rv);
+	step_title = make_cstep_str(p, cind, 1, &rv);
 	if(rv != 0) { goto error; }
 	
-	int itlen;
-	if(item_title != NULL) {
-		itlen = strlen(item_title);	
+	int stlen;
+	if(step_title != NULL) {
+		stlen = strlen(step_title);	
 	} else {
 		rv = MCD_ERR_NOAVGDATA;
 		goto error;
 	}
 	
-	int bufflen = 0;
 	unsigned int data_size = p->np * nc;
 	int ct = get_transient(p, cind);
 	if(ct < 0) { rv = ct; goto error; }
 	
-	
 	if(cind == 0) {
 		// Create the AVGDATA group
-		dg = make_fs(item_title);
+		dg = make_fs(step_title);
 		if(rv = put_fs(&dg, data, FS_DOUBLE, data_size)) { goto error; }
 		
 		ag = make_fs(MCD_AVGDATA);
 		if(rv = put_fs_container(&ag, &dg, 1)) { goto error; }
 		
-		bufflen = get_fs_strlen(&ag);
-		
-		buff = malloc(bufflen);
-		char *pos = buff;
-		pos = print_fs(pos, &ag);
-		
-		// Write to file.
-		if(fwrite(buff, 1, bufflen, f) < bufflen) {
-			rv = MCD_ERR_FILEWRITE;
-			goto error;
-		}
+		if(rv = fwrite_fs(f, &ag)) { goto error; }
 	} else {
 		// In this case we have to find the AVGDATA group
 		// and either append the data or replace it.
-		flocs fl = read_flocs_from_file(f, &rv, MCF_EOF);
-		if(rv != 0) { goto error; }
-		
-		for(i = 0; i < fl.num; i++) {
-			if(strcmp(fl.name[i], MCD_AVGDATA) == 0) { break; }	
-		}
-		
-		if(i >= fl.num) {
-			rv = MCD_ERR_NOAVGDATA;
+		rewind(f);
+		long ag_pos = find_fsave_in_file(f, MCD_AVGDATA, MCF_EOF);
+		if(ag_pos < 0) {
+			rv = ag_pos;
 			goto error;
 		}
 		
-		// Set the file to the relevant group
-		fseek(f, fl.pos[i], SEEK_SET);
+		// This will set the file to be pointing to the contents.
+		fseek(f, ag_pos, SEEK_SET);
+		if(rv = get_fs_header_from_file(f, &ag)) { goto error; }
 		
-		long ad_pos = find_fsave_in_file(f, item_title, fl.size[i]);
+		
+		// See if the relevant group already exists.
+		long ad_pos = find_fsave_in_file(f, step_title, ag.size);
 		if(ad_pos == MCF_ERR_FSAVE_NOT_FOUND) {
 			// This means we need to insert the group at the end.
-			fseek(f, fl.pos[i]-sizeof(unsigned int), SEEK_SET); // Update the size.
-			
-			dg = make_fs(item_title);
+			dg = make_fs(step_title);
 			if(rv = put_fs(&dg, data, FS_DOUBLE, data_size));
 			
-			unsigned int a_size = get_fs_strlen(&dg);
-			unsigned int n_size = fl.size[i] + a_size;
-			
-			if(fwrite(&n_size, sizeof(unsigned int), 1, f) < 1) {
-				rv = MCD_ERR_FILEREAD;
-				goto error;
-			}
-			
-			// Insert the data at the end.
-			buff = malloc(a_size);
-			print_fs(buff, &dg);
-			
-			fseek(f, fl.size[i], SEEK_CUR);
-			
-			if(rv = insert_into_file(f, buff, a_size, -1)) { goto error; }
+			// Add this to MCD_AVGDATA
+			fseek(f, ag_pos, SEEK_SET);
+			if(rv = fadd_fs_to_container(f, &dg)) { goto error; }
 		} else if(ad_pos < 0) {
 			rv = ad_pos;
 			goto error;
@@ -1066,23 +1024,27 @@ int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int hash, int ci
 			for(i = 0; i < data_size; i++) {
 				dg.val.d[i] = (dg.val.d[i]*ct + data[i])/(ct+1);
 			}
+			
+			// Overwrite the data.
+			unsigned int off = get_fs_header_size_from_ns(dg.ns);
+			fseek(f, ad_pos+off, SEEK_SET);
+			if(rv = overwrite_fsave_in_file(f, &dg)) { goto error; }
 		}
 	}
 	
 	error:
 	
 	if(f != NULL) { fclose(f); }
-	if(item_title != NULL) { free(item_title); }
+	if(step_title != NULL) { free(step_title); }
 	if(buff != NULL) { free(buff); }
 	
-	free_flocs(&fl);
 	free_fsave(&ag);
 	free_fsave(&dg);
 	free_fsave(&chash);
 	
 	return rv;
 }
-															 
+
 int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time_t done) {
 	// Save data to existing file, with the header already written
 	// 
@@ -1100,7 +1062,6 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	// there's no good way to "insert" data into a file without simply buffering the remainder
 	// of the file and writing it afterwards, this seems excessive.
 	
-	
 	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
 	if(data == NULL) { return MCD_ERR_NODATA; }
 	if(p == NULL) { return MCD_ERR_NOPROG; }
@@ -1110,196 +1071,74 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	}
 	
 	int i, rv = 0;
-	long ad_pos = -1;
-	int *dim_step = NULL;
-	unsigned int data_size = p->np*nc;
 	
 	FILE *f = NULL;
-	FILE *tf = NULL;
-	fsave mg = null_fs(), ag = null_fs();
-	fsave md = null_fs(), ad = null_fs();
-	flocs fl = null_flocs();
-	flocs afl = null_flocs();
-	char *step_title = NULL, *title_format = NULL, *buff = NULL;
-	char *astitle = NULL;
-	char *tmp_buff = NULL;
-	char *tname = NULL;
-	int *steps = NULL;
 	
-	size_t tmp_read = 0;
-
-	f = fopen(fname, "rb+");
+	unsigned int data_size = p->np * nc;
+	fsave mg = null_fs(), dg = null_fs(), tg = null_fs();
+	char *step_title = NULL;
+	char *buff = NULL;
+	char *ds = NULL;
+	
+	f = fopen(fname, "rb+");	// If it doesn't exist, there's a problem.
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
-
-	// If it's the first time, need to create the groups as well
-	steps = calloc(p->steps_size, sizeof(unsigned int));
-	if(p->varied) {
-		get_cstep(cind, steps, p->steps, p->steps_size);
-	} else {
-		steps[0] = cind;
-	}
 	
-	int ct = get_transient_from_step(p, steps);
+	// Make the label for this particular step.
+	step_title = make_cstep_str(p, cind, 0, &rv);
+	if(rv != 0) { goto error; }
 	
-	// Create the data array.
-	int max = 0;
-	for(i = 0; i < p->steps_size; i++) {
-		if(p->steps[i] > max) {
-			max = p->steps[i];
-		}
-	}
-	
-	int ndigits = (max > 0)?(((int)log10(max))+1):1;	// Number of digits per step
-	
-	step_title = malloc(p->steps_size*(ndigits+1)+2);
-	title_format = malloc(6);
-	buff = malloc(ndigits+2);
-	
-	sprintf(title_format, "%%0%dd,", ndigits);
-	strcpy(step_title, "[");
-	
-	// Create the title format for sprintf
-	sprintf(title_format, "[%%0%dd", ndigits);
-	for(i = 1; i < p->steps_size; i++) {		   
-		sprintf(buff, title_format, p->steps[i]);
-		strcat(step_title, buff);
-	}
-	strcat(step_title, "]");
-	
-	if(p->nt > 1) {
-		if(!p->nDims) {
-			astitle = malloc(strlen("[0]")+1);
-			astitle = strcpy(astitle, "[0]");	
-		} else {
-			dim_step = malloc(p->nDims*sizeof(unsigned int));
-			get_dim_step(p, cind, dim_step);
-			
-			astitle = malloc(p->nDims*(ndigits+1)+2);
-			strcpy(astitle, "[");
-			
-			for(i = 0; i < p->nDims; i++) {
-				sprintf(buff, title_format, dim_step[i]);
-				strcat(astitle, buff);
-			}
-			
-			strcat(astitle, "]");
-		}
-	}
-	
-	free(title_format);
-	free(buff);
-	title_format = NULL;
-	buff = NULL;
-	
-	// Generate the data fsave.
-	md = make_fs(step_title);
-	if(rv = put_fs(&md, data, FS_DOUBLE, p->np*nc)) { goto error; }
+	// Generate the label fsave
+	dg = make_fs(step_title);
+	if(rv = put_fs(&dg, data, FS_DOUBLE, data_size)) { goto error; }
 	
 	if(cind == 0) {
+		// If it's the first time through, create the main data group.
 		mg = make_fs(MCD_MAINDATA);
-		if(rv = put_fs_container(&mg, &md, 1)) { goto error; } // Create a placeholder and print it to file.
-		
-		int bufflen = get_fs_strlen(&mg);
-		
-		if(p->nt > 1) {
-			ag = make_fs(MCD_AVGDATA);
-			if(rv = put_fs_container(&ag, &md, 1)) { goto error; }
-		
-			bufflen += get_fs_strlen(&ag);
-		}
-		
-		buff = malloc(bufflen);
-		char *pos = buff;
-		pos = print_fs(pos, &mg);
-		
-		if(p->nt > 1) {
-			pos = print_fs(pos, &ag);
-		}
-		
-		// Now we can write to the file.
-		if(fwrite(buff, 1, bufflen, f) < bufflen) {
-			rv = MCD_ERR_FILEWRITE;
-			goto error;
-		}
+		if(rv = put_fs(&dg, data, FS_DOUBLE, data_size)) { goto error; }
+		if(rv = fwrite_fs(f, &dg)) { goto error; }
 	} else {
-		fl = read_flocs_from_file(f, &rv, MCF_EOF);
-		if(rv != 0) { goto error; }
-	
-		// Get the average group if necessary.
-		if(p->nt > 1) {
-			for(i = 0; i < fl.num; i++) {
-				if(strcmp(fl.name[i], MCD_AVGDATA) == 0) {
-					break;
-				}
-			}
+		// Otherwise we should find the main data group and append our data
+		long mgp = find_fsave_in_file(f, MCD_MAINDATA, MCF_EOF);
+		if(mgp < 0) { rv = mgp; goto error; }
 		
-			// Set the file to the relevant group
-			fseek(f, fl.pos[i], SEEK_SET);
-		
-			ad_pos = find_fsave_in_file(f, astitle, fl.size[i]);
-			if(ad_pos == MCF_ERR_FSAVE_NOT_FOUND) {
-				// This means we need to create the group.
-				fseek(f, fl.pos[i], SEEK_SET);
-				
-				ad = make_fs(astitle);
-				if(rv = put_fs(&ad, data, FS_DOUBLE, data_size)) { goto error; }
-				
-				size_t bsize = get_fs_strlen(&ad);
-				buff = malloc(bsize);
-				print_fs(buff, &ad);
-				
-				insert_into_file(f, buff, bsize, -1);
-			} else if(ad_pos < 0) {
-				rv = ad_pos;
-				goto error;
-			} else {
-				fseek(f, ad_pos, SEEK_SET);
-		
-				ad = read_fsave_from_file(f, &rv);
-				if(rv != 0) { goto error;	}
-		
-				// Perform the averaging now.
-				for(i = 0; i < data_size; i++) {
-					ad.val.d[i] = (ad.val.d[i]*ct + data[i])/(ct+1);	// ct is zero-based index.
-				}
-		
-				// Overwrite the previous thing.
-				fseek(f, ad_pos, SEEK_SET);
-				overwrite_fsave_in_file(f, &ad);
-			}
-		}
-		
-		// Add the data to the main data group if it doesn't exist.
-		for(i = 0; i < fl.num; i++) {
-			if(strcmp(fl.name[i], MCD_MAINDATA) == 0) {
-				break;	
-			}
-		}
+		fseek(f, mgp, SEEK_SET);
+		if(rv = fappend_data_to_fs(f, data, data_size)) { goto error; }
 	}
 	
+	// Update the timestamp
+	struct tm *tptr;
+	tptr = localtime(&done);
 	
+	ds = calloc(MCD_TIMESTAMP_MAXSIZE+1, 1);
+	strftime(ds, MCD_TIMESTAMP_MAXSIZE, MCD_TIME_FORMAT, tptr);
+	
+	tg = make_fs(MCD_TIMEDONE);
+	if(rv = put_fs(&tg, ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
+	
+	rewind(f);
+	long h_pos = find_fsave_in_file(f, MCD_DATAHEADER, MCF_EOF);
+	if(h_pos < 0) { rv = h_pos; goto error; }
+	
+	fseek(f, h_pos, SEEK_SET);
+	
+	fsave dh = null_fs();
+	if(rv = get_fs_header_from_file(f, &dh)) { goto error; }
+	
+	if(rv = find_and_overwrite_fsave_in_file(f, &tg, dh.size)) { goto error; }
+												
 	error:
-	
 	if(f != NULL) { fclose(f); }
-	if(fl.num > 0) { free_flocs(&fl); }
-	
-	if(mg.size > 0) { free_fsave(&mg); }
-	if(ag.size > 0) { free_fsave(&ag); }
-	if(md.size > 0) { free_fsave(&md); }
-	if(ad.size > 0) { free_fsave(&ad); }
-	
-	
-	if(dim_step != NULL) { free(dim_step); }
 	
 	if(step_title != NULL) { free(step_title); }
-	if(title_format != NULL) { free(title_format); }
 	if(buff != NULL) { free(buff); }
-	if(astitle != NULL) { free(astitle); }
-	if(steps != NULL) { free(steps); }
+	if(ds != NULL) { free(ds); }
+	
+	free_fsave(&tg);
+	free_fsave(&mg);
+	free_fsave(&dg);
 	
 	return rv;
 }
-
 
 int save_data(double *data, double **avg) {
 	return 0;	

@@ -11,11 +11,15 @@
 #include <utility.h>
 #include "toolbox.h"
 #include <ansi_c.h>
-#include <PulseProgramTypes.h>
+
+
+#ifndef FILE_SAVE_H
 #include <FileSave.h>
+#endif
+
 #include <MathParserLib.h>
-#include <PulseProgramLib.h>
 #include <PPConversion.h>
+#include <PulseProgramLib.h>
 #include <UIControls.h>
 #include <General.h>
 #include <MCUserDefinedFunctions.h>

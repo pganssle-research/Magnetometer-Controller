@@ -132,9 +132,14 @@ Descrip	: Since changing over to this new system, you've broken all the
 #include <NIDAQmx.h>
 
 #include <Magnetometer Controller.h>	// Then the libraries specific to
-#include <PulseProgramTypes.h>			// this software.
-#include <FileSave.h>
+#ifndef UICONTROLS_H
 #include <UIControls.h>
+#endif
+
+#ifndef FILE_SAVE_H
+#include <FileSave.h>
+#endif
+
 #include <MathParserLib.h>
 
 #include <MCUserDefinedFunctions.h>
@@ -1898,32 +1903,6 @@ int CVICALLBACK ToggleFIDChan (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-			
-			char **string_list = malloc(sizeof(char *)*10);
-			for(int i = 0; i < 5; i++) {
-				string_list[i] = malloc(strlen("Experiment ") + 7);
-				
-				sprintf(string_list[i], "%s %06d", "Experiment", (i == 4)?275:i);
-			}
-			
-			for(int i = 5; i < 10; i++) {
-				string_list[i] = malloc(100);
-
-				sprintf(string_list[i], "%s %06d", "experiment", (i == 9)?275:(i-5));
-			}
-			
-			
-			unsigned int64 hash1, hash2;
-			
-			for(int i = 0; i < 10; i++) {
-				hash1 = basic_string_hash(string_list[i]);
-				hash2 = basic_string_hash_2(string_list[i]);
-				
-				printf("%s:\tH1: %016llx\tH2:%016llx\n", string_list[i], hash1, hash2);
-				
-				free(string_list[i]);
-			}
-			
 			int num = -1, i;
 			for(i = 0; i < 8; i++) {
 				if(control == dc.fchans[i]) {

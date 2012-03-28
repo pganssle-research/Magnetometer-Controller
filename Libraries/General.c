@@ -345,9 +345,11 @@ unsigned int64 basic_string_hash(char *string) {
 	// Go through and generate an array of hashes
 	unsigned int64 hash = MCG_HASH_SEED;
 	for(p; *p != '\0'; p++) {
-		hash = MCG_HASH_MULTIPLIER * (hash * (*p) + *p);
+		hash = MCG_HASH_MULTIPLIER * (hash * (*p + 1) + *p);
 		hash += hash << 32;
 	} 
+	
+	free(p);
 	
 	return hash;
 	
@@ -362,7 +364,7 @@ unsigned int64 basic_string_hash_fast(char *string) {
 	// Go through and generate an array of hashes
 	int64 hash = MCG_HASH_SEED;
 	for(p = string; *p != '\0'; p++) {
-		hash = MCG_HASH_MULTIPLIER * (hash * (*p)+*p);
+		hash = MCG_HASH_MULTIPLIER * (hash * (*p + 1)+*p);
 		hash += hash << 32;
 	}
 	

@@ -1,4 +1,5 @@
 /********************* File Saving Types *************************/
+#ifndef FILE_SAVE_TYPES_H
 #define FILE_SAVE_TYPES_H
 
 // Data saving library prototypes.
@@ -45,6 +46,7 @@ typedef struct flocs {
 #define FS_TIME 7
 #define FS_CONTAINER 32
 #define FS_CUSTOM 64
+#endif
 
 
 

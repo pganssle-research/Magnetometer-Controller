@@ -1,6 +1,10 @@
 /******************************** Includes *******************************/
 #define PULSE_PROGRAM_LIB_H
 
+#ifndef PULSE_PROGRAM_TYPES_H
+#include <PulseProgramTypes.h>
+#endif
+
 // Some defines that are useful for read_status
 #define PB_STOPPED 1		// Bit 0 = Stopped
 #define PB_RESET 2			// Bit 1 = Reset

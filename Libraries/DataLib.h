@@ -77,7 +77,9 @@ extern int initialize_tdm_safe(int CE_lock, int TDM_lock);
 extern int save_data(double *data, double **avg);
 extern int save_data_safe(double *data, double **avg);
 
-extern int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int hash, int cind, int nc);
+extern char *make_cstep_str(PPROGRAM *p, int cind, int avg, int *ev);
+extern int initialize_mcd(char *fname, char *basefname, unsigned int num, PPROGRAM *p, unsigned int nc, time_t start, int64 hash);
+extern int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, int64 hash);
 extern int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time_t done);
 
 

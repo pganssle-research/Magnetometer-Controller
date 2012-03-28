@@ -1,6 +1,10 @@
  /**************************** Preprocessing *****************************/
 #define SAVE_SESSION_H
 
+#ifndef PULSE_PROGRAM_TYPES_H
+#include <PulseProgramTypes.h>
+#endif
+
 // General info about the program
 #define MC_VERSION 1.1						// The current version
 #define MC_VERSION_STRING "Magnetometer Controller v1.1"

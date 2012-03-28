@@ -6,13 +6,19 @@
 #define ERROR_DEFS_H
 
 // Index
-#define MCD_ERR 1
-#define MCPP_ERR 2
-#define MCEX_ERR 3
+#define MCF_ERR 1
+#define MCD_ERR 2
+#define MCPP_ERR 3
+#define MCEX_ERR 4
+
+// FSave Errors
+#define MCF_ERR_TITLE "File Saving Error"
+#define MCF_ERR_MAX -10501
+#define MCF_ERR_MIN -11000
 
 // Data Saving
 #define MCD_ERR_TITLE "Data Saving Error"		
-#define MCD_ERR_MAX -11000
+#define MCD_ERR_MAX -11001
 #define MCD_ERR_MIN -11250
 
 // Pulse Program
@@ -27,18 +33,71 @@
 
 /***********************************************************
 *  														   *
+*            		File Saving Errors					   *
+* 														   *
+***********************************************************/
+
+#define MCF_ERR_INVALID_MAX_BYTES -10501
+#define MCF_ERR_FSAVE_NOT_FOUND -10502
+#define MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME -10503
+#define MCF_ERR_FSAVE_TYPE_MISMATCH -10504
+#define MCF_ERR_FSAVE_SIZE_MISMATCH -10505
+#define MCF_ERR_CANNOT_TRUNCATE -10506
+#define MCF_ERR_NOFILE -10507
+#define MCF_ERR_BADFNAME -10508
+#define MCF_ERR_NODATA -10509
+#define MCF_ERR_CUST_NOENTRIES -10510
+#define MCF_ERR_INVALID_TYPE -10511
+#define MCF_ERR_FLOC_NAME -10512
+#define MCF_ERR_FLOC_TYPE -10513
+#define MCF_ERR_FLOC_SIZE -10514
+#define MCF_ERR_NOFLOCS -10515
+#define MCF_ERR_FILEREAD -10516
+#define MCF_ERR_FILEWRITE -10517
+#define MCF_ERR_NOSTRING -10518
+#define MCF_ERR_FS_NOTYPE -10519
+#define MCF_ERR_FS_NOSIZE -10520
+#define MCF_ERR_FS_BADCONTENTS -10521
+#define MCF_ERR_NOARRAY -10522
+#define MCF_ERR_NOFSAVE -10523
+
+#define MCF_ERR_INVALID_MAX_BYTES_STR "Invalid maximum bytes paramater passed."
+#define MCF_ERR_FSAVE_NOT_FOUND_STR "Requested fsave not found. This may not be an error."
+#define MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME_STR "FSAVE names do not match, cannot replace safely!"
+#define MCF_ERR_FSAVE_TYPE_MISMATCH_STR "FSAVE types do not match. This may not be an error."
+#define MCF_ERR_FSAVE_SIZE_MISMATCH_STR "FSAVE sizes do not match. This may not be an error."
+#define MCF_ERR_NOFILE_STR "Invalid file passed to function."
+#define MCF_ERR_BADFNAME_STR "Invalid file name."
+#define MCF_ERR_NODATA_STR "Required data were not passed to function."
+#define MCF_ERR_CUST_NOENTRIES_STR "No struct entries provided for custom FSAVE type"
+#define MCF_ERR_INVALID_TYPE_STR "Invalid FSAVE type passed to function."
+#define MCF_ERR_FLOC_NAME_STR "Couldn't read field name."
+#define MCF_ERR_FLOC_TYPE_STR "Couldn't read field type."
+#define MCF_ERR_FLOC_SIZE_STR "Could read field size."
+#define MCF_ERR_NOFLOCS_STR "No fields found in specified file."
+#define MCF_ERR_FILEREAD_STR "Failed to properly read file."
+#define MCF_ERR_FILEWRITE_STR "Failed to properly write to file."
+#define MCF_ERR_NOSTRING_STR "No string was provided to the function."
+#define MCF_ERR_FS_NOTYPE_STR "No type was found for the fsave structure."
+#define MCF_ERR_FS_NOSIZE_STR "No size was found for the fsave structure."
+#define MCF_ERR_FS_BADCONTENTS_STR "The contents of the fsave structure were not properly read."
+#define MCF_ERR_NOARRAY_STR "Required array not passed to function."
+#define MCF_ERR_NOFSAVE_STR "Invalid FSAVE struct passed to function."
+
+/***********************************************************
+*  														   *
 *            		Data Saving Errors					   *
 * 														   *
 ***********************************************************/
 // Return values
-#define MCD_ERR_NOFILENAME -11000
-#define MCD_ERR_NOFILE -11001
-#define MCD_ERR_NOPROG -11002
-#define MCD_ERR_FILEWRITE -11003
-#define MCD_ERR_FILEREAD -11004
-#define MCD_ERR_NODATA -11005
-#define MCD_ERR_NOAVGDATA -11006
-#define MCD_ERR_BADCIND -11007
+#define MCD_ERR_NOFILENAME -11001
+#define MCD_ERR_NOFILE -11002
+#define MCD_ERR_NOPROG -11003
+#define MCD_ERR_FILEWRITE -11004
+#define MCD_ERR_FILEREAD -11005
+#define MCD_ERR_NODATA -11006
+#define MCD_ERR_NOAVGDATA -11007
+#define MCD_ERR_BADCIND -11008
 
 // Strings
 #define MCD_ERR_NOFILENAME_STR "No data filename provided."
@@ -58,7 +117,6 @@
 // Return values
 #define MCPP_ERR_NOFILE -11251
 #define MCPP_ERR_NOPROG -11252
-#define MCPP_ERR_NOSTRING -11253
 #define MCPP_ERR_TEMP_FILE_NAME -11254
 #define MCPP_ERR_TEMP_FILE -11255
 #define MCPP_ERR_FILE_MOVING -11256
@@ -69,7 +127,6 @@
 #define MCPP_ERR_NOAOUT -11261
 #define MCPP_ERR_NOND -11262
 #define MCPP_ERR_NOSKIP -11263
-#define MCPP_ERR_FLOC_NAME -11264
 #define MCPP_ERR_FLOC_TYPE -11265
 #define MCPP_ERR_FLOC_SIZE -11266
 #define MCPP_ERR_NOFLOCS -11267
@@ -78,8 +135,6 @@
 #define MCPP_ERR_FILE_NOPROPS -11270
 #define MCPP_ERR_FILE_NOINSTRS -11271
 #define MCPP_ERR_PROG_PROPS_LABELS -11272
-#define MCPP_ERR_CUST_NOENTRIES -11273
-#define MCPP_ERR_INVALID_TYPE -11274
 #define MCPP_ERR_INVALID_NC_STRING -11275
 #define MCPP_ERR_FIELDSMISSING -11276
 #define MCPP_ERR_INVALIDTMODE -11277
@@ -87,11 +142,11 @@
 #define MCPP_ERR_FS_NOTYPE -11279
 #define MCPP_ERR_FS_NOSIZE -11280
 #define MCPP_ERR_FS_BADCONTENTS -11281
+#define MCPP_ERR_NOSTRING -11282
 
 // Strings
 #define MCPP_ERR_NOFILE_STR "No filename was provided."
 #define MCPP_ERR_NOPROG_STR "PPROGRAM structure variable missing or NULL."
-#define MCPP_ERR_NOSTRING_STR "No string was provided to the function."
 #define MCPP_ERR_TEMP_FILE_NAME_STR "Failed to find temporary file name."
 #define MCPP_ERR_TEMP_FILE_STR "Failed to open temporary file."
 #define MCPP_ERR_FILE_MOVING_STR "Failed to move file to provided location."
@@ -102,24 +157,16 @@
 #define MCPP_ERR_NOAOUT_STR "Failed to generate analog output array."
 #define MCPP_ERR_NOND_STR "Failed to generate multidimensional instrs array."
 #define MCPP_ERR_NOSKIP_STR "Failed to generate skip properties."
-#define MCPP_ERR_FLOC_NAME_STR "Couldn't read field name."
-#define MCPP_ERR_FLOC_TYPE_STR "Couldn't read field type."
-#define MCPP_ERR_FLOC_SIZE_STR "Could read field size."
-#define MCPP_ERR_NOFLOCS_STR "No fields found in specified file."
 #define MCPP_ERR_MALFORMED_FNAME_STR "Malformed field name."
 #define MCPP_ERR_FILE_NOPROG_STR "Program not found in specified file."
 #define MCPP_ERR_FILE_NOPROPS_STR "Program properties not found in program."
 #define MCPP_ERR_FILE_NOINSTRS_STR "Program properties contains no instructions."
 #define MCPP_ERR_PROG_PROPS_LABELS_STR "Program property labels were missing or invalid."
-#define MCPP_ERR_CUST_NOENTRIES_STR "No struct entries provided for custom FSAVE type"
-#define MCPP_ERR_INVALID_TYPE_STR "Invalid FSAVE type passed to function."
 #define MCPP_ERR_INVALID_NC_STRING_STR "Invalid linearized newline-delimited string array found."
 #define MCPP_ERR_FIELDSMISSING_STR "Necessary fields are missing from a required item in PPROGRAM."
 #define MCPP_ERR_INVALIDTMODE_STR "Invalid transient indexing mode in PPROGRAM"
 #define MCPP_ERR_NOARRAY_STR "Null array passed to pulse program function"
-#define MCPP_ERR_FS_NOTYPE_STR "No type was found for the fsave structure."
-#define MCPP_ERR_FS_NOSIZE_STR "No size was found for the fsave structure."
-#define MCPP_ERR_FS_BADCONTENTS_STR "The contents of the fsave structure were not properly read."
+#define MCPP_ERR_NOSTRING_STR "Required string was not present."
 
 /***********************************************************
 *  														   *

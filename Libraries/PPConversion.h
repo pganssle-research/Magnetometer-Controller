@@ -1,6 +1,10 @@
 // PPConversion library
 #define PP_CONVERSION_H
 
+#ifndef PULSE_PROGRAM_TYPES_H
+#include <PulseProgramTypes.h>
+#endif
+
 // Includes
 #include <cvitdms.h>
 #include <cviddc.h>
