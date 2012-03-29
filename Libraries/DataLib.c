@@ -565,11 +565,19 @@ int setup_cexp(CEXP *cexp) {
 		c.cstep = calloc(p->steps_size, sizeof(unsigned int));
 	}
 	
+	add_hash_to_cexp(cexp);
+	
 	*cexp = c;
 	return rv;
 }
 
 int add_hash_to_cexp(CEXP *cexp) {
+	if(cexp->fname != NULL) {
+		cexp->hash = basic_string_hash(cexp->fname);	
+	} else {
+		return MCEX_ERR_NOFNAME;	
+	}
+	
 	return 0;	
 }
 
@@ -798,15 +806,26 @@ char *make_cstep_str(PPROGRAM *p, int cind, int avg, int *ev) {
 	return out;
 }
 
+int initialize_mcd_safe(char *fname, char *basename, unsigned int num, PPROGRAM *p, unsigned int nc, time_t start, int64 hash) {
+	CmtGetLock(lock_uidc);
+	int rv = initialize_mcd(fname, basename, num, p, nc, start, hash);
+	CmtReleaseLock(lock_uidc);
+	
+	return rv;
+}
+
 int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, unsigned int nc, time_t tstart, int64 hash) {
 	// Creates the proper headers for the data file.
 	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
 	if(p == NULL) { return MCD_ERR_NOPROG; }
 	
-	int rv = 0;
+	int i, rv = 0;
 	FILE *f = NULL;
 	char *ext = NULL, *fbuff = NULL, *ds = NULL, *buff = NULL;
 	fsave *fs = NULL, header = null_fs();
+	float *phases = NULL;
+	unsigned char *fchanson = NULL, *schanson = NULL;
+	
 	int fs_size = 0;
 	
 	
@@ -832,18 +851,30 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	f = fopen(fname, "wb+");
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 	
-	// Create the data header first.
+	//////////////////////////
+	//						//
+	//		Data Header     //
+	//						//
+	//////////////////////////
 	fs_size = MCD_DATANUM;
 	fs = calloc(MCD_DATANUM, sizeof(fsave));
 	int cf = 0;
 	
+	// File name
+	fs[cf] = make_fs(MCD_FILENAME);
+	if(rv = put_fs(&(fs[cf]), fname, FS_CHAR, strlen(fname)+1)) { goto error; }
+	
 	// Experiment name
-	fs[cf] = make_fs(MCD_EXPNAME);
+	fs[++cf] = make_fs(MCD_EXPNAME);
 	if(rv = put_fs(&(fs[cf]), basename, FS_CHAR, strlen(basename)+1)) { goto error; }
 	
 	// Experiment number
 	fs[++cf] = make_fs(MCD_EXPNUM);
 	if(rv = put_fs(&(fs[cf]), &num, FS_UINT, 1)) { goto error; }
+	
+	// Hash
+	fs[++cf] = make_fs(MCD_HASH);
+	if(rv = put_fs(&(fs[cf]), &ce.hash, FS_UINT64, 1)) { goto error; }
 	
 	// Number of channels
 	fs[++cf] = make_fs(MCD_NCHANS);
@@ -889,29 +920,114 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	if(rv = put_fs_container(&header, fs, cf)) { goto error; }
 	
 	// Print the container.
-	size_t count = get_fs_strlen(&header), written = 0;
-	buff = malloc(count);
-	print_fs(buff, &header);
+	if(rv = fwrite_fs(f, &header)) { goto error; }
 	
-	written = fwrite(buff, 1, count, f);
-	if(written != count) {
-		rv = MCD_ERR_FILEWRITE;
-		goto error;
+	fs = free_fsave_array(fs, cf+1);
+	header = free_fsave(&header);
+
+	//////////////////////////////
+	//							//
+	//		Display Header     	//
+	//							//
+	//////////////////////////////
+	fs = calloc(MCD_DISPNUM, sizeof(fsave));
+	fs_size = MCD_DISPNUM;
+	cf = 0;
+	
+	// Polynomial fit on/off - boolean UCHAR
+	fs[cf] = make_fs(MCD_POLYFITON);
+	if(rv = put_fs(&(fs[cf]), &(uidc.polyon), FS_UCHAR, 1)) { goto error; }
+	
+	// Polynomial fit order - UINT.
+	fs[++cf] = make_fs(MCD_POLYFITORDER);
+	if(rv = put_fs(&(fs[cf]), &(uidc.polyord), FS_UINT, 1)) { goto error; }
+	
+	// FFT Phases - Linear indexed array of the 3 phase components.
+	unsigned int n_phase = 3*nc;
+	phases = calloc(n_phase, sizeof(float)) ;
+	for(int j = 0; j < nc; j++) {
+		for(i = 0; i < 3; i++) {
+			phases[3*j + i] = uidc.sphase[j][i];	
+		}
 	}
 	
-	free(buff);
-	buff = NULL;
+	fs[++cf] = make_fs(MCD_PHASE);
+	if(rv = put_fs(&(fs[cf]), phases, FS_FLOAT, n_phase)) { goto error; }
 
+	// Currently displayed FFT channel.
+	fs[++cf] = make_fs(MCD_FFTCHAN);
+	if(rv = put_fs(&(fs[cf]), &uidc.schan, FS_INT, 1)) { goto error; }
 	
-	// Finally, save the program
+
+	// Gains and offsets - FLOAT x nc
+	// Spectrum gains
+	fs[++cf] = make_fs(MCD_SGAINS);
+	if(rv = put_fs(&(fs[cf]), uidc.sgain, FS_FLOAT, nc)) { goto error; }
+	
+	// Spectrum offsets
+	fs[++cf] = make_fs(MCD_SOFFS);
+	if(rv = put_fs(&(fs[cf]), uidc.soff, FS_FLOAT, nc)) { goto error; }
+	
+	// FID Gains
+	fs[++cf] = make_fs(MCD_FGAINS);
+	if(rv = put_fs(&(fs[cf]), uidc.fgain, FS_FLOAT, nc)) { goto error; }
+	
+	// FID Offsets
+	fs[++cf] = make_fs(MCD_FOFFS);
+	if(rv = put_fs(&(fs[cf]), uidc.foff, FS_FLOAT, nc)) { goto error; }
+	
+	// Channels on
+	fchanson = calloc(nc, sizeof(unsigned char));
+	schanson = calloc(nc, sizeof(unsigned char));
+	
+	for(i = 0; i < nc; i++) {
+		if(uidc.fchans[i]) {
+			fchanson[i] = 1;
+		}
+		
+		if(uidc.schans[i]) {
+			schanson[i] = 1;	
+		}
+	}
+	
+	// Spectrum Channels on
+	fs[++cf] = make_fs(MCD_SCHANSON);
+	if(rv = put_fs(&(fs[cf]), schanson, FS_UCHAR, nc)) { goto error; }
+	
+	// FID Channels on
+	fs[++cf] = make_fs(MCD_FCHANSON);
+	if(rv = put_fs(&(fs[cf]), fchanson, FS_UCHAR, nc)) { goto error; }
+	
+	
+	// Put it all in the container, then write the container to file.
+	header = make_fs(MCD_DISPHEADER);
+	if(rv = put_fs_container(&header, fs, cf)) { goto error; }
+	
+	if(rv = fwrite_fs(f, &header)) { goto error; }
+	
+	header = free_fsave(&header);
+	fs = free_fsave_array(fs, fs_size);
+	fs_size = 0;
+	
+	
+	//////////////////////////////
+	//							//
+	//			Program     	//
+	//							//
+	//////////////////////////////
+	
 	rv = save_pprogram(p, f);
-	if(rv != 0) { goto error; }
+	if(rv != 0) { goto error; }		// That was anti-climactic.
 	
 	error:
 	if(ext != NULL) { free(ext); }
 	if(buff != NULL) { free(buff); }
 	if(fbuff != NULL) { free(fbuff); }
 	if(ds != NULL) { free(ds); }
+	
+	if(phases != NULL) { free(phases); }
+	if(fchanson != NULL) { free(fchanson); }
+	if(schanson != NULL) { free(schanson); }
 	
 	free_fsave(&header);
 	if(fs != NULL) { free_fsave_array(fs, fs_size); }
@@ -944,14 +1060,14 @@ int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc
 		f = fopen(fname, "wb+");
 		
 		// Write the hash to make sure it's the same thing.
-		chash = make_fs(MCEX_HASH);
+		chash = make_fs(MCD_HASH);
 		if(rv = put_fs(&chash, &hash, FS_INT, 1)) { goto error; }
 		if(rv = fwrite_fs(f, &chash)) { goto error; }
 	} else {
 		f = fopen(fname, "rb+");
 		
 		// This file must open with the hash.
-		long hoff = find_fsave_in_file(f, MCEX_HASH, MCF_EOF);
+		long hoff = find_fsave_in_file(f, MCD_HASH, MCF_EOF);
 		
 		fseek(f, hoff, SEEK_SET);
 		
@@ -4091,7 +4207,6 @@ int setup_DAQ_task() {
 	if(ic_name != NULL) { free(ic_name); }
 	if(cc_name != NULL) { free(cc_name); }
 	if(cc_out_name != NULL) { free(cc_out_name); }
-//	if(ce.ccname != NULL) { ce.ccname = NULL; }  // Why was this being freed?
 	if(tc_name != NULL) { free(tc_name); }
 	if(rv != 0) {
 		if(ce.atset) { DAQmxClearTask(ce.aTask); }

@@ -211,8 +211,11 @@ int put_fs(fsave *fs, void *val, unsigned int type, unsigned int NumElements) {
 		case FS_DOUBLE:
 			fs->val.d = (double *)val;
 			break;
-		case FS_TIME:
-			fs->val.t = (time_t *)val;
+		case FS_INT64:
+			fs->val.ll = (int64 *)val;
+			break;
+		case FS_UINT64:
+			fs->val.ull = (int64 *)val;
 			break;
 	}
 	
@@ -651,6 +654,9 @@ size_t get_fs_type_size(unsigned int type) {
 			return sizeof(float);
 		case FS_DOUBLE:
 			return sizeof(double);
+		case FS_INT64:
+		case FS_UINT64:
+			return sizeof(int64);
 	}
 	return 0;
 		
@@ -677,7 +683,8 @@ int is_valid_fs_type(unsigned int type) {
 		case FS_UINT:
 		case FS_FLOAT:
 		case FS_DOUBLE:
-		case FS_TIME:
+		case FS_INT64:
+		case FS_UINT64:
 		case FS_CONTAINER:
 		case FS_CUSTOM:
 			return 1;

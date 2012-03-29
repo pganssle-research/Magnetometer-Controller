@@ -180,9 +180,11 @@
 #define MCEX_ERR_NOPROG -11502
 #define MCEX_ERR_NOSTEPS -11503
 #define MCEX_ERR_INVALIDTMODE -11504
+#define MCEX_ERR_NOFNAME -11505
 
 // Strings
 #define MCEX_ERR_NOCEXP_STR "Missing or invalid CEXP structure passed to the function."
 #define MCEX_ERR_NOPROG_STR "Missing or invalid program in the current experiment."
 #define MCEX_ERR_NOSTEPS_STR "CEXP is missing the steps indexing array."
 #define MCEX_ERR_INVALIDTMODE_STR "Invalid transient indexing mode in CEXP"
+#define MCEX_ERR_NOFNAME_STR "No filename has been added to the CEXP struct."

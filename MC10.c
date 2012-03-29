@@ -1898,6 +1898,12 @@ int CVICALLBACK ChangePolySubtract (int panel, int control, int event,
 	{
 		case EVENT_COMMIT:
 
+			CmtGetLock(lock_uidc);
+			GetCtrlVal(panel, control, &uidc.polyon);
+			CmtReleaseLock(lock_uidc);
+			
+			// TODO: Implement the actual subtraction.
+			
 			break;
 	}
 	return 0;
@@ -1910,6 +1916,17 @@ int CVICALLBACK ChangePolyFitOrder (int panel, int control, int event,
 	{
 		case EVENT_COMMIT:
 
+			CmtGetLock(lock_uidc);
+			GetCtrlVal(panel, control, &uidc.polyord);
+			
+			// TODO: Implement the actual subtraction.
+			if(uidc.polyon) {
+				// Subraction goes here.	
+			}
+			
+			CmtReleaseLock(lock_uidc);
+			
+			
 			break;
 	}
 	return 0;

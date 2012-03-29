@@ -22,9 +22,6 @@
 
 #define MCD_FNAME_FIXED_LEN MCD_FNAME_DATE_LEN + MCD_FNAME_NUM_LEN + 2 // Doesn't include null-termination or extension. 
 
-// Experiment hash
-#define MCEX_HASH "ce_hash"
-
 // Data Date Stamp
 #define MCD_DATE_FORMAT "%y%m%d"
 #define MCD_DATESTAMP_MAXSIZE 6
@@ -38,11 +35,13 @@
 
 // Data header
 #define MCD_DATAHEADER "[Data Header]"
-#define MCD_DATANUM 8
+#define MCD_DATANUM 10
 
-#define MCD_EXPNAME "Experiment Name"
-#define MCD_EXPNUM "Experiment Number"
-#define MCD_NCHANS "NumChans"
+#define MCD_FILENAME "filename"
+#define MCD_EXPNAME "ExperimentName"
+#define MCD_EXPNUM "ExperimentNum"
+#define MCD_HASH "HashCode"  
+#define MCD_NCHANS "NumChans"  
 
 #define MCD_DATESTAMP "DateStamp"
 #define MCD_TIMESTART "TimeStarted"
@@ -51,6 +50,20 @@
 #define MCD_CIND "CurrentIndex"
 #define MCD_MAXSTEPS "MaxSteps"
 
+// Display header
+#define MCD_DISPHEADER "[Display Header]"
+#define MCD_DISPNUM 10
+
+#define MCD_POLYFITON "poly_on"
+#define MCD_POLYFITORDER "poly_ord"
+#define MCD_PHASE "phase"
+#define MCD_FFTCHAN "fft_channel"
+#define MCD_SGAINS "spec_gains"
+#define MCD_SOFFS "spec_offsets"
+#define MCD_FGAINS "fid_gains"
+#define MCD_FOFFS "fid_offsets"
+#define MCD_SCHANSON "spec_chans_on"
+#define MCD_FCHANSON "fid_chans_on"
 
 // TDM stuff
 #define MCTD_MAINDATA "DataGroup"			// The main data group name.
@@ -185,6 +198,7 @@ extern void change_range_safe(void);
 
 /****************** Experiment Running *******************/
 extern int setup_cexp(CEXP *cexp);
+extern int add_hash_to_cexp(CEXP *cexp);
 extern int get_ct(CEXP *ce);
 
 /****************** Device Interaction *******************/

@@ -372,6 +372,9 @@ void initialize_data() {
 	uidc.nchans = 0;					// There are no channels before we get them
 	uidc.chans = NULL;
 	
+	uidc.polyon = 0;
+	uidc.polyord = 0;
+	
 	uidc.disp_update = 0;
 	
 	uidc.dlpath = NULL;

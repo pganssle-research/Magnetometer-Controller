@@ -38,6 +38,10 @@
 #define INSTR_HEIGHT 30
 #define INSTR_GAP 5
 
+#define MCD_REALCHAN 0
+#define MCD_IMAGCHAN 1
+#define MCD_MAGCHAN 2
+
 /******************* Structure Definitions *******************/
 // Structures for containing pointers to UI objects
 // pc - > Structure for indexing the UI controls and panels related to pulse programming
@@ -376,6 +380,9 @@ struct {
 	float sgain[8];			// Gains for the spectrum
 	float foff[8];			// Offsets for the FID.
 	float soff[8];			// Offsets for the spectrum
+	
+	unsigned char polyon;	// Whether polynomial fitting is on
+	int polyord;			// Order of the polynomial fit
 
 	int devindex;			// Device index
 	

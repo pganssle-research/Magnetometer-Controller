@@ -3,6 +3,7 @@
 #define PULSE_PROGRAM_LIB_H
 
 #include <PulseProgramTypes.h>
+#include <FileSaveTypes.h>
 
 
 // Some defines that are useful for read_status
