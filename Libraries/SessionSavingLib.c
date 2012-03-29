@@ -293,6 +293,7 @@ void initialize_program() {
 	uipc.ao_exprs = NULL;
 	
 	uipc.ppath = NULL;
+	uipc.pfpath = NULL;
 	CmtReleaseLock(lock_uipc);
 
 	//	Now allocate memory for the instruction arrays, then create one of each
@@ -1400,23 +1401,39 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	//																				//
 	//////////////////////////////////////////////////////////////////////////////////
 
-	// Initialize arrays that we'll need to dynamically allocate here as NULL, so
-	// that if there's an error, you can tell if they need to be freed.
-	int i, nl, ind, num, len, rv = 0;
-	int *inds = NULL;
-	float *ranges = NULL;
+	int i, rv = 0;
 	char *fbuff = (filename == NULL)?session_fname:filename;
-	char *fname = NULL, *buff = NULL, *buff2 = NULL, *p = NULL;
-
-	// PulseProgConfig and also ddesc
-	char *devname, *cnames, *trige, *trigc, *countc, *curcc, *ddesc;
-	devname = cnames = trige = trigc = countc = curcc = ddesc = NULL;
+	char *fname = NULL;
 	
-	// Our first memory allocation stuff.
-	int g = 200, s = 200, g2 = 200;
-	buff = malloc(g);
-	buff2 = malloc(g2);
-
+	// XML Variables
+	CVIXMLDocument xml_doc = -1;
+	
+	CVIXMLElement r_e = 0;			// Root
+	CVIXMLElement chan_e  = 0;		// Reused
+	
+	// General
+	CVIXMLElement gen_e = 0, df_e = 0, pf_e = 0;
+	
+	// Preferences
+	CVIXMLElement pref_e = 0, npsrat_e = 0;
+	
+	// Pulse Program Configuration
+	CVIXMLElement ppc_e, pbdev_e, dev_e, tc_e, cc_e;
+	ppc_e = pbdev_e = dev_e = tc_e = cc_e = 0;
+	
+	// Data Display
+	CVIXMLElement dd_e, fid_e, spec_e, phase_e;
+	dd_e = fid_e = spec_e = phase_e = 0;
+	
+	// Attributes
+	CVIXMLAttribute buff_a = 0, name_a = 0, ind_a = 0;
+	
+	// Buffers
+	char *buff = NULL;
+	int blen = 0, len, nl, ind;
+	int ibuff;
+	
+	// Get the file
 	int flen = strlen(fbuff);
 	if(strlen("xml") > strlen(PPROG_EXTENSION)) {
 		flen += strlen("xml")+2;
@@ -1426,27 +1443,13 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	
 	fname = malloc(flen);
 	
+	blen = 200;
+	buff = malloc(200);
+	
 	if(safe) { 
 		CmtGetLock(lock_uidc);
 		CmtGetLock(lock_uipc);
 	}
-	
-	CVIXMLDocument xml_doc = -1;
-	
-	// Elements
-	CVIXMLElement r_e = 0, pref_e = 0, gen_e = 0, ppc_e = 0, dd_e = 0;
-	CVIXMLElement npsrat_e = 0, tview_e = 0;
-	CVIXMLElement at_e,  bf_e, fpath_e, ppath_e, dlpath_e, lfinfo_e, ddesc_e;
-	CVIXMLElement dev_e, pbdev_e, chans_e, chann_e, chanr_e, trig_e, bttls_e, curcc_e, countc_e;
-	CVIXMLElement fid_e, spec_e, con_e, col_e, gain_e, off_e;
-	at_e = bf_e = fpath_e = ppath_e = dlpath_e = lfinfo_e = ddesc_e = 0;
-	dev_e = pbdev_e = chans_e = chann_e = chanr_e = trig_e = bttls_e = curcc_e = countc_e = 0;
-	fid_e = spec_e = con_e = col_e = gain_e = off_e = 0;
-	
-	// Attributes
-	CVIXMLAttribute ind_a = 0, num_a = 0;
-	CVIXMLAttribute trttl_a = 0, edge_a = 0;
-	CVIXMLAttribute as_a = 0;
 	
 	// Unlike with the save_session function, we'll end with the pulse program, since we need
 	// to make sure broken ttls and trigger ttls and such are set up.
@@ -1455,33 +1458,220 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	
 	// Get the root element and the main elements.
 	if(rv = CVIXMLGetRootElement(xml_doc, &r_e)) { goto error; }
-	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PREFS, &pref_e)) { goto error; }
 	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_GEN, &gen_e)) { goto error; }
+	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PREFS, &pref_e)) { goto error; }  
 	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PPC, &ppc_e)) { goto error; }
 	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_DDISP, &dd_e)) { goto error; }
+
+	
+	//////////////////////////////////////////////////
+	//												//
+	//					 General					//
+	//												//
+	//////////////////////////////////////////////////
+	
+	if(gen_e != 0) {
+		////// Attributes
+		if(rv = CVIXMLGetAttributeByName(gen_e, MCXML_ACTIVETAB, &buff_a)) { goto error; }
+	
+		if(buff_a != 0) {
+			// Active Tab
+			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+			if(sscanf(buff, "%d", &ibuff) == 1 && ibuff != -1) {
+				SetActiveTabPage(mc.mtabs[1], mc.mtabs[0], ibuff);	
+			}
+	
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;
+		}
+
+		////// Child elements
+		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_DATAFILE, &df_e)) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_PROGFILE, &pf_e)) { goto error; }
+		
+		CVIXMLDiscardElement(gen_e);
+		gen_e = 0;
+	}
+	
+	
+	//// Data File
+	if(df_e != 0) {
+		//// Attributes
+		// Base filename
+		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_BFNAME, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValueLength(buff_a, &len)) { goto error; }
+			
+			if(len > 0) {
+				buff = realloc_if_needed(buff, &blen, ++len, 1);
+				
+				if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+				
+				SetCtrlVal(mc.basefname[1], mc.basefname[0], buff);
+			}
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;
+		}
+		
+		// File path
+		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_FPATH, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValueLength(buff_a, &len)) { goto error; }
+			
+			if(len > 0) {
+				buff = realloc_if_needed(buff, &blen, ++len, 1);
+				
+				if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+				
+				SetCtrlVal(mc.path[1], mc.path[0], buff);
+			}
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;
+		}
+		
+		// Load path
+		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_LPATH, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValueLength(buff_a, &len)) { goto error; }
+			
+			if(len > 0) {
+				if(uidc.dlpath != NULL) { free(uidc.dlpath); }
+				uidc.dlpath = malloc(++len);
+				
+				if(rv = CVIXMLGetAttributeValue(buff_a, uidc.dlpath)) { goto error; }
+			}
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;
+		}
+		
+		// Load Data Info Bool
+		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_LFINFO, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			int ldm = 0;
+			
+			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+			sscanf(buff, "%d", &ldm);
+			
+			SetCtrlVal(mc.ldatamode[1], mc.ldatamode[0], ldm);
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;
+		}
+		
+		
+		// Now the description - which is the value.
+		strcpy(buff, "");
+		if(rv = CVIXMLGetElementValueLength(df_e, &len)) { goto error; }
+		if(len > 0) { 
+			buff = realloc_if_needed(buff, &blen, ++len, 1);
+			
+			if(rv = CVIXMLGetElementValue(df_e, buff)) { goto error; }
+		}
+		
+		SetCtrlVal(mc.datadesc[1], mc.datadesc[0], buff);
+		
+		CVIXMLDiscardElement(df_e);
+		df_e = 0;
+	}
+	
+	///// Program File
+	if(pf_e != 0) { 
+		// Load path
+		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_LPATH, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValueLength(buff_a, &len)) { goto error; }
+			
+			if(len > 0) {
+				if(uipc.ppath != NULL) { free(uipc.ppath); }
+				uipc.ppath = malloc(++len);
+				
+				if(rv = CVIXMLGetAttributeValue(buff_a, uipc.ppath)) { goto error; }
+			}
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;
+		}
+		
+		
+		// Program File Path
+		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_FPATH, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValueLength(buff_a, &len)) { goto error; }
+			
+			if(len > 0) {
+				if(uipc.pfpath != NULL) { free(uipc.pfpath); }
+				uipc.pfpath = malloc(++len);
+				
+				if(rv = CVIXMLGetAttributeValue(buff_a, uipc.pfpath)) { goto error; }
+			}
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;
+		}
+	}
 	
 	//////////////////////////////////////////////////
 	//												//
 	//				   Preferences					//
 	//												//
 	//////////////////////////////////////////////////
-	
-	// Get the child elements
+
 	if(pref_e != 0) {
-		if(rv = CVIXMLGetChildElementByTag(pref_e, MCXML_NPSRAT, &npsrat_e)) { goto error; } 	// NP, SR, AT Prefs
-		if(rv = CVIXMLGetChildElementByTag(pref_e, MCXML_TVIEW, &tview_e)) { goto error; }		// Transient view pref
+		////// Attributes
+		if(rv = CVIXMLGetAttributeByName(pref_e, MCXML_TVIEW, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+			
+			sscanf(buff, "%d", &uidc.disp_update);
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;
+		}
 		
+		if(rv = CVIXMLGetChildElementByTag(pref_e, MCXML_NPSRAT, &npsrat_e)) { goto error; } 	// NP, SR, AT Prefs
+
 		CVIXMLDiscardElement(pref_e);
 		pref_e = 0;
 	}
 	
-	if(npsrat_e != 0) {	// Only do this stuff if we found the element.			
-		if(rv = CVIXMLGetElementValue(npsrat_e, buff))	// This can't overrun the buffer
-			goto error;
-	
+	if(npsrat_e != 0) {	// Only do this stuff if we found the element.
 		int np = -1, sr = -1, at = -1;
-		sscanf(buff, "%d;%d;%d", &np, &sr, &at);
 		
+		// NP
+		if(rv = CVIXMLGetAttributeByName(npsrat_e, MCXML_NPPREF, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+			
+			sscanf(buff, "%d", &np);
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;	
+		}
+		
+		// SR
+		if(rv = CVIXMLGetAttributeByName(npsrat_e, MCXML_SRPREF, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+			
+			sscanf(buff, "%d", &sr);
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;	
+		}
+		
+		// AT
+		if(rv = CVIXMLGetAttributeByName(npsrat_e, MCXML_ATPREF, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+			
+			sscanf(buff, "%d", &at);
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;	
+		}
+	  	
 		CtrlCallbackPtr cb;		// Need to get a pointer to the callback function
 		GetCtrlAttribute(pc.np[1], pc.np[0], ATTR_CALLBACK_FUNCTION_POINTER, &cb);
 		
@@ -1493,199 +1683,138 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		npsrat_e = 0;
 	}
 	
-	
-	if(tview_e != 0) {
-		if(rv = CVIXMLGetElementValue(tview_e, buff)) { goto error; }
-		
-		int tview = -1;
-		sscanf(buff, "%d", &tview);
-		
-		if(tview < 0 || tview > 2) { tview = 0; }
-		
-		uidc.disp_update = tview; // Update the uidc var.
-		
-		// Need to make sure that the menu bar checking reflects the uidc var. 
-
-		for(i = 0; i < 3; i++) {
-			SetMenuBarAttribute(mc.mainmenu, mc.vtviewopts[i], ATTR_CHECKED, (i == tview)?1:0);
-		}
-		
-		// Free memory
-		CVIXMLDiscardElement(tview_e);
-		tview_e = 0;
-	}
-	
-	//////////////////////////////////////////////////
-	//												//
-	//					 General					//
-	//												//
-	//////////////////////////////////////////////////
-	
-	// First we get all the elements.
-	if(gen_e != 0) {
-		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_ACTIVETAB, &at_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_DFBNAME, &bf_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_DFPATH, &fpath_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_DLPATH, &dlpath_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_DDESC, &ddesc_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_LFINFO, &lfinfo_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(gen_e, MCXML_PPATH, &ppath_e)) { goto error; }
-		
-		CVIXMLDiscardElement(gen_e);
-		
-		gen_e = 0;
-	}
-	
-	// Then one by one we try and get their values.
-	// Active tab
-	if(at_e != 0) {
-		if(rv = CVIXMLGetElementValue(at_e, buff)) { goto error; }
-		
-		int tab = -1;
-		sscanf(buff, "%d", &tab);
-		if(tab != -1)
-			SetActiveTabPage(mc.mtabs[1], mc.mtabs[0], tab);
-		
-		CVIXMLDiscardElement(at_e);
-		at_e = 0;
-	}
-	
-	// Base filename
-	if(bf_e != 0) {
-		if(rv = CVIXMLGetElementValueLength(bf_e, &len)) { goto error; }
-		
-		buff = realloc_if_needed(buff, &g, len, s);
-		
-		if(rv = CVIXMLGetElementValue(bf_e, buff)) { goto error; }
-		
-		if(len > 0) 
-		 SetCtrlVal(mc.basefname[1], mc.basefname[0], buff); 
-		
-		CVIXMLDiscardElement(bf_e);
-		bf_e = 0;
-	}
-	
-	// Data path
-	if(fpath_e != 0) {
-		if(rv = CVIXMLGetElementValueLength(fpath_e, &len)) { goto error; }
-		
-		buff = realloc_if_needed(buff, &g, len, s);
-		
-		if(rv = CVIXMLGetElementValue(fpath_e, buff)) { goto error; }
-		
-		if(len > 0)
-			SetCtrlVal(mc.path[1], mc.path[0], buff);
-		
-		CVIXMLDiscardElement(fpath_e);
-		fpath_e = 0;
-	}
-	
-	// Data load path
-	if(dlpath_e != 0) {
-		if(rv = CVIXMLGetElementValueLength(dlpath_e, &len)) { goto error; }
-		
-		buff = realloc_if_needed(buff, &g, len, s);
-		
-		if(rv = CVIXMLGetElementValue(dlpath_e, buff)) { goto error; }
-		
-		// We don't want to set dlpath to anything but NULL unless we actually have something to put there.
-		if(len > 0) {
-			uidc.dlpath = malloc(len+1);
-			strcpy(uidc.dlpath, buff);
-		}
-
-		CVIXMLDiscardElement(dlpath_e);
-		dlpath_e = 0;
-	}
-	
-	// Data description
-	if(ddesc_e != 0) {
-		if((rv = CVIXMLGetElementValueLength(ddesc_e, &len)) && rv != 1) { goto error; }
-		ddesc = malloc(len+1);
-		
-		if(len > 0) {
-			if(rv = CVIXMLGetElementValue(ddesc_e, ddesc)) { goto error; }
-		
-			SetCtrlVal(mc.datadesc[1], mc.datadesc[0], ddesc);
-		}
-		
-		free(ddesc);
-		ddesc = NULL;
-
-		CVIXMLDiscardElement(ddesc_e);
-		ddesc_e = 0;
-	}
-	
-	// Program load path
-	if(ppath_e != 0) {
-		if(rv = CVIXMLGetElementValueLength(ppath_e, &len)) { goto error; }
-		
-		buff = realloc_if_needed(buff, &g, len, s);
-		
-		// As above, load into a buffer first, in case there's an error.
-		if(rv = CVIXMLGetElementValue(ppath_e, buff)) { goto error; }
-		
-		if(len > 0) {
-			uipc.ppath = malloc(len+1);
-			strcpy(uipc.ppath, buff);;
-		}
-		
-		CVIXMLDiscardElement(ppath_e);
-		ppath_e = 0;
-	}
-	
-	// Load file info preference
-	if(lfinfo_e != 0) {								// Boolean, can't overrun buffer.
-		if(rv = CVIXMLGetElementValue(lfinfo_e, buff)) { goto error; }
-		
-		int lfinfo = 0;			// Default to no
-		sscanf(buff, "%d", &lfinfo);
-		
-		SetCtrlVal(mc.ldatamode[1], mc.ldatamode[0], lfinfo);
-		
-		CVIXMLDiscardElement(lfinfo_e);
-		lfinfo_e = 0;
-	}
-	
 	//////////////////////////////////////////////////
 	//												//
 	//			   Pulse Program Config				//
 	//												//
 	//////////////////////////////////////////////////
 	
-	// Get the elements and attributes, if possible.
 	if(ppc_e != 0) {
-		if(rv = CVIXMLGetAttributeByName(ppc_e, MCXML_TRIGTTL, &trttl_a))  { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_DEV, &dev_e)) { goto error; }
+		// Child Elements
 		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_PBDEV, &pbdev_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_CHANSON, &chans_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_CHANNAMES, &chann_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_CHANRANGE, &chanr_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_CURCHAN, &curcc_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_COUNTCHAN, &countc_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_TRIGCHAN, &trig_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_BROKETTLS, &bttls_e)) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(ppc_e, MCXML_DEV, &dev_e)) { goto error; }
 		
 		CVIXMLDiscardElement(ppc_e);
 		ppc_e = 0;
 	}
 	
-	// Now we go through and get all the elements and attributes we found.
-	// Trigger TTL
-	if(trttl_a != 0) {
-		if(rv = CVIXMLGetAttributeValue(trttl_a, buff)) { goto error; }
-		
-		int trig_ttl = -1;
-		sscanf(buff, "%d", &trig_ttl);
-		
-		if(trig_ttl >= 0 && trig_ttl < 24) {
-			uipc.trigger_ttl = trig_ttl;
-			SetCtrlVal(pc.trig_ttl[1], pc.trig_ttl[0], trig_ttl);
+	
+	// PulseBlaster
+	if(pbdev_e != 0) {
+		// Device index
+		if(rv = CVIXMLGetAttributeByName(pbdev_e, MCXML_INDEX, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+			
+			ind = -1;
+			sscanf(buff, "%d", &ind);
+			
+			if(ind >= 0) {
+				GetNumListItems(pc.pbdev[1], pc.pbdev[0], &nl);
+				
+				if(nl > ind) {
+					SetCtrlIndex(pc.pbdev[1], pc.pbdev[0], ind);	
+				}
+			}
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;	
 		}
 		
-		CVIXMLDiscardAttribute(trttl_a);
-		trttl_a = 0;
+		// Trigger TTL
+		if(rv = CVIXMLGetAttributeByName(pbdev_e, MCXML_TRIGTTL, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+			
+			int trig_ttl = -1;
+			sscanf(buff, "%d", &trig_ttl);
+			
+			if(trig_ttl > 0 && trig_ttl < 24) {
+				uipc.trigger_ttl = trig_ttl;	
+				SetCtrlVal(pc.trig_ttl[1], pc.trig_ttl[0], trig_ttl);
+			}
+			
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;	
+		}
+		
+		// Broken TTLS
+		if(rv = CVIXMLGetAttributeByName(pbdev_e, MCXML_BROKENTTLS, &buff_a)) { goto error; }
+		if(buff_a != 0) {
+			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+		
+			sscanf(buff, "%d", &uipc.broken_ttls);
+		
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;	
+		}
+	
+		CVIXMLDiscardElement(pbdev_e);
+		pbdev_e = 0;
 	}
+	
+	// DAQ
+	if(dev_e != 0) {
+		// Device name
+		ind = -1;
+		strcpy(buff, "");
+		
+		// Device name
+		if(rv = CVIXMLGetAttributeByName(dev_e, MCXML_NAME, &buff_a)) { goto error; }
+		if(buff_a != 0) { 
+			if(rv = CVIXMLGetAttributeValueLength(buff_a, &len)) { goto error; }
+			
+			if(len > 0) {
+				buff = realloc_if_needed(buff, &blen, ++len, 1);
+				
+				if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+			}
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;
+		}
+		
+		// Device Index
+		if(rv = CVIXMLGetAttributeByName(dev_e, MCXML_INDEX, &buff_a)) { goto error; }
+		if(buff_a != 0) { 
+			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
+			
+			sscanf(buff, "%d", &ind);
+			
+			CVIXMLDiscardAttribute(buff_a);
+			buff_a = 0;
+		}
+		
+		// Try and figure out what device we want from the information available.
+		GetNumListItems(pc.dev[1], pc.dev[0], &nl);
+		if(nl > 0) {
+			int old_ind;
+			GetCtrlIndex(pc.dev[1], pc.dev[0], &old_ind);
+			
+			if(strlen(buff) > 0) {
+				int nind;
+				GetIndexFromValue(pc.dev[1], pc.dev[0], &nind, buff);
+				
+				if(nind >= 0) { 
+					ind = nind;
+				}
+			}
+			
+			// If we found something, reload DAQ info.
+			if(ind >= 0 && ind < nl) {
+				SetCtrlIndex(pc.dev[1], pc.dev[0], ind);
+			
+				if(ind != old_ind) {
+					load_DAQ_info_safe(0, 0, 1);	
+				}
+			}
+		}
+		
+		CVIXMLDiscardElement(dev_e);
+		dev_e = 0;
+	}
+
 	
 	// Device
 	if(dev_e != 0) {
@@ -2024,15 +2153,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		trig_e = 0;
 	}
 	
-	// Broken TTLS
-	if(bttls_e != 0) {
-		if(rv = CVIXMLGetElementValue(bttls_e, buff)) { goto error; }
-		
-		sscanf(buff, "%d", &uipc.broken_ttls);
-		
-		CVIXMLDiscardElement(bttls_e);
-		bttls_e = 0;
-	}
+	
 	
 	//////////////////////////////////////////////////
 	//												//
