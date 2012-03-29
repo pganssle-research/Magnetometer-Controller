@@ -212,10 +212,10 @@ int put_fs(fsave *fs, void *val, unsigned int type, unsigned int NumElements) {
 			fs->val.d = (double *)val;
 			break;
 		case FS_INT64:
-			fs->val.ll = (int64 *)val;
+			fs->val.ll = (__int64 *)val;
 			break;
 		case FS_UINT64:
-			fs->val.ull = (int64 *)val;
+			fs->val.ull = (__int64 *)val;
 			break;
 	}
 	
@@ -656,7 +656,7 @@ size_t get_fs_type_size(unsigned int type) {
 			return sizeof(double);
 		case FS_INT64:
 		case FS_UINT64:
-			return sizeof(int64);
+			return sizeof(__int64);
 	}
 	return 0;
 		

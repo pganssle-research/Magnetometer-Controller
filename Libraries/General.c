@@ -322,7 +322,7 @@ char *generate_expression_error_message(char *err_message, int *pos, int size) {
 	return output;
 }
 
-unsigned int64 basic_string_hash(char *string) {
+unsigned __int64 basic_string_hash(char *string) {
 	// Given a null-terminated string, we'll generate an extremely basic hash.
 	// This is in no way secure, but hopefully it's got minimal collisions.
 	
@@ -343,7 +343,7 @@ unsigned int64 basic_string_hash(char *string) {
 	p[slen-1] = '\0';
 	
 	// Go through and generate an array of hashes
-	unsigned int64 hash = MCG_HASH_SEED;
+	unsigned __int64 hash = MCG_HASH_SEED;
 	for(p; *p != '\0'; p++) {
 		hash = MCG_HASH_MULTIPLIER * (hash * (*p + 1) + *p);
 		hash += hash << 32;
@@ -355,14 +355,14 @@ unsigned int64 basic_string_hash(char *string) {
 	
 }
 
-unsigned int64 basic_string_hash_fast(char *string) {
+unsigned __int64 basic_string_hash_fast(char *string) {
 		unsigned int slen = strlen(string);
 	unsigned int len = 1;
 	
 	unsigned char *p = NULL;
 
 	// Go through and generate an array of hashes
-	int64 hash = MCG_HASH_SEED;
+	__int64 hash = MCG_HASH_SEED;
 	for(p = string; *p != '\0'; p++) {
 		hash = MCG_HASH_MULTIPLIER * (hash * (*p + 1)+*p);
 		hash += hash << 32;
@@ -403,9 +403,10 @@ void *realloc_if_needed(void *array, int *len, int new_len, int inc) {
 	
 	if(array == NULL) {
 		array = malloc(l);
+	} else {
+		array = realloc(array, l);
 	}
 	
-	array = realloc(array, l);
 	*len = l;
 	return array;
 }

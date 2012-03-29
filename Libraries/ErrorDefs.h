@@ -3,6 +3,7 @@
 *            		Error Indexing						   *
 * 														   *
 ***********************************************************/
+#ifndef ERROR_DEFS_H
 #define ERROR_DEFS_H
 
 // Index
@@ -10,6 +11,7 @@
 #define MCD_ERR 2
 #define MCPP_ERR 3
 #define MCEX_ERR 4
+#define MCSS_ERR 5
 
 // FSave Errors
 #define MCF_ERR_TITLE "File Saving Error"
@@ -30,6 +32,11 @@
 #define MCEX_ERR_TITLE "Current Experiment Error"
 #define MCEX_ERR_MAX -11501
 #define MCEX_ERR_MIN -11750
+
+// Session Saving
+#define MCSS_ERR_TITLE "Session Saving Error"
+#define MCSS_ERR_MAX -11751
+#define MCSS_ERR_MIN -12000
 
 /***********************************************************
 *  														   *
@@ -188,3 +195,19 @@
 #define MCEX_ERR_NOSTEPS_STR "CEXP is missing the steps indexing array."
 #define MCEX_ERR_INVALIDTMODE_STR "Invalid transient indexing mode in CEXP"
 #define MCEX_ERR_NOFNAME_STR "No filename has been added to the CEXP struct."
+
+/***********************************************************
+*  														   *
+*           Sessopm Savomg Error Values					   *
+* 														   *
+***********************************************************/
+// Return values
+#define MCSS_ERR_NOOUT -11751
+#define MCSS_ERR_NOATTNAME -11752
+
+// Strings
+#define MCSS_ERR_NOOUT_STR "No output pointer was specified."
+#define MCSS_ERR_NOATTNAME_STR "No attribute name passed to function."
+
+#endif
+

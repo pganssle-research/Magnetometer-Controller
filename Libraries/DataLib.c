@@ -20,25 +20,22 @@
 
 // Includes
 #include <analysis.h>
-#include <cvixml.h>  
-#include <NIDAQmx.h>
-#include <toolbox.h>
 #include <userint.h>
+#include "toolbox.h"
 #include <ansi_c.h>
-#include <formatio.h>  
-#include <spinapi.h>					// SpinCore functions
-#include <cviddc.h> 
+#include <utility.h>
 
-#include <UIControls.h>					// For manipulating the UI controls
-#include <FileSave.h>
-#include <MathParserLib.h>				// For parsing math
-#include <DataLib.h>
-#include <MCUserDefinedFunctions.h>		// Main UI functions
-#include <PPConversion.h>
-#include <PulseProgramLib.h>
-#include <SaveSessionLib.h>
+#include <Version.h> 
 #include <General.h>
-#include <Version.h>
+#include <MCUserDefinedFunctions.h>
+
+#include <UIControls.h>
+#include <DataLib.h>
+#include <DataLibPriv.h>
+#include <PulseProgramLib.h>
+#include <FileSave.h>
+#include <PPConversion.h> // For now.
+
 #include <ErrorDefs.h>
 #include <ErrorLib.h>
 
@@ -366,7 +363,7 @@ int run_experiment(PPROGRAM *p) {
 	
 	if(ev)  {
 		if((ev < -247 && ev >= -250) || (ev < -6201 && ev >= -6224)) {  
-			display_ddc_error(ev); 
+			display_error(ev); 
 		} else {
 			uInt32 es_size = DAQmxGetExtendedErrorInfo(NULL, 0);
 			
@@ -676,8 +673,8 @@ int initialize_tdm() {
 	free(name);
 	vname = desc = name = NULL;
 	
-	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tdone);
-	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tstart);
+	// Current time
+	ce.tstart = ce.tdone = time(NULL);
 
 	// Now since it's the first time, we need to set up the attributes, metadata and program.
 	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_NP, DDC_Int32, np)) { goto error; } 
@@ -1322,7 +1319,7 @@ int save_data_ddc(double *data, double **avg) {
 	csstr = NULL;
 	
 	// Save the time completed
-	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tdone);
+	ce.tdone = time(NULL);
 	if(rv = DDC_SetChannelGroupProperty(mcg, MCTD_TIMEDONE, ce.tdone)) { goto error; }
 	
 	// Grab the channels.

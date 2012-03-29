@@ -2,10 +2,6 @@
 #ifndef FILE_SAVE_TYPES_H
 #define FILE_SAVE_TYPES_H
 
-#ifndef int64
-#define int64 __int64
-#endif
-
 // Data saving library prototypes.
 // Types
 typedef struct fsave {
@@ -22,8 +18,8 @@ typedef struct fsave {
 		float *f;				// Type 5
 		double *d;				// Type 6
 		
-		int64 *ll;				// Type 7
-		unsigned int64 *ull;	// Type 8
+		__int64 *ll;				// Type 7
+		unsigned __int64 *ull;	// Type 8
 	} val;
 	
 	unsigned int type;

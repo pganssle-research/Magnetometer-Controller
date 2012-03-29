@@ -1,13 +1,9 @@
 // Includes
-#include <NIDAQmx.h>
-#include <PulseProgramTypes.h>
-
-#ifndef int64
-#define int64 __int64
-#endif
-
 #ifndef UI_CONTROLS_H
 #define UICONTROLS_H
+
+#include <NIDAQmx.h>
+#include <PulseProgramTypes.h>
 
 /******************* Constant Definitions *******************/
 #define MC_FID	0
@@ -439,8 +435,8 @@ typedef struct CEXP {
 	int ninst;				// Number of instructions in this run
 	PINSTR *ilist;			// List of instructions for this run.
 
-	CVIAbsoluteTime tstart;	// Time started
-	CVIAbsoluteTime tdone; 	// Time that the most recent part was completed.
+	time_t tstart;	// Time started
+	time_t tdone; 	// Time that the most recent part was completed.
 	
 	// Analog output info
 	TaskHandle oTask;		// Analog output task

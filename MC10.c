@@ -110,46 +110,47 @@ Descrip	: Since changing over to this new system, you've broken all the
 
 /******************************* Includes *********************************/
 
-#include <userint.h>					// Start with the standard libraries
 #include <cvirte.h>		
-#include <stdio.h>
 #include <stdlib.h>
+#include <ansi_c.h>
+#include <NIDAQmx.h>   
+
+#include <Version.h>
+
+#include <userint.h>					// Start with the standard libraries
+#include <stdio.h>
 #include <stdarg.h>
 #include <math.h>
 #include <windows.h>
 #include <analysis.h>
-#include <utility.h>
-#include <ansi_c.h>
 #include "pathctrl.h"
 #include "toolbox.h"
 #include "asynctmr.h"
 #include <errno.h>
 #include <ctype.h>
 #include <string.h>
-#include <cviddc.h>
 
-#include <spinapi.h>					// Then the external libraries
-#include <NIDAQmx.h>
 
-#include <Magnetometer Controller.h>	// Then the libraries specific to
-#ifndef UICONTROLS_H
-#include <UIControls.h>
-#endif
-
-#ifndef FILE_SAVE_H
-#include <FileSave.h>
-#endif
-
+#include <MC10.h> 
 #include <MathParserLib.h>
 
-#include <MCUserDefinedFunctions.h>
-#include <MC10.h> 
 #include <DataLib.h>
 #include <PulseProgramLib.h>
 #include <SaveSessionLib.h>
-#include <General.h>
+
 #include <PPConversion.h>
-#include <Version.h>
+#include <UIControls.h>
+#include <FileSave.h>
+#include <MCUserDefinedFunctions.h> 
+#include <utility.h>
+
+#include <General.h>  
+#include <spinapi.h>					// Then the external libraries
+
+
+#include <Magnetometer Controller.h>	// Then the libraries specific to
+
+
 
 static TaskHandle acquireSignal, counterTask;    
 extern PVOID RtlSecureZeroMemory(PVOID ptr, SIZE_T cnt);

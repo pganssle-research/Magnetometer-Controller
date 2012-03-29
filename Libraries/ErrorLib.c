@@ -9,8 +9,15 @@
 // independently from this library.									//
 //////////////////////////////////////////////////////////////////////
 
+#include <userint.h>
 #include <ErrorDefs.h>
 #include <ErrorLib.h>
+
+void display_error(int err_val) {
+	unsigned int type = is_mc_error(err_val);
+	
+	MessagePopup(get_mc_error_title(type), get_err_string(err_val, type));
+}
 
 char *get_mc_error_title(unsigned int err_index) {
 	switch(err_index) {

@@ -1,9 +1,5 @@
 #define GENERAL_H
 
-#ifndef int64
-#define int64 __int64
-#endif
-
 #define MCG_EOF -1
 
 #define MCG_DFLT_BUFF_SIZE 128000 // 128kB 
@@ -35,8 +31,8 @@ extern char **get_nc_strings(char *string, int *ns);
 extern char **generate_char_num_array(int first, int last, int *elems);
 extern char *generate_expression_error_message(char *err_message, int *pos, int size);
 
-extern unsigned int64 basic_string_hash(char *string);
-extern unsigned int64 basic_string_hash_2(char *string);
+extern unsigned __int64 basic_string_hash(char *string);
+extern unsigned __int64 basic_string_hash_2(char *string);
 /************** Memory Allocation *************/     
 extern void *malloc_or_realloc(void *pointer, size_t size);  
 extern void *realloc_if_needed(void *array, int *len, int new_len, int inc);

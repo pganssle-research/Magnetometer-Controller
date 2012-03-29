@@ -1,9 +1,8 @@
 // PPConversion library
+#ifndef PP_CONVERSION_H
 #define PP_CONVERSION_H
 
-#ifndef PULSE_PROGRAM_TYPES_H
 #include <PulseProgramTypes.h>
-#endif
 
 // Includes
 #include <cvitdms.h>
@@ -11,6 +10,10 @@
 
 // Macro definitions.
 // Properties of the Programs group
+// File type
+#define MCTD_TDMS 0		// TDMS
+#define MCTD_TDM 1		// TDM
+
 #define MCTD_PGNAME	"ProgramGroup"			// Name of the group
 
 #define MCTD_PNP "nPoints"					// p.np
@@ -88,3 +91,5 @@ PPROGRAM *load_programDDC(DDCChannelGroupHandle pcg, int *err_val);
 PPROGRAM *load_programDDC_safe(DDCChannelGroupHandle pcg, int *err_val);
 
 extern void display_ddc_error(int err_val);
+
+#endif

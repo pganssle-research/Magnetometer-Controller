@@ -57,24 +57,27 @@ Desrip	: Need to add a few things to PPROGRAM that I did not consider at
 
 #include "toolbox.h"
 #include <userint.h>
+#include <utility.h>
 #include <ansi_c.h>
-#include <spinapi.h>					// SpinCore functions
-#include <NIDAQmx.h>
-
 #include <FileSave.h>
 #include <MathParserLib.h>				// For parsing math
 #include <UIControls.h>					// For manipulating the UI controls
 
-#include <MCUserDefinedFunctions.h>		// Main UI functions
-#include <MC10.h>
-#include <PulseProgramLib.h>			// Prototypes and type definitions for this file
+#include <MCUserDefinedFunctions.h>
+#include <PulseProgramLib.h>
+#include <PulseProgramLibPriv.h>
 #include <SaveSessionLib.h>
-#include <General.h>
-#include <PPConversion.h>
 
 #include <Version.h>
+#include <General.h>
 #include <ErrorLib.h>
 #include <ErrorDefs.h>
+
+#include <PPConversion.h>
+#include <MC10.h>
+
+
+#include <spinapi.h>
 
 //////////////////////////////////////////////////////////////
 // 															//

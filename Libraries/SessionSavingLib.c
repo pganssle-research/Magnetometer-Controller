@@ -19,28 +19,21 @@
 *****************************************************************************/
 
 // Includes
-#include "FileBrowser.h"
-#include <cvixml.h>
-#include "toolbox.h"
-#include <userint.h>
-#include <ansi_c.h>
-#include <spinapi.h>					// SpinCore functions
-#include <NIDAQmx.h>
-
-#include <UIControls.h>					// For manipulating the UI controls
-#include <FileSave.h> 
-
-#include <cvitdms.h>
-#include <cviddc.h>
-
-#include <MathParserLib.h>
-#include <MCUserDefinedFunctions.h>
-#include <PulseProgramLib.h>			
 #include <SaveSessionLib.h>
-#include <DataLib.h>
+#include <SessionSavingLibPrivate.h>
+
+#include <UIControls.h>
 #include <Magnetometer Controller.h>
+#include <PulseProgramLib.h>
+#include <DataLib.h>
+#include <MCUserDefinedFunctions.h>
+
 #include <General.h>
-#include <PPConversion.h>
+#include <ErrorDefs.h>
+#include <ErrorLib.h>
+
+#include <spinapi.h>
+
 
 // Globals
 char *session_fname = "SavedSession";
@@ -1410,6 +1403,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	
 	CVIXMLElement r_e = 0;			// Root
 	CVIXMLElement chan_e  = 0;		// Reused
+	ListType chan_list = 0;
 	
 	// General
 	CVIXMLElement gen_e = 0, df_e = 0, pf_e = 0;
@@ -1811,13 +1805,51 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			}
 		}
 		
+		// Get the channels on.
+		int chanson;
+		if(rv = get_attribute_int_val(dev_e, MCXML_NCHANSON, &chanson, -1)) { goto error; }
+		if(chanson >= 1) {
+			// Find the first channel.
+			if(rv = CVIXMLFindElements(dev_e, MCXML_CHANNEL, &chan_list)) { goto error; }
+			nl = ListNumItems(chan_list);
+			float range;
+			
+			for(i = 0; i < nl; i++) {  // One-based index, apparently
+				ListRemoveItem(chan_list, &chan_e, FRONT_OF_LIST); 
+				if(chan_e != 0) {
+					// Index
+					if(rv = get_attribute_int_val(chan_e, MCXML_INDEX, &ind, -1)) { goto error; }
+					
+					// Name
+					buff = get_element_val(chan_e, buff, &blen, &rv);
+					if(rv < 0) { goto error; }
+					
+					// Find the relevant channel based on this information
+					
+					
+					// Range
+					if(rv = get_attribute_float_val(chan_e, MCXML_RANGE, &range, uidc.range[i])) { goto error; }
+					
+					if(range > 0) {
+						uidc.range[i] = range;
+					}
+					
+					CVIXMLDiscardElement(chan_e);
+					chan_e = 0;
+				}
+			}
+			
+			ListDispose(chan_list);
+			chan_list = 0;
+		}
+	
 		CVIXMLDiscardElement(dev_e);
 		dev_e = 0;
 	}
 
 	
 	// Device
-	if(dev_e != 0) {
+/*	if(dev_e != 0) {
 		int o_ind = -2;
 		
 		// Get the index attribute first, I guess.
@@ -2342,11 +2374,11 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			free_pprog(p);
 		}
 	}
-	
+		*/
 	
 	error:
 	// Now free memory that's been allocated and not freed
-	if(fname != NULL) { free(fname); }
+	/* if(fname != NULL) { free(fname); }
 	if(buff != NULL) { free(buff); }
 	if(buff2 != NULL) { free(buff2); }
 	if(devname != NULL) { free(devname); }
@@ -2397,7 +2429,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	if(trttl_a != 0) { CVIXMLDiscardAttribute(trttl_a); }
 	if(edge_a != 0) { CVIXMLDiscardAttribute(edge_a); }
 	if(as_a != 0) { CVIXMLDiscardAttribute(as_a); }
-	
+					 */
 	// Discard the document
 	if(xml_doc != -1) { CVIXMLDiscardDocument(xml_doc); }
 	
@@ -2407,6 +2439,142 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	}
 	return rv;
 }
+
+char *get_element_val(CVIXMLElement elem, char *buff, int *blen, int *ev) {
+	int rv = 0;
+	int failed = 1;
+	int bl = 0, len;
+	
+	if(blen != NULL) { bl = *blen; }
+	
+	
+	if(elem != 0) {
+		if(rv = CVIXMLGetElementValueLength(elem, &len) && len != 0) { goto error; }
+		
+		if(len > 0) {
+			buff = realloc_if_needed(buff, &bl, ++len, 1);
+			
+			if(rv = CVIXMLGetElementValue(elem, buff)) { goto error; }
+			
+			failed = 0;
+		} else {
+			rv = 0;	
+		}
+	}
+	
+	error:
+	
+	if(failed) {
+		buff = realloc_if_needed(buff, &bl, 2, 1);
+		strcpy(buff, "");
+	}
+	
+	if(blen != NULL) { *blen = bl; }
+	if(ev != NULL) { *ev = rv; }
+	
+	return buff;
+}
+
+char *get_attribute_val(CVIXMLElement elem, char *att_name, char *buff, int *blen, int *ev) {
+	// Get the value from an attribute. If buff == NULL, this will allocate a new
+	// array. Otherwise it will reallocate buff if necessary, buff is returned.
+	// On failure, buff is set to "". Only pass dynamically allocated memory to this.
+	// Result must be freed.
+	
+	CVIXMLAttribute att = 0;
+	int bl = 0, failed = 1, rv = 0, len;
+	
+	if(att_name == NULL) { rv = MCSS_ERR_NOATTNAME; goto error; }
+	
+	if(blen != NULL) {
+		bl = *blen;
+	}
+
+	if(elem != 0) {
+		if(rv = CVIXMLGetAttributeByName(elem, att_name, &att)) { goto error; }
+		
+		if(att != 0) { 
+			if(rv = CVIXMLGetAttributeValueLength(att, &len) && len != 0) { goto error; }
+			if(len > 0) {
+				buff = realloc_if_needed(buff, &bl, ++len, 1);
+				failed = 0;
+			} else {
+				rv = 0;	
+			}
+		}
+	}
+	
+	error:
+	if(att != 0) { CVIXMLDiscardAttribute(att); }
+	
+	// Not what you're used to, I imagine
+	if(failed) {
+		buff = realloc_if_needed(buff, &bl, 2, 1);
+		strcpy(buff, "");
+	}
+	
+	if(blen != NULL) { *blen = bl; }
+	if(ev != NULL) { *ev = rv; }
+	
+	return buff;
+}
+
+int get_attribute_float_val(CVIXMLElement elem, char *att_name, float *val, float dflt_val) {
+	int rv = 0;
+	CVIXMLAttribute att = 0;
+	char buff[32] ="";		// We'll assume that no floats are represented with more than 31 digits.
+	float out = dflt_val;
+
+	if(val == NULL) { rv = MCSS_ERR_NOOUT; goto error; }
+	if(att_name == NULL) { rv = MCSS_ERR_NOATTNAME; goto error; }
+
+	if(elem != 0) {
+		if(rv = CVIXMLGetAttributeByName(elem, att_name, &att)) { goto error; }
+	
+		if(att != 0) {
+			if(rv = CVIXMLGetAttributeValue(att, buff)) { goto error; }
+			float fbuff = 0;
+			if(sscanf(buff, "%f", &fbuff) == 1) {
+				out = fbuff;	
+			}
+		}
+	}
+
+	error:
+	if(att != 0) { CVIXMLDiscardAttribute(att); }
+
+	*val = out;
+	return rv;	
+}
+
+int get_attribute_int_val(CVIXMLElement elem, char *att_name, int *val, int dflt_val) {
+	int rv = 0;
+	CVIXMLAttribute att = 0;
+	char buff[32] ="";		// We'll assume that no ints are represented with more than 31 digits.
+	int out = dflt_val;
+	
+	if(val == NULL) { rv = MCSS_ERR_NOOUT; goto error; }
+	if(att_name == NULL) { rv = MCSS_ERR_NOATTNAME; goto error; }
+	
+	if(elem != 0) {
+		if(rv = CVIXMLGetAttributeByName(elem, att_name, &att)) { goto error; }
+		
+		if(att != 0) {
+			if(rv = CVIXMLGetAttributeValue(att, buff)) { goto error; }
+			int ibuff = 0;
+			if(sscanf(buff, "%d", &ibuff) == 1) {
+				out = ibuff;	
+			}
+		}
+	}
+	
+	error:
+	if(att != 0) { CVIXMLDiscardAttribute(att); }
+	
+	*val = out;
+	return rv;
+}
+
 
 void display_xml_error(int err) {
 	char *message = malloc(500);
