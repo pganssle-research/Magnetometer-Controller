@@ -1899,7 +1899,11 @@ int CVICALLBACK ChangePolySubtract (int panel, int control, int event,
 		case EVENT_COMMIT:
 
 			CmtGetLock(lock_uidc);
-			GetCtrlVal(panel, control, &uidc.polyon);
+			int val;
+			GetCtrlVal(panel, control, &val);
+			
+			uidc.polyon = val?1:0;
+			
 			CmtReleaseLock(lock_uidc);
 			
 			// TODO: Implement the actual subtraction.

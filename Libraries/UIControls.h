@@ -351,7 +351,9 @@ struct {
 	char **ao_exprs;			// Variable expressions.		Size = [max_anum]
 
 	// Other
-	char *ppath;				// The default directory for the base program.
+	char *ppath;				// The default directory for the base program
+	char *pfpath;				// Full path for the current program
+	
 	int uses_pb;				// Whether or not to use the pulseblaster.
 } uipc;
 

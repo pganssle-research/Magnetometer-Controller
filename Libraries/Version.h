@@ -1,10 +1,12 @@
 /************************************************
 *            Version Information                *
 ************************************************/
+#ifndef VERSION_H
 #define VERSION_H
 
 // Program version number and string.
-#define MC_VERSION 1.1			
+#define MC_VERSION 1.1
+#define MC_VNUMSTR "1.1"
 #define MC_VERSION_STRING "Magnetometer Controller v1.1"
 
 // Pulse Program Format Version and Extension
@@ -16,3 +18,7 @@
 #define MCD_VERSION 0.1
 #define MCD_EXTENSION "mcd"
 #define MCD_ALLEXTS ".mcd; .tdm"
+
+// Display options
+#define MCD_NPHASEORDERS 3
+#endif
