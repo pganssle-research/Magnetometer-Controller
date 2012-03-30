@@ -34,7 +34,6 @@
 
 #include <spinapi.h>
 
-
 // Globals
 char *session_fname = "SavedSession";
 
@@ -1077,12 +1076,15 @@ int save_session(char *filename, int safe) { // Primary session saving function
 
 		for(i = 0; i < uidc.nchans; i++) {
 			if(uidc.chans[i]) {
-				GetLabelLengthFromIndex(pc.curchan[1], pc.curchan[0], i, &len);
+				GetLabelLengthFromIndex(pc.ic[1], pc.ic[0], i, &len);
 				
 				on_indices[j] = i;
 				chan_names[j] = malloc(len+1);
 		
-				GetLabelFromIndex(pc.curchan[1], pc.curchan[0], i, chan_names[j]);
+				GetLabelFromIndex(pc.ic[1], pc.ic[0], i, chan_names[j]);
+				
+				strcpy(chan_names[j], chan_names[j]+1); // Truncate trailing character.
+				
 				if(++j >= uidc.onchans) { break; }  
 			}
 		}
@@ -1302,7 +1304,7 @@ int save_session(char *filename, int safe) { // Primary session saving function
 	CVIXMLDiscardElement(dd_e);
 	fid_e = spec_e = dd_e = 0;
 	
-	// Save the document
+	// Save the document			   
 	rv = CVIXMLSaveDocument(xml_doc, 1, fname);
 	
 	error:
@@ -1396,7 +1398,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 
 	int i, rv = 0;
 	char *fbuff = (filename == NULL)?session_fname:filename;
-	char *fname = NULL;
+	char *fname = NULL, *dname = NULL, *buff2 = NULL;
 	
 	// XML Variables
 	CVIXMLDocument xml_doc = -1;
@@ -1814,8 +1816,30 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			nl = ListNumItems(chan_list);
 			float range;
 			
+			GetCtrlValStringLength(pc.dev[1], pc.dev[0], &len);
+			if(len > 0) {
+				dname = malloc(len+2);
+			
+				GetCtrlVal(pc.dev[1], pc.dev[0], buff);
+				
+				if(dname[strlen(dname)] != '/') {
+					strcpy(dname+strlen(dname), "/");	
+				}
+			} else {
+				dname = malloc(1);
+				strcpy(dname, "");
+			}
+			
+			int dl = strlen(dname);
+			int blen2 = dl;
+			int oind = -1, nind = -1;
+			int nl2;
+			int success = 0;
+			
+			GetNumListItems(pc.ic[1], pc.ic[0], &nl2);
+			
 			for(i = 0; i < nl; i++) {  // One-based index, apparently
-				ListRemoveItem(chan_list, &chan_e, FRONT_OF_LIST); 
+				ListRemoveItem(chan_list, &chan_e, FRONT_OF_LIST);
 				if(chan_e != 0) {
 					// Index
 					if(rv = get_attribute_int_val(chan_e, MCXML_INDEX, &ind, -1)) { goto error; }
@@ -1825,19 +1849,43 @@ int load_session(char *filename, int safe) { // Primary session loading function
 					if(rv < 0) { goto error; }
 					
 					// Find the relevant channel based on this information
+					buff2 = realloc_if_needed(buff2, &blen2, strlen(buff)+dl+1, 1);
+					
+					sprintf(buff2, "%s%s", dname, buff);
+					
+					GetIndexFromValue(pc.ic[1], pc.ic[0], &nind);
+					
+					success = 1;
+					if(nind >= 0) {
+						// Turn the channel on	
+					} else if(ind >= 0 && ind < nl2 && !uidc.chans[ind]) {
+						// Turn on channel "ind"	
+					} else {
+						nl--;
+						i--;
+						success = 0;
+					}
 					
 					
-					// Range
-					if(rv = get_attribute_float_val(chan_e, MCXML_RANGE, &range, uidc.range[i])) { goto error; }
+					if(success) {
+						// Range
+						if(rv = get_attribute_float_val(chan_e, MCXML_RANGE, &range, uidc.range[i])) { goto error; }
 					
-					if(range > 0) {
-						uidc.range[i] = range;
+						if(range > 0) {
+							uidc.range[i] = range;
+						}
 					}
 					
 					CVIXMLDiscardElement(chan_e);
 					chan_e = 0;
 				}
 			}
+			
+			free(buff2);
+			buff2 = NULL;
+			
+			free(dname);
+			dname = NULL;
 			
 			ListDispose(chan_list);
 			chan_list = 0;
@@ -2491,12 +2539,15 @@ char *get_attribute_val(CVIXMLElement elem, char *att_name, char *buff, int *ble
 	}
 
 	if(elem != 0) {
-		if(rv = CVIXMLGetAttributeByName(elem, att_name, &att)) { goto error; }
+		if((rv = CVIXMLGetAttributeByName(elem, att_name, &att)) < 0) { goto error; }
 		
 		if(att != 0) { 
-			if(rv = CVIXMLGetAttributeValueLength(att, &len) && len != 0) { goto error; }
+			if((rv = CVIXMLGetAttributeValueLength(att, &len) < 0) && len != 0) { goto error; }
 			if(len > 0) {
 				buff = realloc_if_needed(buff, &bl, ++len, 1);
+				
+				if((rv = CVIXMLGetAttributeValue(att, buff)) < 0) { goto error; }
+				
 				failed = 0;
 			} else {
 				rv = 0;	

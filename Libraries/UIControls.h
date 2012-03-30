@@ -123,7 +123,7 @@ struct {
 	int ic[2];			// Input channels control
 	int cc[2];			// Counter channel control
 	int curchan[2];		// Current channel control
-	int range[2];			// Maximum value control
+	int range[2];		// Maximum value control
 	int trigc[2];		// Trigger channel ring control
 	int	trige[2];		// Trigger edge ring control
 	int skip[2];		// Skip condition on/off LED control
