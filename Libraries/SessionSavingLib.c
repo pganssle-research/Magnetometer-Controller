@@ -1989,11 +1989,16 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		
 		if(rv = get_attribute_int_val(dd_e, MCXML_POLYON, &pon, 0)) { goto error; }
 		uidc.polyon = pon?1:0;
+		SetCtrlVal(dc.fid, dc.fpolysub, pon);
+		SetCtrlVal(dc.spec, dc.spolysub, pon);
 		
 		if(rv = get_attribute_int_val(dd_e, MCXML_POLYORD, &pord, -1)) { goto error; }
 		
 		if(pord > -1) {
 			uidc.polyord = pord;
+			
+			SetCtrlVal(dc.fid, dc.fpsorder, pord);
+			SetCtrlVal(dc.spec, dc.spsorder, pord);	
 		}
 		
 		// Child elements

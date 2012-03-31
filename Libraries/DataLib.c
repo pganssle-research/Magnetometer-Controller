@@ -2050,14 +2050,17 @@ int plot_data(double *data, int np, double sr, int nc) {
 		goto error;
 	 }
 	// Generate the frequency vector for the phase evaluation
-	for(i = 0; i < npfft/2; i++)
+	for(i = 0; i < npfft/2; i++) {
 		freq[i] = i*sr/(2*(npfft/2-1)); 
+	}
 	
 	for(i = 0; i < nc; i++) {  // Iterate through the channels
 		// Get the data for this channel
-		for(j = 0; j < np; j++)
-			curr_data[j] = data[j+i*np];
-	
+		// Pre-scale the data to have 0 change in the power spectrum - i.e. multiply by (2/np)
+		for(j = 0; j < np; j++) {
+			curr_data[j] = data[j+i*np]*2/np;
+		}
+		
 		FFTEx(curr_data, np, npfft, NULL, FALSE, curr_fft);  // Do the fourier transform before any gain stuff
 		
 		if(uidc.fgain[i] != 1.0 || uidc.foff[i] != 0.0) {

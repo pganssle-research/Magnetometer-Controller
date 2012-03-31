@@ -1903,6 +1903,10 @@ int CVICALLBACK ChangePolySubtract (int panel, int control, int event,
 			int val;
 			GetCtrlVal(panel, control, &val);
 			
+			// Sync between both things.
+			int is_fid = (panel == dc.fid);
+			SetCtrlVal(is_fid?dc.spec:dc.fid, is_fid?dc.spolysub:dc.fpolysub, val);
+			
 			uidc.polyon = val?1:0;
 			
 			CmtReleaseLock(lock_uidc);
@@ -1923,6 +1927,9 @@ int CVICALLBACK ChangePolyFitOrder (int panel, int control, int event,
 
 			CmtGetLock(lock_uidc);
 			GetCtrlVal(panel, control, &uidc.polyord);
+			
+			int is_fid = (panel == dc.fid);
+			SetCtrlVal(is_fid?dc.spec:dc.fid, is_fid?dc.spsorder:dc.fpsorder, uidc.polyord);
 			
 			// TODO: Implement the actual subtraction.
 			if(uidc.polyon) {
