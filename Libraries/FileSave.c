@@ -167,10 +167,16 @@ int find_and_overwrite_fsave_in_file(FILE *f, fsave *fs, unsigned int max_bytes)
 
 /*************** FSave Functions ********************/
 fsave make_fs(char *name) {
+	if(name == NULL) {
+		name = "";
+	}
+	
 	fsave f = {
-		.name = name,
+		.name = malloc(strlen(name)+1),
 		.ns = strlen(name)+1	// Include null character
 	};
+	
+	strcpy(f.name, name);
 
 	return f;
 }
@@ -694,8 +700,10 @@ int is_valid_fs_type(unsigned int type) {
 }
 
 fsave free_fsave(fsave *fs) {
-	if(fs != NULL && fs->val.c != NULL) {
-		free(fs->val.c);
+	if(fs != NULL) {
+		if(fs->val.c != NULL) { free(fs->val.c); }
+		if(fs->name != NULL) { free(fs->name); }
+		
 	}
 	
 	return null_fs();
@@ -703,8 +711,8 @@ fsave free_fsave(fsave *fs) {
 
 fsave *free_fsave_array(fsave *fs, int size) {
 	if(fs != NULL) {
-		for(int i = 0; i < size; i++) { 
-			if(fs[i].val.c != NULL) { free(fs[i].val.c); }
+		for(int i = 0; i < size; i++) {
+			free_fsave(&(fs[i]));
 		}
 		
 		free(fs);

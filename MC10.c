@@ -150,9 +150,6 @@ Descrip	: Since changing over to this new system, you've broken all the
 
 #include <Magnetometer Controller.h>	// Then the libraries specific to
 
-
-
-static TaskHandle acquireSignal, counterTask;    
 extern PVOID RtlSecureZeroMemory(PVOID ptr, SIZE_T cnt);
 
 // Multithreading variable declarations
@@ -162,10 +159,15 @@ DefineThreadSafeScalarVar(int, DoubleQuitIdle, 0);
 DefineThreadSafeScalarVar(int, Status, PB_STOPPED);
 DefineThreadSafeScalarVar(int, Running, 0);
 DefineThreadSafeScalarVar(int, Initialized, 0);
+DefineThreadSafeScalarVar(int, PhaseUpdating, 0);
 
 int lock_pb, lock_DAQ, lock_tdm; 		// Thread locks
 int lock_uidc, lock_uipc, lock_ce, lock_af;
-PPROGRAM *gp = NULL;
+
+int plot_update_thread = 0;
+
+
+PPROGRAM *gp = NULL;	// For testing.
 
 //////////////////////////////////////////////////////
 //                                                  //
@@ -179,17 +181,20 @@ int main (int argc, char *argv[])
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_pb);
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_DAQ);
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_tdm);
-	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_uidc);
-	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_uipc);
+	
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_ce);
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_af);
 
+	CmtNewLock(NULL, 0, &lock_uidc);
+	CmtNewLock(NULL, 0, &lock_uipc);
+	
 	InitializeQuitUpdateStatus();
 	InitializeQuitIdle();
 	InitializeDoubleQuitIdle();
 	InitializeStatus();
 	InitializeInitialized();
 	InitializeRunning();
+	InitializePhaseUpdating();
 	
 	SetQuitUpdateStatus(0);
 	SetQuitIdle(0);
@@ -197,6 +202,7 @@ int main (int argc, char *argv[])
 	SetStatus(PB_STOPPED);
 	SetRunning(0);
 	SetInitialized(0);
+	SetPhaseUpdating(0);
 	
 	if (InitCVIRTE (0, argv, 0) == 0)
 		return -1;	/* out of memory */
@@ -224,6 +230,7 @@ int main (int argc, char *argv[])
 	UninitializeQuitUpdateStatus();
 	UninitializeInitialized();
 	UninitializeRunning();
+	UninitializePhaseUpdating();
 
 	return 0;
 }
@@ -2125,6 +2132,9 @@ int CVICALLBACK ChangePhaseCorrectionOrder (int panel, int control, int event,
 	return 0;
 }
 
+int calls = 0;
+int ends = 0;
+
 int CVICALLBACK ChangePhaseKnob (int panel, int control, int event,
 		void *callbackData, int eventData1, int eventData2)
 {
@@ -2136,9 +2146,10 @@ int CVICALLBACK ChangePhaseKnob (int panel, int control, int event,
 			
 			GetCtrlVal(panel, control, &phase);
 			GetCtrlVal(dc.sphorder[1], dc.sphorder[0], &order);
-			GetCtrlVal(panel, dc.scring, &chan);
-			
+			GetCtrlVal(panel, dc.scring, &chan); 
+
 			change_phase_safe(chan, phase, order);
+			
 			break;
 	}
 	return 0;

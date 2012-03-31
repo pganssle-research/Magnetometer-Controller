@@ -14,6 +14,7 @@ DeclareThreadSafeScalarVar(int, DoubleQuitIdle);
 DeclareThreadSafeScalarVar(int, Status);
 DeclareThreadSafeScalarVar(int, Running);
 DeclareThreadSafeScalarVar(int, Initialized);
+DeclareThreadSafeScalarVar(int, PhaseUpdating);
 
 /***************** Function Declarations ******************/
 

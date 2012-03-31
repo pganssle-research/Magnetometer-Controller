@@ -312,6 +312,9 @@ int run_experiment(PPROGRAM *p) {
 				}
 			
 				CmtGetLock(lock_uidc);
+				
+				
+				
 				if(ev = save_data_safe(data, (uidc.disp_update == 0)?&avg_data:NULL))  { 
 					CmtReleaseLock(lock_uidc);
 					goto error; 
