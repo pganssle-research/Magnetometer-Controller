@@ -1264,7 +1264,7 @@ int save_session(char *filename, int safe) { // Primary session saving function
 		
 		// Number
 		sprintf(buff, "%d", i);
-		if(rv = CVIXMLAddAttribute(chan_e, MCXML_NUM, buff)) { goto error; }
+		if(rv = CVIXMLAddAttribute(chan_e, MCXML_INDEX, buff)) { goto error; }
 		
 		// On
 		if(rv = CVIXMLAddAttribute(chan_e, MCXML_ON, uidc.schans[i]?trues:falses)) { goto error; }
@@ -1396,7 +1396,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	//																				//
 	//////////////////////////////////////////////////////////////////////////////////
 
-	int i, rv = 0;
+	int i, j, rv = 0;
 	char *fbuff = (filename == NULL)?session_fname:filename;
 	char *fname = NULL, *dname = NULL, *buff2 = NULL;
 	
@@ -1405,7 +1405,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	
 	CVIXMLElement r_e = 0;			// Root
 	CVIXMLElement chan_e  = 0;		// Reused
-	ListType chan_list = 0;
+	ListType chan_list = 0, phase_list = 0;
 	
 	// General
 	CVIXMLElement gen_e = 0, df_e = 0, pf_e = 0;
@@ -1453,11 +1453,11 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	if(rv = CVIXMLLoadDocument(fname, &xml_doc)) { goto error; }
 	
 	// Get the root element and the main elements.
-	if(rv = CVIXMLGetRootElement(xml_doc, &r_e)) { goto error; }
-	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_GEN, &gen_e)) { goto error; }
-	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PREFS, &pref_e)) { goto error; }  
-	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PPC, &ppc_e)) { goto error; }
-	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_DDISP, &dd_e)) { goto error; }
+	if(rv = CVIXMLGetRootElement(xml_doc, &r_e) < 0) { goto error; }
+	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_GEN, &gen_e) < 0) { goto error; }
+	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PREFS, &pref_e) < 0) { goto error; }  
+	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_PPC, &ppc_e) < 0) { goto error; }
+	if(rv = CVIXMLGetChildElementByTag(r_e, MCXML_DDISP, &dd_e) < 0) { goto error; }
 
 	
 	//////////////////////////////////////////////////
@@ -1468,7 +1468,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	
 	if(gen_e != 0) {
 		////// Attributes
-		if(rv = CVIXMLGetAttributeByName(gen_e, MCXML_ACTIVETAB, &buff_a)) { goto error; }
+		if(rv = CVIXMLGetAttributeByName(gen_e, MCXML_ACTIVETAB, &buff_a) < 0) { goto error; }
 	
 		if(buff_a != 0) {
 			// Active Tab
@@ -1575,7 +1575,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	///// Program File
 	if(pf_e != 0) { 
 		// Load path
-		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_LPATH, &buff_a)) { goto error; }
+		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_LPATH, &buff_a) < 0) { goto error; }
 		if(buff_a != 0) {
 			if(rv = CVIXMLGetAttributeValueLength(buff_a, &len)) { goto error; }
 			
@@ -1592,7 +1592,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		
 		
 		// Program File Path
-		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_FPATH, &buff_a)) { goto error; }
+		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_FPATH, &buff_a) < 0) { goto error; }
 		if(buff_a != 0) {
 			if(rv = CVIXMLGetAttributeValueLength(buff_a, &len)) { goto error; }
 			
@@ -1812,7 +1812,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		if(rv = get_attribute_int_val(dev_e, MCXML_NCHANSON, &chanson, -1)) { goto error; }
 		if(chanson >= 1) {
 			// Find the first channel.
-			if(rv = CVIXMLFindElements(dev_e, MCXML_CHANNEL, &chan_list)) { goto error; }
+			if(rv = CVIXMLFindElements(dev_e, MCXML_CHANNEL, &chan_list) < 0) { goto error; }
 			nl = ListNumItems(chan_list);
 			float range;
 			
@@ -1820,7 +1820,7 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			if(len > 0) {
 				dname = malloc(len+2);
 			
-				GetCtrlVal(pc.dev[1], pc.dev[0], buff);
+				GetCtrlVal(pc.dev[1], pc.dev[0], dname);
 				
 				if(dname[strlen(dname)] != '/') {
 					strcpy(dname+strlen(dname), "/");	
@@ -1853,13 +1853,13 @@ int load_session(char *filename, int safe) { // Primary session loading function
 					
 					sprintf(buff2, "%s%s", dname, buff);
 					
-					GetIndexFromValue(pc.ic[1], pc.ic[0], &nind);
+					GetIndexFromValue(pc.ic[1], pc.ic[0], &nind, buff);
 					
 					success = 1;
-					if(nind >= 0) {
-						// Turn the channel on	
+					if(nind >= 0 && !uidc.chans[ind]) {
+						toggle_ic_ind(nind);
 					} else if(ind >= 0 && ind < nl2 && !uidc.chans[ind]) {
-						// Turn on channel "ind"	
+						toggle_ic_ind(ind);	
 					} else {
 						nl--;
 						i--;
@@ -1890,525 +1890,213 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			ListDispose(chan_list);
 			chan_list = 0;
 		}
-	
+		
+		// Current channel.
+		if(rv = get_attribute_int_val(dev_e, MCXML_CURCHAN, &ind, -1)) { goto error; }
+		
+		if(ind >= 0 && ind < uidc.onchans) {
+			SetCtrlVal(pc.curchan[1], pc.curchan[0], ind);
+		}
+		
+		// Trigger channel.
+		if(rv = CVIXMLGetChildElementByTag(dev_e, MCXML_TRIGCHAN, &tc_e) < 0) { goto error; }
+		if(tc_e != 0) { 
+			// Get the edge first.
+			int edge;
+			if(rv = get_attribute_int_val(tc_e, MCXML_TRIGEDGE, &edge, -1)) { goto error; }
+			
+			if(edge != -1) { 
+				SetCtrlVal(pc.trige[1], pc.trige[0], edge);
+			}
+			
+			// Now try and find the trigger.
+			buff = get_element_val(tc_e, buff, &blen, &rv);
+			if(rv != 0) { goto error; }
+			
+			if(rv = get_attribute_int_val(tc_e, MCXML_INDEX, &ind, -1)) { goto error; }
+			
+			int nind;
+			GetIndexFromValue(pc.trigc[1], pc.trigc[0], &nind, buff);
+			GetNumListItems(pc.trigc[1], pc.trigc[0], &nl);
+			
+			if(nind >= 0) {
+				SetCtrlIndex(pc.trigc[1], pc.trigc[0], nind);	
+			} else if(ind >= 0 && ind < nl) {
+				SetCtrlIndex(pc.trigc[1], pc.trigc[0], ind);	
+			}
+			
+			
+			CVIXMLDiscardElement(tc_e);
+			tc_e = 0;
+		}
+		
+		// Counter channel
+		if(rv = CVIXMLGetChildElementByTag(dev_e, MCXML_COUNTCHAN, &cc_e) < 0) { goto error; }
+		if(cc_e != 0) {
+			buff = get_element_val(cc_e, buff, &blen, &rv);
+			if(rv < 0) { goto error; }
+			
+			if(rv = get_attribute_int_val(cc_e, MCXML_INDEX, &ind, -1)) { goto error; }
+			
+			CVIXMLDiscardElement(cc_e);
+			cc_e = 0;
+		}
+		
 		CVIXMLDiscardElement(dev_e);
 		dev_e = 0;
 	}
-
-	
-	// Device
-/*	if(dev_e != 0) {
-		int o_ind = -2;
-		
-		// Get the index attribute first, I guess.
-		if(rv = CVIXMLGetAttributeByName(dev_e, MCXML_INDEX, &ind_a)) { goto error; }
-		
-		if(ind_a != 0) {
-			if(rv = CVIXMLGetAttributeValue(ind_a, buff)) { goto error; }
-			
-			sscanf(buff, "%d", &o_ind);
-			CVIXMLDiscardAttribute(ind_a);
-			ind_a = 0;
-		}
-		
-		if(o_ind != -1) {
-			// Then the value
-			if(rv = CVIXMLGetElementValueLength(dev_e, &len)) { goto error; }
-		
-			buff = realloc_if_needed(buff, &g, len, s);
-		
-			if(rv = CVIXMLGetElementValue(dev_e, buff)) { goto error; }
-		
-			// Now get the value as close as possible.
-			GetNumListItems(pc.dev[1], pc.dev[0], &nl);
-			if(nl > 0 && len > 0) {
-				int old_ind;
-				GetCtrlIndex(pc.dev[1], pc.dev[0], &old_ind);
-				GetIndexFromValue(pc.dev[1], pc.dev[0], &ind, buff);
-				if(ind >= 0)
-					SetCtrlIndex(pc.dev[1], pc.dev[0], ind);
-				else if (o_ind >= 0 && o_ind < nl)
-					SetCtrlIndex(pc.dev[1], pc.dev[0], o_ind);
-				else if (o_ind >= nl)
-					SetCtrlIndex(pc.dev[1], pc.dev[0], nl-1);
-				
-				// We need to reload the DAQ info for the given device if it's been changed.
-				GetCtrlIndex(pc.dev[1], pc.dev[0], &ind);
-				if(ind != old_ind) {
-					load_DAQ_info_safe(0, 0, 1);
-				}
-			}
-		}
-		
-		CVIXMLDiscardElement(dev_e);
-		dev_e = 0;
-	}
-	
-	// PulseBlaster Device
-	if(pbdev_e != 0) { 
-		if(rv = CVIXMLGetElementValue(pbdev_e, buff)) { goto error; } 	// Can't cause buffer overruns
-		
-		int pbdev = 0, nl;
-		sscanf(buff, "%d", &pbdev);
-		
-		GetNumListItems(pc.pbdev[1], pc.pbdev[0], &nl);
-		
-		if(pbdev < nl)
-			SetCtrlVal(pc.pbdev[1], pc.pbdev[0], pbdev);
-		
-		CVIXMLDiscardElement(pbdev_e);
-		pbdev_e = 0;
-	}
-	
-	// Channels
-	if(chans_e != 0) {
-		// First get the number of channels attribute.
-		if(rv = CVIXMLGetAttributeByName(chans_e, MCXML_NUM, &num_a)) { goto error; }
-		
-		if(num_a != 0) {
-			num = -2;
-			if(rv = CVIXMLGetAttributeValue(num_a, buff)) { goto error; }
-			
-			sscanf(buff, "%d", &num);
-			CVIXMLDiscardAttribute(num_a);
-			num_a = 0;
-		}
-		
-		// Get which indexes they are.
-		if(num > 0) {
-			inds =  malloc(sizeof(int)*num);
-			CmtGetLock(lock_uidc);
-			uidc.onchans = num;
-			
-			if(rv = CVIXMLGetElementValue(chans_e, buff)) { goto error; }
-			p = strtok(buff, ";");
-			i = 0;
-			// This should read out each one.
-			while(p != NULL && i < num) {
-				if(sscanf(p, "%d", &ind) && ind < uidc.nchans && ind >= 0) {
-					inds[i++] = ind;
-				} else {
-					inds[i++] = -1;
-					uidc.onchans--;
-				}
-				p = strtok(NULL, ";");
-			}
-			
-			CmtReleaseLock(lock_uidc);
-		}
-		CVIXMLDiscardElement(chans_e);
-		chans_e = 0;
-		
-		// Now we'll actually try and set them to the original channels.
-		if(chann_e != 0 && inds != NULL) {
-			if(rv = CVIXMLGetElementValueLength(chann_e, &len)) { goto error; }
-			
-			// The values are of the form Device/channel
-			int dlen;
-			GetCtrlValStringLength(pc.dev[1], pc.dev[0], &dlen);
-			devname = malloc(++dlen);
-			GetCtrlVal(pc.dev[1], pc.dev[0], devname);
-			
-			buff = realloc_if_needed(buff, &g, len+1, s);
-			
-			// Read the value into the buffer.
-			if(len > 0 &&  (rv = CVIXMLGetElementValue(chann_e, buff))) { goto error; }
-			
-			i = -1;
-			p = strtok(buff, ";");
-			while(p != NULL && i < num-1) {
-				if(inds[++i] >= 0) {
-					sprintf(buff2, "%s/%s", devname, p);	// Make the name
-					GetIndexFromValue(pc.ic[1], pc.ic[0], &ind, buff2);
-					if(ind >= 0 && ind < nl)
-						inds[i] = ind;
-				}
-				
-				p = strtok(NULL, ";");
-			}
-		}
-		
-		if(chann_e != 0) { CVIXMLDiscardElement(chann_e); }
-		chann_e = 0;
-		
-		// Now we get the ranges.
-		if(chanr_e != 0 && inds != NULL) {
-			if(rv = CVIXMLGetElementValue(chanr_e, buff)) { goto error; }
-			
-			i = -1;
-			p = strtok(buff, ";");
-			ranges = calloc(sizeof(float)*num, sizeof(float));
-			float range;
-			while(p != NULL && i < num-1) {
-				if(inds[++i] >= 0 && sscanf(p, "%f", &range) && range > 0.0)
-					ranges[i] = range;
-				
-				p = strtok(NULL, ";"); 
-			}
-		}
-		
-		if(chanr_e != 0) { CVIXMLDiscardElement(chanr_e); }
-		chanr_e = 0;
-		
-		if(inds != NULL) { DeleteListItem(pc.curchan[1], pc.curchan[0], 0, -1); }
-		
-		// Now we should have a list of ranges and indices, and we can set up
-		// the proper user interface.
-		int j = 0;
-		int vlen;
-		
-		uidc.onchans = 0;
-		for(i = 0; i < num; i++) {
-			if(inds[i] < 0)
-				continue;
-			
-			GetLabelLengthFromIndex(pc.ic[1], pc.ic[0], inds[i], &len);
-			GetValueLengthFromIndex(pc.ic[1], pc.ic[0], inds[i], &vlen);
-			
-			buff = realloc_if_needed(buff, &g, len, s);
-			buff2 = realloc_if_needed(buff2, &g2, len, s);
-			
-			GetLabelFromIndex(pc.ic[1], pc.ic[0], inds[i], buff);
-			GetValueFromIndex(pc.ic[1], pc.ic[0], inds[i], buff2);
-			
-			add_chan(&buff[1], inds[i]);
-			buff[0] = 149;
-			ReplaceListItem(pc.ic[1], pc.ic[0], inds[i], buff, buff2);
-			
-			if(ranges[i] > 0)
-				uidc.range[j] = ranges[i];
-			
-			j++;	// Counter of how many things we've added.
-		}
-
-		SetCtrlVal(pc.nc[1], pc.nc[0], uidc.onchans);
-		
-		if(ranges != NULL) { free(ranges); }
-		if(inds != NULL) { free(inds); }
-		if(devname != NULL) { free(devname); }
-		
-		ranges = NULL;
-		inds = NULL;
-		devname = NULL;
-	}
-
-	// Current channel
-	if(curcc_e != 0) {
-		if(rv = CVIXMLGetAttributeByName(curcc_e, MCXML_INDEX, &ind_a)) { goto error; }
-		
-		int o_ind = -1;
-
-		if((rv = CVIXMLGetElementValueLength(curcc_e, &len)) && rv != 1) { goto error; } 
-		GetNumListItems(pc.curchan[1], pc.curchan[0], &nl);
-
-		if(ind_a != 0) {
-			if(rv = CVIXMLGetAttributeValue(ind_a, buff)) { goto error; }
-			
-			sscanf(buff, "%d", &o_ind);
-			
-			CVIXMLDiscardAttribute(ind_a);
-			ind_a = 0;
-		}
-		
-		if(nl > 0 && len > 0) {
-			buff = realloc_if_needed(buff, &g, len+1, s);
-			if(rv = CVIXMLGetElementValue(curcc_e, buff)) { goto error; }
-			
-			// Find the index that this points to.
-			ind = -1;
-			for(i = 0; i < nl; i++) {
-				GetLabelLengthFromIndex(pc.curchan[1], pc.curchan[0], i, &len);
-				buff2 = realloc_if_needed(buff2, &g2, len+1, s);
-				
-				GetLabelFromIndex(pc.curchan[1], pc.curchan[0], i, buff2);
-				
-				if(strcmp(buff2, buff) == 0) {
-					ind = i;
-					break;
-				}
-			}
-			
-			if(ind >= 0)
-				SetCtrlIndex(pc.curchan[1], pc.curchan[0], ind);
-			else if (o_ind >= 0 && o_ind < nl)
-				SetCtrlIndex(pc.curchan[1], pc.curchan[0], o_ind);
-			else if (o_ind >= nl)
-				SetCtrlIndex(pc.curchan[1], pc.curchan[0], nl-1);
-		}
-		
-		CVIXMLDiscardElement(curcc_e);
-		curcc_e = 0;
-	}
-	
-	// Counter Channel
-	if(countc_e != 0) {
-		int o_ind = -2;
-		if(rv = CVIXMLGetAttributeByName(countc_e, MCXML_INDEX, &ind_a)) { goto error;}
-		
-		if(ind_a != 0) {
-			if(rv = CVIXMLGetAttributeValue(ind_a, buff)) { goto error; }
-			
-			sscanf(buff, "%d", &o_ind);
-			
-			CVIXMLDiscardAttribute(ind_a);
-			ind_a = 0;
-		}
-		
-		if((rv = CVIXMLGetElementValueLength(countc_e, &len)) && rv != 1) { goto error; }
-		
-		GetNumListItems(pc.cc[1], pc.cc[0], &nl);
-		if(nl > 0 && len > 0) {
-			buff = realloc_if_needed(buff, &g, len+1, s);
-			if(rv = CVIXMLGetElementValue(countc_e, buff)) { goto error; }
-			
-			// Find the index that this points to.
-			ind = -1;
-			for(i = 0; i < nl; i++) {
-				GetLabelLengthFromIndex(pc.cc[1], pc.cc[0], i, &len);
-				buff2 = realloc_if_needed(buff2, &g2, len+1, s);
-				
-				GetLabelFromIndex(pc.cc[1], pc.cc[0], i, buff2);
-				
-				if(strcmp(buff2, buff) == 0) {
-					ind = i;
-					break;
-				}
-			}
-			
-			if(ind >= 0)
-				SetCtrlIndex(pc.cc[1], pc.cc[0], ind);
-			else if (o_ind >= 0 && o_ind < nl)
-				SetCtrlIndex(pc.cc[1], pc.cc[0], o_ind);
-			else if (o_ind >= nl)
-				SetCtrlIndex(pc.cc[1], pc.cc[0], nl-1);
-		}
-		
-		CVIXMLDiscardElement(countc_e);
-		countc_e = 0;
-	}
-
-	// Trigger channel
-	if(trig_e) {
-		if((rv = CVIXMLGetElementValueLength(trig_e, &len)) && rv != 1) { goto error; }
-		
-		GetNumListItems(pc.trigc[1], pc.trigc[0], &nl);
-		if(nl > 0 && len > 0) {
-			buff = realloc_if_needed(buff, &g, len+1, s);
-			if(rv = CVIXMLGetElementValue(trig_e, buff)) { goto error; }
-			
-			// Find the index that this points to, if it's there.
-			ind = -1;
-			for(i = 0; i < nl; i ++) {
-				GetLabelLengthFromIndex(pc.trigc[1], pc.cc[0], i, &len);
-				buff2 = realloc_if_needed(buff2, &g2, len+1, s);
-				
-				GetLabelFromIndex(pc.trigc[1], pc.trigc[0], i, buff2);
-				
-				if(strcmp(buff2, buff) == 0) {
-					ind = i;
-					break;
-				}
-			}
-			
-			if(ind >= 0)
-				SetCtrlIndex(pc.trigc[1], pc.trigc[0], ind);
-		}
-		
-		if(rv = CVIXMLGetAttributeByName(trig_e, MCXML_TRIGEDGE, &edge_a)) { goto error; }
-		
-		if(edge_a != 0) {
-			if(rv = CVIXMLGetAttributeValue(edge_a, buff)) { goto error; } 
-			
-			int edge = -1;
-			sscanf(buff, "%d", &edge);
-			
-			if(edge >= 0) 
-				SetCtrlVal(pc.trige[1], pc.trige[0], edge);	
-			
-			CVIXMLDiscardAttribute(edge_a);
-			edge_a = 0;
-		}
-		
-		CVIXMLDiscardElement(trig_e);
-		trig_e = 0;
-	}
-	
 	
 	
 	//////////////////////////////////////////////////
 	//												//
-	//			      Data Display					//
+	//			       Data Display					//
 	//												//
 	//////////////////////////////////////////////////
-	// Get the main elements
+
 	if(dd_e != 0) {
-		if(rv = CVIXMLGetChildElementByTag(dd_e, MCXML_FID, &fid_e)) { goto error; }
-		if(rv = CVIXMLGetChildElementByTag(dd_e, MCXML_SPEC, &spec_e)) { goto error; }
+		// Attributes
+		int pord, pon;
+		
+		if(rv = get_attribute_int_val(dd_e, MCXML_POLYON, &pon, 0)) { goto error; }
+		uidc.polyon = pon?1:0;
+		
+		if(rv = get_attribute_int_val(dd_e, MCXML_POLYORD, &pord, -1)) { goto error; }
+		
+		if(pord > -1) {
+			uidc.polyord = pord;
+		}
+		
+		// Child elements
+		if(rv = CVIXMLGetChildElementByTag(dd_e, MCXML_FID, &fid_e) < 0) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(dd_e, MCXML_SPEC, &spec_e) < 0) { goto error; }
 		
 		CVIXMLDiscardElement(dd_e);
 		dd_e = 0;
 	}
 	
-	// Most of this is exactly the same thing, so we'll just loop through.
-	int pan[2] = {dc.fid, dc.spec};
-	int as_c[2] = {dc.fauto, dc.sauto};
-	int ch_c[2][8];
-	for(i = 0; i < 8; i++) {
-		ch_c[0][i] = dc.fchans[i];
-		ch_c[1][i] = dc.schans[i];
-	}
-
-	CVIXMLElement *element, e;
+	// FID
+	if(fid_e != 0) { 
+		int as;
+		if(rv = get_attribute_int_val(fid_e, MCXML_AUTOSCALE, &as, -1)) { goto error; }
+		
+		if(as != -1) {
+			SetCtrlVal(dc.fid, dc.fauto, as);
+		}
+		
+		// Get the channel information.
+		if((rv = CVIXMLFindElements(fid_e, MCXML_CHANNEL, &chan_list)) < 0) { goto error; }
 	
-	for(int j = 0; j < 2; j++) {
-		element = j?&spec_e:&fid_e;
-		e = *element;
-		
-		if(e != 0) {
-			// The easy one first - autoscale.
-			if(rv = CVIXMLGetAttributeByName(e, MCXML_AUTOSCALE, &as_a)) { goto error; }
-		
-			if(as_a != 0) {
-				if(rv = CVIXMLGetAttributeValue(as_a, buff)) { goto error; }
-			
-				int as = -1;
-				sscanf(buff, "%d", &as);
-			
-				if(as != -1) { SetCtrlVal(pan[j], as_c[j], as); }
-			
-				CVIXMLDiscardAttribute(as_a);
-				as_a = 0;
-			}
-			
-			// Now we go through and do channels, colors, gains and offsets.
-			// Channels
-			if(rv = CVIXMLGetChildElementByTag(e, MCXML_CHANSON, &con_e)) { goto error; }
-			if(con_e != 0) {
-				// Get the number attribute first.
-				if(rv = CVIXMLGetAttributeByName(con_e, MCXML_NUM, &num_a)) { goto error; }
+		if(chan_list != 0) {
+			nl = ListNumItems(chan_list);
+
+			for(i = 0; i < nl; i++) {
+				ListRemoveItem(chan_list, &chan_e, FRONT_OF_LIST);
+				if(chan_e != 0) { 
+					// Index
+					if(rv = get_attribute_int_val(chan_e, MCXML_INDEX, &ind, -1)) { goto error; }
+					if(ind >= 0 && ind < 8) {
+						int color, on;
+						// On
+						if(rv = get_attribute_int_val(chan_e, MCXML_ON, &on, 0)) { goto error; }
+						set_fid_chan(ind, on);
 				
-				num = -1;
-				if(num_a != 0) {
-					if(rv = CVIXMLGetAttributeValue(num_a, buff)) { goto error; }
-					
-					sscanf(buff, "%d", &num);
-					CVIXMLDiscardAttribute(num_a);
-					num_a = 0;
+						// Color
+						if(rv = get_attribute_int_val(chan_e, MCXML_COLOR, &color, -1)) { goto error; }
+						if(color >= 0) { uidc.fcol[ind] = color; }
+				
+						// Gain and offset
+						if(rv = get_attribute_float_val(chan_e, MCXML_GAIN, &uidc.fgain[ind], 1.0)) { goto error; }
+						if(rv = get_attribute_float_val(chan_e, MCXML_OFFSET, &uidc.foff[ind], 0.0)) { goto error; }
+					}
+			
+					// Not doing anything with the channel name at the moment.
+			
+					CVIXMLDiscardElement(chan_e);
+					chan_e = 0;
 				}
-				
-				if(rv = CVIXMLGetElementValueLength(con_e, &len) < 0) { goto error; }
-				
-				if(rv == 0 && len > 0) {
-					buff = realloc_if_needed(buff, &g, len+1, s);
-					
-					if(rv = CVIXMLGetElementValue(con_e, buff)) { goto error; }
-					
-					int chan, on;
-					i = 0;
-					p = strtok(buff, ";");
-					
-					while(p != NULL && i < 8) {
-						chan = -1;
-						sscanf(p, "%d", &chan);
+			}
+	
+			ListDispose(chan_list);
+			chan_list = 0;
+		}
+	}
+	
+	// FFT display
+	if(spec_e != 0) {
+		int as;
+		if(rv = get_attribute_int_val(spec_e, MCXML_AUTOSCALE, &as, 0)) { goto error; }
+		SetCtrlVal(dc.spec, dc.sauto, as);
+		
+		// At the moment we don't really need the number of phase orders or the number of chans, they can be inferred.
+		if((rv = CVIXMLFindElements(spec_e, MCXML_CHANNEL, &chan_list)) < 0) { goto error; }
+		if(chan_list != 0) {
+			nl = ListNumItems(chan_list);
+			
+			for(i = 0; i < nl; i++) {
+				ListRemoveItem(chan_list, &chan_e, FRONT_OF_LIST);
+				if(chan_e != 0) { 
+					// Index
+					if(rv = get_attribute_int_val(chan_e, MCXML_INDEX, &ind, -1)) { goto error; }
+
+					if(ind >= 0 && ind < 8) {
+						int color, on;
+						// On
+						if(rv = get_attribute_int_val(chan_e, MCXML_ON, &on, 0)) { goto error; }
+						set_spec_chan(ind, on);
+	
+						// Color
+						if(rv = get_attribute_int_val(chan_e, MCXML_COLOR, &color, -1)) { goto error; }
+						if(color >= 0) { uidc.scol[ind] = color; }
+	
+						// Gain and offset
+						if(rv = get_attribute_float_val(chan_e, MCXML_GAIN, &uidc.sgain[ind], 1.0)) { goto error; }
+						if(rv = get_attribute_float_val(chan_e, MCXML_OFFSET, &uidc.soff[ind], 0.0)) { goto error; }
 						
-						if(chan >= 0 && chan < 8) {
-							GetCtrlVal(pan[j], ch_c[j][chan], &on);
-							if(!on) {
-								SetCtrlVal(pan[j], ch_c[j][chan], 1);
-								j?toggle_spec_chan(chan):toggle_fid_chan(chan);
+						
+						// Phase information
+						if((rv = CVIXMLFindElements(chan_e, MCXML_PHASE, &phase_list)) < 0) { goto error; }
+						if(phase_list != 0) {
+							int nlp = ListNumItems(phase_list);
+							
+							for(j = 0; j < nlp; j++) {
+								ListRemoveItem(phase_list, &phase_e, FRONT_OF_LIST);
+								
+								if(phase_e != 0) { 																	    
+									int ord;
+									
+									if(rv = get_attribute_int_val(phase_e, MCXML_PHASEORDER, &ord, -1)) { goto error; }
+									
+									if(ord >= 0 && ord < MCD_NPHASEORDERS) {
+										float corr = 0.0;
+										
+										buff = get_element_val(phase_e, buff, &blen, &rv);
+										if(rv < 0) { goto error; }
+										
+										sscanf(buff, "%f", &corr);
+										
+										uidc.sphase[ind][ord] = corr;
+									}   
+									
+									CVIXMLDiscardElement(phase_e);
+									phase_e = 0;
+								}
 							}
 						}
 						
-						i++;
-						p = strtok(NULL, ";");
+						ListDispose(phase_list);
+						phase_list = 0;
 					}
-				} else if (num == 0) {
-					int val;
-					for(i = 0; i < 8; i++) {
-						GetCtrlVal(pan[j], ch_c[j][i], &val);
-						if(val) {
-							SetCtrlVal(pan[j], ch_c[j][i], 0);
-							j?toggle_spec_chan(i):toggle_fid_chan(i);
-						}
-					}
-				}
 				
-				CVIXMLDiscardElement(con_e);
-				con_e = 0;
+					CVIXMLDiscardElement(chan_e);
+					chan_e = 0;
+				}
 			}
 			
-			// Colors
-			if(rv = CVIXMLGetChildElementByTag(e, MCXML_COLORS, &col_e)) { goto error; }
-			if(col_e != 0) { 
-				if(rv = CVIXMLGetElementValueLength(col_e, &len)) { goto error; }
-				
-				if(len > 0) {
-					buff = realloc_if_needed(buff, &g, len+1, s);
-					
-					if(rv = CVIXMLGetElementValue(col_e, buff)) { goto error; }
-					
-					i = 0;
-					p = strtok(buff, ";");
-					while(p != NULL && i < 8) {
-						sscanf(p, "%x", j?&uidc.scol[i++]:&uidc.fcol[i++]);
-						p = strtok(NULL, ";");
-					}
-				}
-				
-				CVIXMLDiscardElement(col_e);
-				col_e = 0;
-			}
-			
-			// Gains
-			if(rv = CVIXMLGetChildElementByTag(e, MCXML_GAINS, &gain_e)) { goto error; }
-			if(gain_e != 0) {
-				if(rv = CVIXMLGetElementValueLength(gain_e, &len)) { goto error; }
-				
-				if(len > 0) {
-					buff = realloc_if_needed(buff, &g, len+1, s);
-					
-					if(rv = CVIXMLGetElementValue(gain_e, buff)) { goto error; }
-					
-					i = 0; 
-					p = strtok(buff, ";");
-					while(p != NULL && i < 8) {
-						sscanf(p, "%f", j?&uidc.sgain[i++]:&uidc.fgain[i++]);
-						p = strtok(NULL, ";");
-					}
-				}
-				
-				CVIXMLDiscardElement(gain_e);
-				gain_e = 0;
-			}
-			
-			// Offsets
-			if(rv = CVIXMLGetChildElementByTag(e, MCXML_OFF, &off_e)) { goto error; }
-			if(off_e != 0) {
-				if(rv = CVIXMLGetElementValueLength(off_e, &len)) { goto error; }
-				
-				if(len > 0) { 
-					buff = realloc_if_needed(buff, &g, len+1, s);
-				
-					if(rv = CVIXMLGetElementValue(off_e, buff)) { goto error; }
-				
-					i = 0;
-					p = strtok(buff, ";");
-					while(p != NULL && i < 8) {
-						sscanf(p, "%f", j?&uidc.soff[i++]:&uidc.foff[i++]);
-						p = strtok(NULL, ";");
-					}
-				}
-				
-				CVIXMLDiscardElement(off_e);
-				off_e = 0;
-			}   
-			
+			ListDispose(chan_list);
+			chan_list = 0;
 		}
 		
-		CVIXMLDiscardElement(e);
-		*element = 0;
 	}
-	
 	
 	// Finally, we load the program
 	sprintf(fname, "%s.%s", fbuff, PPROG_EXTENSION);
@@ -2422,62 +2110,63 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			free_pprog(p);
 		}
 	}
-		*/
-	
+
 	error:
 	// Now free memory that's been allocated and not freed
-	/* if(fname != NULL) { free(fname); }
-	if(buff != NULL) { free(buff); }
+	if(fname != NULL) { free(fname); }
+	if(dname != NULL) { free(dname); }
 	if(buff2 != NULL) { free(buff2); }
-	if(devname != NULL) { free(devname); }
-	if(cnames != NULL) { free(cnames); }
-	if(trige != NULL) { free(trige); }
-	if(trigc != NULL) { free(trigc); }
-	if(countc != NULL) { free(countc); }
-	if(curcc != NULL) { free(curcc); }
-	if(inds != NULL) { free(inds); }
-	if(ranges != NULL) { free(ranges); }
-	if(ddesc != NULL) { free(ddesc); }
+	if(buff != NULL) { free(buff); }
 	
-	// And discard the elements
-	if(dev_e != 0) { CVIXMLDiscardElement(dev_e); }
-	if(chans_e != 0) { CVIXMLDiscardElement(chans_e); }
-	if(pbdev_e != 0) { CVIXMLDiscardElement(pbdev_e); }
-	if(chann_e != 0) { CVIXMLDiscardElement(chann_e); }
-	if(chanr_e != 0) { CVIXMLDiscardElement(chanr_e); }
-	if(trig_e != 0) { CVIXMLDiscardElement(trig_e); }
-	if(bttls_e != 0) { CVIXMLDiscardElement(bttls_e); }
-	if(curcc_e != 0) { CVIXMLDiscardElement(curcc_e); }
-	if(countc_e != 0) { CVIXMLDiscardElement(countc_e); }
+	if(chan_e != 0) { CVIXMLDiscardElement(chan_e); }
+	if(phase_e != 0) { CVIXMLDiscardElement(phase_e); }
+	
+	chan_e = 0;
+	phase_e = 0;
+	
+	// Must dispose of lists.
+	if(chan_list != 0) {
+		nl = ListNumItems(chan_list);
+		for(i = 0; i < nl; i++) {
+			ListRemoveItem(chan_list, &chan_e, FRONT_OF_LIST);
+			
+			CVIXMLDiscardElement(chan_e);
+			chan_e = 0;
+		}
+		
+		ListDispose(chan_list);
+	}
+	
+	if(phase_list != 0) {
+		nl = ListNumItems(phase_list);
+		for(i = 0; i < nl; i++) {
+			ListRemoveItem(phase_list, &phase_e, FRONT_OF_LIST);
+			
+			CVIXMLDiscardElement(phase_e);
+			phase_e = 0;
+		}
+	}
+	
+	// Now the rest of the elements
 	if(r_e != 0) { CVIXMLDiscardElement(r_e); }
-	if(pref_e != 0) { CVIXMLDiscardElement(pref_e); }
 	if(gen_e != 0) { CVIXMLDiscardElement(gen_e); }
+	if(df_e != 0) { CVIXMLDiscardElement(df_e); }
+	if(pf_e != 0) { CVIXMLDiscardElement(pf_e); }
+	if(pref_e != 0) { CVIXMLDiscardElement(npsrat_e); }
 	if(ppc_e != 0) { CVIXMLDiscardElement(ppc_e); }
+	if(pbdev_e != 0) { CVIXMLDiscardElement(pbdev_e); }
+	if(dev_e != 0) { CVIXMLDiscardElement(dev_e); }
+	if(tc_e != 0) { CVIXMLDiscardElement(tc_e); }
+	if(cc_e != 0) { CVIXMLDiscardElement(cc_e); }
 	if(dd_e != 0) { CVIXMLDiscardElement(dd_e); }
-	if(npsrat_e != 0) { CVIXMLDiscardElement(npsrat_e); }
-	if(tview_e != 0) { CVIXMLDiscardElement(tview_e); }
-	if(at_e != 0) { CVIXMLDiscardElement(at_e); }
-	if(bf_e != 0) { CVIXMLDiscardElement(bf_e); }
-	if(fpath_e != 0) { CVIXMLDiscardElement(fpath_e); }
-	if(dlpath_e != 0) { CVIXMLDiscardElement(dlpath_e); }
-	if(ppath_e != 0) { CVIXMLDiscardElement(ppath_e); }
-	if(ddesc_e != 0) { CVIXMLDiscardElement(ddesc_e); }
-	if(lfinfo_e != 0) { CVIXMLDiscardElement(lfinfo_e); }
 	if(fid_e != 0) { CVIXMLDiscardElement(fid_e); }
 	if(spec_e != 0) { CVIXMLDiscardElement(spec_e); }
-	if(col_e != 0) { CVIXMLDiscardElement(col_e); }
-	if(gain_e != 0) { CVIXMLDiscardElement(gain_e); }
-	if(off_e != 0) { CVIXMLDiscardElement(off_e); }
-	if(con_e != 0) { CVIXMLDiscardElement(con_e); }
-
 	
 	// And the attributes
+	if(buff_a != 0) { CVIXMLDiscardAttribute(buff_a); }
+	if(name_a != 0) { CVIXMLDiscardAttribute(name_a); }
 	if(ind_a != 0) { CVIXMLDiscardAttribute(ind_a); }
-	if(num_a != 0) { CVIXMLDiscardAttribute(num_a); }
-	if(trttl_a != 0) { CVIXMLDiscardAttribute(trttl_a); }
-	if(edge_a != 0) { CVIXMLDiscardAttribute(edge_a); }
-	if(as_a != 0) { CVIXMLDiscardAttribute(as_a); }
-					 */
+	
 	// Discard the document
 	if(xml_doc != -1) { CVIXMLDiscardDocument(xml_doc); }
 	

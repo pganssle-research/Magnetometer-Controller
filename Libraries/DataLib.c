@@ -2834,21 +2834,30 @@ void change_spec_offset_safe(int num) {
 }
 
 void toggle_fid_chan(int num) {
+	if(num < 0 || num >= 8) {
+		return;
+	}
+	
+	int on;
+	GetCtrlVal(dc.fid, dc.fchans[num], &on);
+	
+	set_fid_chan(num, !on);
+}
+
+void toggle_fid_chan_safe(int num) {
+	CmtGetLock(lock_uidc);
+	toggle_fid_chan(num);
+	CmtReleaseLock(lock_uidc);
+}
+
+void set_fid_chan(int num, int on) {
 	// Turns whether or not a given channel is on on or off and
 	// updates all the relevant controls.
-	
-	/****** TODO *******
-	 Once the data loading and such is done, this also needs to hide or show
-	 the appropriate data, update the channel preferences, etc.   (Is this done?)
-	 *******************/
-	
-	if(num < 0 || num >= 8)
+
+	if(num < 0 || num >= 8 || uidc.fchans[num] == on)
 		return;
 	
 	// Update UIDC
-	int i, on;
-	GetCtrlVal(dc.fid, dc.fchans[num], &on);
-	
 	uidc.fchans[num] = on;
 	
 	if(on) {
@@ -2858,6 +2867,7 @@ void toggle_fid_chan(int num) {
 	}
 
 	// Turn the data on or off
+	int i; 
 	if(uidc.fplotids[num] >= 0) {
 		SetPlotAttribute(dc.fid, dc.fgraph, uidc.fplotids[num], ATTR_TRACE_COLOR, on?uidc.fcol[num]:VAL_TRANSPARENT);
 	}
@@ -2868,6 +2878,8 @@ void toggle_fid_chan(int num) {
 	// Reverse it if any channels are on.
 	int c_on = (uidc.fnc < 1);
 	
+	SetCtrlVal(dc.fid, dc.fchans[num], on);
+	
 	SetCtrlAttribute(dc.fid, dc.fccol, ATTR_DIMMED, c_on);
 	SetCtrlAttribute(dc.fid, dc.fcgain, ATTR_DIMMED, c_on);
 	SetCtrlAttribute(dc.fid, dc.fcoffset, ATTR_DIMMED, c_on);
@@ -2877,25 +2889,38 @@ void toggle_fid_chan(int num) {
 	}
 }
 
-void toggle_fid_chan_safe(int num) {
+void set_fid_chan_safe(int num, int on) {
 	CmtGetLock(lock_uidc);
-	toggle_fid_chan(num);
+	set_fid_chan(num, on);
 	CmtReleaseLock(lock_uidc);
 }
 
+
 void toggle_spec_chan(int num) {
-	// Turns whether or not a given spectrumc hannel is on or off and updates the relevant controls
+	int on;
+	GetCtrlVal(dc.spec, dc.schans[num], &on);
 	
-	if(num < 0 || num >= 8) { return; }
+	set_spec_chan(num, !on);
+}
+
+
+void toggle_spec_chan_safe(int num) {
+	CmtGetLock(lock_uidc);		  
+	toggle_spec_chan(num);
+	CmtReleaseLock(lock_uidc);
+}
+
+void set_spec_chan(int num, int on) {
+	// Turns whether or not a given spectrum channel is on or off and updates the relevant controls
+	
+	if(num < 0 || num >= 8 || uidc.schans[num] == on) { return; }
 	
 	/****** TODO *******
 	 Once the data loading and such is done, this also needs to hide or show
 	 the appropriate data, update the channel preferences, etc.
 	 *******************/
 	
-	int i, on;
-	GetCtrlVal(dc.spec, dc.schans[num], &on);
-	
+	// Update UIDC
 	uidc.schans[num] = on;
 	
 	if(on) {
@@ -2905,6 +2930,7 @@ void toggle_spec_chan(int num) {
 	}
 
 	// Turn the data on or off
+	int i; 
 	if(uidc.schan >= 0 && uidc.schan < 3 && uidc.splotids[num][uidc.schan] >= 0) {
 		SetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[num][uidc.schan], ATTR_TRACE_COLOR, on?uidc.scol[num]:VAL_TRANSPARENT);
 		for(i = 0; i < 8; i++) {
@@ -2925,6 +2951,8 @@ void toggle_spec_chan(int num) {
 	// Reverse it if any channels are on.
 	int c_on = (uidc.snc < 1);
 	
+	SetCtrlVal(dc.spec, dc.schans[num], on);
+	
 	SetCtrlAttribute(dc.spec, dc.sccol, ATTR_DIMMED, c_on);
 	SetCtrlAttribute(dc.spec, dc.scgain, ATTR_DIMMED, c_on);
 	SetCtrlAttribute(dc.spec, dc.scoffset, ATTR_DIMMED, c_on);
@@ -2944,9 +2972,9 @@ void toggle_spec_chan(int num) {
 	}
 }
 
-void toggle_spec_chan_safe(int num) {
-	CmtGetLock(lock_uidc);		  
-	toggle_spec_chan(num);
+void set_spec_chan_safe(int num, int on) {
+	CmtGetLock(lock_uidc);
+	set_spec_chan(num, on);
 	CmtReleaseLock(lock_uidc);
 }
 
@@ -3863,6 +3891,60 @@ int load_DAQ_info_safe(int UIDC_lock, int UIPC_lock, int DAQ_lock) {
 	return rv;
 }
 
+int toggle_ic_ind(int ind) {
+	// Does the back-end work for toggling on a given channel.
+	int nl, rv = 0;
+	
+	char *label = NULL;
+	char *value = NULL;
+	
+	GetNumListItems(pc.ic[1], pc.ic[0], &nl);
+	if(ind < 0 || ind >= nl) {
+		rv = MCD_ERR_NOINPUTCHANS;
+		goto error;
+	}
+	
+	// Get the old label and value   
+	int lablen, len;
+	GetLabelLengthFromIndex(pc.ic[1], pc.ic[0], ind, &lablen);
+	GetValueLengthFromIndex(pc.ic[1], pc.ic[0], ind, &len);
+	
+	label = malloc(lablen+1);
+	value = malloc(len+1);
+	
+	GetLabelFromIndex(pc.ic[1], pc.ic[0], ind, label);
+	GetValueFromIndex(pc.ic[1], pc.ic[0], ind, value);
+	
+	label[0] = uidc.chans[ind]?' ':149; // 149 is a mark
+	
+	// Replace the list item to replace the label
+	ReplaceListItem(pc.ic[1], pc.ic[0], ind, label, value);
+	
+	if(uidc.chans[ind]) {
+		remove_chan(ind);
+	} else {
+		add_chan(&label[1], ind);
+	}
+	
+	// Update the uidc var now.
+	uidc.chans[ind] = !uidc.chans[ind];		// Toggle its place in the var
+	
+	error:
+	
+	if(label != NULL) { free(label); }
+	if(value != NULL) { free(value); }
+	
+	return rv;
+}
+
+int toggle_ic_ind_safe(int ind) {
+	CmtGetLock(lock_uidc);
+	int rv = toggle_ic_ind(ind);
+	CmtReleaseLock(lock_uidc);
+	
+	return rv;
+}
+
 void toggle_ic() {
 	// Toggles a given input channel. If you are turning it off, this
 	// function will jump you back to the previous location. If the previous
@@ -3879,47 +3961,18 @@ void toggle_ic() {
 		SetCtrlAttribute(pc.ic[1], pc.ic[0], ATTR_DFLT_INDEX, 0);	
 	}
 	
-	// Check if we can turn this on or not.
-	if(!uidc.chans[val] && uidc.onchans == 8) {
+	// Check if we can turn this on or not - if so do the back end
+	// On error in the back-end, jump back, clearly.
+	if(!uidc.chans[val] && uidc.onchans == 8 || toggle_ic_ind(val)) {
 		SetCtrlIndex(pc.ic[1], pc.ic[0], oval); // Jump back to where we were
 		return;
 	}
-	
-	// Get the old label and value
-	int lablen, len;
-	char *label, *value;
-	GetLabelLengthFromIndex(pc.ic[1], pc.ic[0], val, &lablen);
-	GetValueLengthFromIndex(pc.ic[1], pc.ic[0], val, &len);
-	
-	// Need to free these later
-	label = malloc(lablen+1);
-	value = malloc(len+1);
-	
-	GetLabelFromIndex(pc.ic[1], pc.ic[0], val, label);
-	GetValueFromIndex(pc.ic[1], pc.ic[0], val, value);
-	
-	label[0] = uidc.chans[val]?' ':149; // 149 is a mark
-	
-	// Replace the list item to replace the label
-	ReplaceListItem(pc.ic[1], pc.ic[0], val, label, value);
 	
 	// Now we're going to insert into the current channels ring in the right place
 	// Either delete the val when we find it, or insert this before the first one
 	// that's bigger than it.
 	int i, ind;
-	
-	if(uidc.chans[val]) {
-		remove_chan(val);
-	} else {
-		add_chan(&label[1], val);
-	}
-	
-	free(label);
-	free(value);
-	
-	// Update the uidc var now.
-	uidc.chans[val] = !uidc.chans[val];		// Toggle its place in the var
-	
+
 	// Finally, we'll do the bit where we set this to the right value.
 	if(!uidc.chans[val]) {
 		if(oval != val) {

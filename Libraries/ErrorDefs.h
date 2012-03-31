@@ -106,6 +106,7 @@
 #define MCD_ERR_NOAVGDATA -11007
 #define MCD_ERR_BADCIND -11008
 #define MCD_ERR_NOPATH -11009
+#define MCD_ERR_NOINPUTCHANS -11010
 
 // Strings
 #define MCD_ERR_NOFILENAME_STR "No data filename provided."
@@ -117,6 +118,7 @@
 #define MCD_ERR_NOAVGDATA_STR "No average data found in existing file."
 #define MCD_ERR_BADCIND_STR "Malformed current index passed to function."
 #define MCD_ERR_NOPATH_STR "No path was provided to a function that requires one."
+#define MCD_ERR_NOINPUTCHANS_STR "No input channels are available on this device."
 
 /***********************************************************
 *  														   *

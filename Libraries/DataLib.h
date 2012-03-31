@@ -74,8 +74,14 @@ extern void change_spec_gain_safe(int num);
 extern void change_spec_offset(int num);
 extern void change_spec_offset_safe(int num);
 
+extern void set_fid_chan(int num, int on);
+extern void set_fid_chan_safe(int num, int on);
+
 extern void toggle_fid_chan(int num);
 extern void toggle_fid_chan_safe(int num);
+
+extern void set_spec_chan(int num, int on);
+extern void set_spec_chan_safe(int num, int on);
 
 extern void toggle_spec_chan(int num);
 extern void toggle_spec_chan_safe(int num);
@@ -102,6 +108,9 @@ extern int load_AO_info_safe(void);
 
 extern int load_DAQ_info(void);
 extern int load_DAQ_info_safe(int UIDC_lock, int UIPC_lock, int DAQ_lock);
+
+extern int toggle_ic_ind(int ind);
+extern int toggle_ic_ind_safe(int ind);
 
 extern void toggle_ic(void);
 extern void toggle_ic_safe(void);

@@ -1956,15 +1956,13 @@ int CVICALLBACK ToggleFIDChan (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-			int num = -1, i;
-			for(i = 0; i < 8; i++) {
-				if(control == dc.fchans[i]) {
-					num = i;
-					break;
-				}
-			}
+			int num, val;
+			GetCtrlVal(panel, control, &val);
 			
-			toggle_fid_chan_safe(num);
+			num = int_in_array(dc.fchans, control, 8);
+			if(num >= 0) {
+				set_fid_chan_safe(num, val);	
+			}
 			
 			break;
 	}
@@ -2073,16 +2071,13 @@ int CVICALLBACK ToggleSpecChan (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			int val;
+			GetCtrlVal(panel, control, &val);
 			
-			int num = -1, i;
-			for(i = 0; i < 8; i++) {
-				if(control == dc.schans[i]) {
-					num = i;
-					break;
-				}
+			int num = int_in_array(dc.schans, control, 8);
+			if(num >= 0) {
+				set_spec_chan_safe(num, val);
 			}
-			
-			toggle_spec_chan_safe(num);
 			
 			break;
 	}
