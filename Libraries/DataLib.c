@@ -2792,7 +2792,7 @@ void change_spec_offset(int num) {
 	
 	// Get the old gain
 	float oldoff = uidc.soff[c];
-	GetCtrlVal(dc.spec, dc.scgain, &uidc.soff[c]);
+	GetCtrlVal(dc.spec, dc.scoffset, &uidc.soff[c]);
 	
 	if(uidc.splotids[c][0] < 0 || uidc.splotids[c][1] < 0 || uidc.splotids[c][2] < 0)  // If we don't need to update the plot, we're good
 		return;

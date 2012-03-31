@@ -1211,6 +1211,22 @@ int save_session(char *filename, int safe) { // Primary session saving function
 	GetCtrlVal(dc.fid, dc.fauto, &as);
 	if(rv = CVIXMLAddAttribute(fid_e, MCXML_AUTOSCALE, as?trues:falses)) {	goto error; }	// Autoscale on/off
 	
+	// Current channel
+	int curchan = -1;
+	if(uidc.fnc == 1) {
+		for(i = 0; i < 8; i++) {
+			if(uidc.fchans[i]) { 
+				curchan = i;
+				break; 
+			}	
+		}
+	} else if (uidc.fnc > 1) {
+		GetCtrlVal(dc.fid, dc.fcring, &curchan);	
+	}
+	
+	sprintf(buff, "%d", curchan);
+	if(rv = CVIXMLAddAttribute(fid_e, MCXML_CURCHAN, buff)) { goto error; }
+	
 	//// Add the Spectrum attributes
 	// Number of Channels On
 	sprintf(buff, "%d", uidc.snc);
@@ -1224,7 +1240,21 @@ int save_session(char *filename, int safe) { // Primary session saving function
 	sprintf(buff, "%d", MCD_NPHASEORDERS);
 	if(rv = CVIXMLAddAttribute(spec_e, MCXML_NPHASEORDERS, buff)) { goto error; }
 	
+	// Current channel
+	curchan = -1;
+	if(uidc.snc == 1) { 
+		for(i = 0; i < 8; i++) {
+			if(uidc.schans[i]) { 
+				curchan = i;
+				break; 
+			}	
+		}
+	} else {
+		GetCtrlVal(dc.spec, dc.scring, &curchan);	
+	}
 	
+	sprintf(buff, "%d", curchan);
+	if(rv = CVIXMLAddAttribute(spec_e, MCXML_CURCHAN, buff)) { goto error; }
 	
 	// Now create each of the channel elements
 	for(i = 0; i < 8; i++) {
@@ -2019,6 +2049,18 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			ListDispose(chan_list);
 			chan_list = 0;
 		}
+		
+		if(uidc.fnc > 1) {
+			if(rv = get_attribute_int_val(fid_e, MCXML_CURCHAN, &ind, -1)) { goto error; }
+			
+			if(ind >= 0 && ind < 8) {
+				SetCtrlVal(dc.fid, dc.fcring, ind);
+				update_fid_chan_box();
+			}
+		}
+		
+		CVIXMLDiscardElement(fid_e);
+		fid_e = 0;
 	}
 	
 	// FFT display
@@ -2096,6 +2138,18 @@ int load_session(char *filename, int safe) { // Primary session loading function
 			chan_list = 0;
 		}
 		
+		// Get the current channel in the box.
+		if(uidc.snc > 1) {
+			if(rv = get_attribute_int_val(spec_e, MCXML_CURCHAN, &ind, -1)) { goto error; }
+			
+			if(ind >= 0 && ind < 8) {
+				SetCtrlVal(dc.spec, dc.scring, ind);
+				update_spec_chan_box();
+			}
+		}
+		
+		CVIXMLDiscardElement(spec_e);
+		spec_e = 0;
 	}
 	
 	// Finally, we load the program

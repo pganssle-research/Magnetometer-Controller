@@ -48,6 +48,7 @@
 #define MCXML_ON "On"
 #define MCXML_INDEX "Index"
 #define MCXML_NAME "Name"
+#define MCXML_CURCHAN "CurrentChan"			// Current channel selected - has index.
 
 /********************************************************
  *						General							*
@@ -179,7 +180,8 @@
  	
   	<MCXML_FID
  	 *MCXML_NCHANSON 			-> Number of channels displayed
-	 *MCXML_AUTOSCALE>
+	 *MCXML_AUTOSCALE
+	 *MCXML_CURCHAN>
 		<MCXML_CHANNEL
 		 *MCXML_INDEX
 		 *MCXML_ON			-> If it should be displayed
@@ -191,7 +193,8 @@
 	<MCXML_SPEC
 	*MCXML_NCHANSON 			-> Number of channels displayed
 	*MCXML_AUTOSCALE		
-	*MCXML_NPHASEORDERS>	-> How many phase orders are corrected for (MCD_NPHASEORDERS)
+	*MCXML_NPHASEORDERS
+	*MCMXL_CURCHAN>
 		<MCXML_CHANNEL
 		 *MCXML_INDEX
 		 *MCXML_ON
@@ -228,22 +231,6 @@
 
 // Phase Attributes
 #define MCXML_PHASEORDER "Order"			// Phase order
-
-//// LEGACY
-#define MCXML_COLORS "Colors"				// Colors for the channels
-#define MCXML_GAINS "Gains"					// Gains for the channels
-#define MCXML_OFF "Offsets"					// Offsets for the channels
-#define MCXML_CHANSON "ChansOn"				// Acquisition channels on (pas la chanson)
-#define MCXML_CHANNAMES "ChanNames"			// The names of the channels that are on.
-#define MCXML_CHANRANGE "ChanRanges"		// Ranges of the channels - ints.
-#define MCXML_CURCHAN "CurrentChan"			// Current channel selected - has index.
-#define MCXML_BROKETTLS "BrokenTTLs"		// Broken TTLs
-#define MCXML_DDESC "DataDescription"		// Data file description
-#define MCXML_PPATH "ProgPath"				// Program path.
-#define MCXML_DFBNAME "BaseDataFName" 		// Base filename for data files
-#define MCXML_DFPATH "DataPath"				// Data path
-#define MCXML_DLPATH "DataLoadPath"			// Data path for loading data files.
-#define MCXML_RETAG "SSRoot"				// Root element tag
 
 /************************* Function Declarations *************************/    
 extern char *get_element_val(CVIXMLElement elem, char *buff, int *blen, int *ev);
