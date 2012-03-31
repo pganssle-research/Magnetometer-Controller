@@ -348,8 +348,8 @@
 #define  MainMenu_View_ProgramChart       21      /* callback function: ViewProgramChart */
 #define  MainMenu_View_TransView          22
 #define  MainMenu_View_TransView_SUBMENU  23
-#define  MainMenu_View_TransView_ViewLatestTrans 24 /* callback function: ChangeTransientView */
-#define  MainMenu_View_TransView_ViewAverage 25   /* callback function: ChangeTransientView */
+#define  MainMenu_View_TransView_ViewAverage 24   /* callback function: ChangeTransientView */
+#define  MainMenu_View_TransView_ViewLatestTrans 25 /* callback function: ChangeTransientView */
 #define  MainMenu_View_TransView_ViewNoUpdate 26  /* callback function: ChangeTransientView */
 #define  MainMenu_View_ChangeDimension    27      /* callback function: ChangeNDPointMenu */
 #define  MainMenu_SetupMenu               28

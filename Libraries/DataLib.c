@@ -954,7 +954,6 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	// Currently displayed FFT channel.
 	fs[++cf] = make_fs(MCD_FFTCHAN);
 	if(rv = put_fs(&(fs[cf]), &uidc.schan, FS_INT, 1)) { goto error; }
-	
 
 	// Gains and offsets - FLOAT x nc
 	// Spectrum gains

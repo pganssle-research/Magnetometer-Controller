@@ -1540,61 +1540,33 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		}
 		
 		// File path
-		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_FPATH, &buff_a)) { goto error; }
-		if(buff_a != 0) {
-			if(rv = CVIXMLGetAttributeValueLength(buff_a, &len)) { goto error; }
-			
-			if(len > 0) {
-				buff = realloc_if_needed(buff, &blen, ++len, 1);
-				
-				if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
-				
-				SetCtrlVal(mc.path[1], mc.path[0], buff);
-			}
-			
-			CVIXMLDiscardAttribute(buff_a);
-			buff_a = 0;
+		buff = get_attribute_val(df_e, MCXML_FPATH, buff, &blen, &rv);
+		if(rv < 0) { goto error; }
+		
+		if(strlen(buff) > 0) {
+			SetCtrlVal(mc.path[1], mc.path[0], buff);
 		}
 		
 		// Load path
-		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_LPATH, &buff_a)) { goto error; }
-		if(buff_a != 0) {
-			if(rv = CVIXMLGetAttributeValueLength(buff_a, &len)) { goto error; }
+		buff = get_attribute_val(df_e, MCXML_LPATH, buff, &blen, &rv);
+		if(rv < 0) { goto error; }
+		
+		if(strlen(buff) > 0) { 
+			if(uidc.dlpath != NULL) { free(uidc.dlpath); }
+			uidc.dlpath = malloc(strlen(buff)+1);
 			
-			if(len > 0) {
-				if(uidc.dlpath != NULL) { free(uidc.dlpath); }
-				uidc.dlpath = malloc(++len);
-				
-				if(rv = CVIXMLGetAttributeValue(buff_a, uidc.dlpath)) { goto error; }
-			}
-			
-			CVIXMLDiscardAttribute(buff_a);
-			buff_a = 0;
+			strcpy(uidc.dlpath, buff);
 		}
 		
 		// Load Data Info Bool
-		if(rv = CVIXMLGetAttributeByName(df_e, MCXML_LFINFO, &buff_a)) { goto error; }
-		if(buff_a != 0) {
-			int ldm = 0;
-			
-			if(rv = CVIXMLGetAttributeValue(buff_a, buff)) { goto error; }
-			sscanf(buff, "%d", &ldm);
-			
-			SetCtrlVal(mc.ldatamode[1], mc.ldatamode[0], ldm);
-			
-			CVIXMLDiscardAttribute(buff_a);
-			buff_a = 0;
-		}
+		int ldm;
+		if(rv = get_attribute_int_val(df_e, MCXML_LFINFO, &ldm, 0)) { goto error; }
 		
+		SetCtrlVal(mc.ldatamode[1], mc.ldatamode[0], ldm);
 		
 		// Now the description - which is the value.
-		strcpy(buff, "");
-		if(rv = CVIXMLGetElementValueLength(df_e, &len)) { goto error; }
-		if(len > 0) { 
-			buff = realloc_if_needed(buff, &blen, ++len, 1);
-			
-			if(rv = CVIXMLGetElementValue(df_e, buff)) { goto error; }
-		}
+		buff = get_element_val(df_e, buff, &blen, &rv);
+		if(rv < 0) { goto error; }
 		
 		SetCtrlVal(mc.datadesc[1], mc.datadesc[0], buff);
 		
@@ -2036,9 +2008,13 @@ int load_session(char *filename, int safe) { // Primary session loading function
 						set_fid_chan(ind, on);
 				
 						// Color
-						if(rv = get_attribute_int_val(chan_e, MCXML_COLOR, &color, -1)) { goto error; }
-						if(color >= 0) { uidc.fcol[ind] = color; }
-				
+						buff = get_attribute_val(chan_e, MCXML_COLOR, buff, &blen, &rv);
+						if(rv < 0) { goto error; }
+						
+						if(sscanf(buff, "%x", &color) == 1 && color >= 0) {
+							uidc.fcol[ind] = color;
+						}
+						
 						// Gain and offset
 						if(rv = get_attribute_float_val(chan_e, MCXML_GAIN, &uidc.fgain[ind], 1.0)) { goto error; }
 						if(rv = get_attribute_float_val(chan_e, MCXML_OFFSET, &uidc.foff[ind], 0.0)) { goto error; }
@@ -2092,9 +2068,13 @@ int load_session(char *filename, int safe) { // Primary session loading function
 						set_spec_chan(ind, on);
 	
 						// Color
-						if(rv = get_attribute_int_val(chan_e, MCXML_COLOR, &color, -1)) { goto error; }
-						if(color >= 0) { uidc.scol[ind] = color; }
-	
+						buff = get_attribute_val(chan_e, MCXML_COLOR, buff, &blen, &rv);
+						if(rv < 0) { goto error; }
+						
+						if(sscanf(buff, "%x", &color) == 1 && color >= 0) {
+							uidc.scol[ind] = color;	
+						}
+
 						// Gain and offset
 						if(rv = get_attribute_float_val(chan_e, MCXML_GAIN, &uidc.sgain[ind], 1.0)) { goto error; }
 						if(rv = get_attribute_float_val(chan_e, MCXML_OFFSET, &uidc.soff[ind], 0.0)) { goto error; }
@@ -2373,7 +2353,6 @@ int get_attribute_int_val(CVIXMLElement elem, char *att_name, int *val, int dflt
 	*val = out;
 	return rv;
 }
-
 
 void display_xml_error(int err) {
 	char *message = malloc(500);
