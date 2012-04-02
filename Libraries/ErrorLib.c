@@ -21,12 +21,16 @@ void display_error(int err_val) {
 
 char *get_mc_error_title(unsigned int err_index) {
 	switch(err_index) {
+		case MCF_ERR:
+			return MCF_ERR_TITLE;
 		case MCD_ERR:
 			return MCD_ERR_TITLE;
 		case MCPP_ERR:
 			return MCPP_ERR_TITLE;
 		case MCEX_ERR:
 			return MCEX_ERR_TITLE;
+		case MCSS_ERR:
+			return MCSS_ERR_TITLE;
 	}
 	
 	return "Unknown Error";
@@ -41,13 +45,67 @@ char *get_err_string(int err_val, unsigned int err_type) {
 	
 	if(type > 0) { 
 		switch(type) {
+			case MCF_ERR:
+				switch(err_val) {
+					case MCF_ERR_INVALID_MAX_BYTES:
+						return MCF_ERR_INVALID_MAX_BYTES_STR;
+					case MCF_ERR_FSAVE_NOT_FOUND:
+						return MCF_ERR_FSAVE_NOT_FOUND_STR;
+					case MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME:
+						return MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME_STR;
+					case MCF_ERR_FSAVE_TYPE_MISMATCH:
+						return MCF_ERR_FSAVE_TYPE_MISMATCH_STR;
+					case MCF_ERR_FSAVE_SIZE_MISMATCH:
+						return MCF_ERR_FSAVE_SIZE_MISMATCH_STR;
+					case MCF_ERR_CANNOT_TRUNCATE:
+						return MCF_ERR_CANNOT_TRUNCATE_STR;
+					case MCF_ERR_NOFILE:
+						return MCF_ERR_NOFILE_STR;
+					case MCF_ERR_BADFNAME:
+						return MCF_ERR_BADFNAME_STR;
+					case MCF_ERR_NODATA:
+						return MCF_ERR_NODATA_STR;
+					case MCF_ERR_CUST_NOENTRIES:
+						return MCF_ERR_CUST_NOENTRIES_STR;
+					case MCF_ERR_INVALID_TYPE:
+						return MCF_ERR_INVALID_TYPE_STR;
+					case MCF_ERR_FLOC_NAME:
+						return MCF_ERR_FLOC_NAME_STR;
+					case MCF_ERR_FLOC_TYPE:
+						return MCF_ERR_FLOC_TYPE_STR;
+					case MCF_ERR_NOFLOCS:
+						return MCF_ERR_NOFLOCS_STR;
+					case MCF_ERR_FILEREAD:
+						return MCF_ERR_FILEREAD_STR;
+					case MCF_ERR_FILEWRITE:
+						return MCF_ERR_FILEWRITE_STR;
+					case MCF_ERR_NOSTRING:
+						return MCF_ERR_NOSTRING_STR;
+					case MCF_ERR_FS_NOTYPE:
+						return MCF_ERR_FS_NOTYPE_STR;
+					case MCF_ERR_FS_NOSIZE:
+						return MCF_ERR_FS_NOSIZE_STR;
+					case MCF_ERR_FS_BADCONTENTS:
+						return MCF_ERR_FS_BADCONTENTS_STR;
+					case MCF_ERR_NOARRAY:
+						return MCF_ERR_NOARRAY_STR;
+					case MCF_ERR_NOFSAVE:
+						return MCF_ERR_NOFSAVE_STR;
+					case MCF_ERR_EMPTYVAL:
+						return MCF_ERR_EMPTYVAL_STR;
+					case MCF_ERR_FS_NONS:
+						return MCF_ERR_FS_NONS_STR;
+					case MCF_ERR_FS_NONAME:
+						return MCF_ERR_FS_NONAME_STR;
+				}
+				break;
 			case MCD_ERR:
 				// Data saving errors
 				switch(err_val) {
-					case MCD_ERR_NOFILE:
-						return MCD_ERR_NOFILE_STR;
 					case MCD_ERR_NOFILENAME:
 						return MCD_ERR_NOFILENAME_STR;
+					case MCD_ERR_NOFILE:
+						return MCD_ERR_NOFILE_STR;
 					case MCD_ERR_NOPROG:
 						return MCD_ERR_NOPROG_STR;
 					case MCD_ERR_FILEWRITE:
@@ -58,6 +116,12 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCD_ERR_NODATA_STR;
 					case MCD_ERR_NOAVGDATA:
 						return MCD_ERR_NOAVGDATA_STR;
+					case MCD_ERR_BADCIND:
+						return MCD_ERR_BADCIND_STR;
+					case MCD_ERR_NOPATH:
+						return MCD_ERR_NOPATH_STR;
+					case MCD_ERR_NOINPUTCHANS:
+						return MCD_ERR_NOINPUTCHANS_STR;
 				}
 				break;
 			case MCPP_ERR:
@@ -103,6 +167,14 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCPP_ERR_INVALIDTMODE_STR;
 					case MCPP_ERR_NOARRAY:
 						return MCPP_ERR_NOARRAY_STR;
+					case MCPP_ERR_FS_NOTYPE:
+						return MCPP_ERR_FS_NOTYPE_STR;
+					case MCPP_ERR_FS_NOSIZE:
+						return MCPP_ERR_FS_NOSIZE_STR;
+					case MCPP_ERR_FS_BADCONTENTS:
+						return MCPP_ERR_FS_BADCONTENTS_STR;
+					case MCPP_ERR_NOSTRING:
+						return MCPP_ERR_NOSTRING_STR;
 				}
 				break;
 			case MCEX_ERR:
@@ -117,6 +189,14 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCEX_ERR_INVALIDTMODE_STR;
 				}
 				break;
+			case MCSS_ERR:
+				switch(err_val) {
+					case MCSS_ERR_NOOUT:
+						return MCSS_ERR_NOOUT_STR;
+					case MCSS_ERR_NOATTNAME:
+						return MCSS_ERR_NOATTNAME_STR;
+				}
+				break;
 		}
 	}
 	
@@ -124,12 +204,16 @@ char *get_err_string(int err_val, unsigned int err_type) {
 }
 
 unsigned int is_mc_error(int ev) {
-	if(ev >= MCD_ERR_MIN && ev <= MCD_ERR_MAX) {
+	if(ev >= MCF_ERR_MIN && ev <= MCF_ERR_MAX) {
+		return MCF_ERR;
+	} else if(ev >= MCD_ERR_MIN && ev <= MCD_ERR_MAX) {
 		return MCD_ERR;	
 	} else if(ev >= MCPP_ERR_MIN && ev <= MCPP_ERR_MAX) {
 		return MCPP_ERR;
 	} else if (ev >= MCEX_ERR_MIN && ev >= MCEX_ERR_MAX) {
 		return MCEX_ERR;
+	} else if (ev >= MCSS_ERR_MIN && ev <= MCSS_ERR_MAX) {
+		return MCSS_ERR;	
 	}
 	
 	return 0;

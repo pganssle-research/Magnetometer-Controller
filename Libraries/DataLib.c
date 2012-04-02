@@ -165,7 +165,7 @@ int run_experiment(PPROGRAM *p) {
 		}
 		
 		// Initialize the TDM file
-		if(ev = initialize_tdm_safe(0, 1)) { goto error; }
+		//if(ev = initialize_tdm_safe(0, 1)) { goto error; }
 		
 		update_experiment_nav();
 	}
@@ -291,7 +291,7 @@ int run_experiment(PPROGRAM *p) {
 				// later. Clear them when you are really done.
 				
 				if(ev = DAQmxStopTask(ce.cTask)) { if(ev != 200010) { goto error; } }
-				if(ev = DAQmxStopTask(ce.aTask)) { goto error; }
+				if(ev = DAQmxStopTask(ce.aTask)) { if(ev != 200010) { goto error; } }
 				
 				CmtReleaseLock(lock_DAQ);
 				daq_locked = 0;
@@ -310,16 +310,19 @@ int run_experiment(PPROGRAM *p) {
 					free(avg_data);
 					avg_data = NULL;
 				}
-			
+				
+				if(ce.p->nt > 1) {
+					if(ev = update_avg_data_mcd(MCD_AVGCACHE_FNAME, &avg_data, p, data, ce.cind, ce.nchan, ce.hash)) { goto error; }
+				}
+				
+				if(ce.cind == 0) {
+					if(ev = initialize_mcd_safe(ce.path, ce.bfname, ce.num, p, ce.nchan, ce.tstart, ce.hash)) { goto error; }	
+				}
+				
+				if(ev = save_data_mcd(ce.path, p, data, ce.cind, ce.nchan, ce.tdone)) { goto error; }
+				
 				CmtGetLock(lock_uidc);
 				
-				
-				
-				if(ev = save_data_safe(data, (uidc.disp_update == 0)?&avg_data:NULL))  { 
-					CmtReleaseLock(lock_uidc);
-					goto error; 
-				}
-			
 				if(uidc.disp_update < 2) {	// We're plotting stuff for 0 (Avg) or 1 (Latest)
 					CmtGetLock(lock_ce);
 					if(uidc.disp_update && ct > 1) { 
@@ -365,7 +368,7 @@ int run_experiment(PPROGRAM *p) {
 	if(avg_data != NULL) { free(avg_data); }
 	
 	if(ev)  {
-		if((ev < -247 && ev >= -250) || (ev < -6201 && ev >= -6224)) {  
+		if(is_mc_error(ev)) {  
 			display_error(ev); 
 		} else {
 			uInt32 es_size = DAQmxGetExtendedErrorInfo(NULL, 0);
@@ -501,7 +504,7 @@ int prepare_next_step (PPROGRAM *p) {
 	int ct = get_ct(&ce);
 	
 	if(!p->varied) {
-		if(ct <= p->nt) {
+		if(ct < p->nt) {	// Transients are internally on a zero-based index.
 			if(p->use_pb) {
 				if(ce.ilist == NULL) { 
 					ce.ilist = generate_instructions(p, ce.cind, &ce.ninst);
@@ -827,8 +830,7 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	unsigned char *fchanson = NULL, *schanson = NULL;
 	
 	int fs_size = 0;
-	
-	
+
 	// Enforce valid extension
 	ext = get_extension(fname);
 	if(ext != NULL || strcmp(ext, MCD_EXTENSION) != 0) {
@@ -888,7 +890,7 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	tptr = localtime(&ts);
 	
 	ds = malloc(MCD_DATESTAMP_MAXSIZE+1);	// Get the string
-	strftime(ds, MCD_DATESTAMP_MAXSIZE, MCD_DATE_FORMAT, tptr);
+	strftime(ds, MCD_DATESTAMP_MAXSIZE+1, MCD_DATE_FORMAT, tptr);
 	
 	fs[++cf] = make_fs(MCD_DATESTAMP);
 	if(rv = put_fs(&(fs[cf]), ds, FS_CHAR, strlen(ds)+1)) { goto error; }
@@ -898,7 +900,7 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	
 	// Timestamps - both the same for now
 	ds = calloc(MCD_TIMESTAMP_MAXSIZE+1, 1);
-	strftime(ds, MCD_TIMESTAMP_MAXSIZE, MCD_TIME_FORMAT, tptr);
+	strftime(ds, MCD_TIMESTAMP_MAXSIZE+1, MCD_TIME_FORMAT, tptr);
 	
 	fs[++cf] = make_fs(MCD_TIMESTART);	// Time started
 	if(rv = put_fs(&(fs[cf]), ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
@@ -1036,7 +1038,7 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	return rv;
 }
 
-int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, int64 hash) {
+int update_avg_data_mcd(char *fname, double **avg_data, PPROGRAM *p, double *data, int cind, int nc, int64 hash) {
 	// This is basically for cacheing average data in a local file.
 	// First call will create a file (overwrites when cind == 0)
 	// Subsequent calls will update it with the new data.
@@ -1081,7 +1083,13 @@ int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc
 	
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 	
-	step_title = make_cstep_str(p, cind, 1, &rv);
+	if(p->varied) {
+		step_title = make_cstep_str(p, cind, 1, &rv);
+	} else {
+		step_title = malloc(strlen("[0]")+1);
+		strcpy(step_title, "[0]");
+	}
+		
 	if(rv != 0) { goto error; }
 	
 	int stlen;
@@ -1146,9 +1154,15 @@ int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc
 				dg.val.d[i] = (dg.val.d[i]*ct + data[i])/(ct+1);
 			}
 			
+			if(avg_data != NULL && data_size > 0) {
+				*avg_data = malloc(data_size*sizeof(double));
+				memcpy(*avg_data, dg.val.d, data_size*sizeof(double));
+			}
+			
 			// Overwrite the data.
 			unsigned int off = get_fs_header_size_from_ns(dg.ns);
-			fseek(f, ad_pos+off, SEEK_SET);
+			
+			fseek(f, ad_pos, SEEK_SET);
 			if(rv = overwrite_fsave_in_file(f, &dg)) { goto error; }
 		}
 	}
@@ -1204,9 +1218,14 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	f = fopen(fname, "rb+");	// If it doesn't exist, there's a problem.
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 	
-	// Make the label for this particular step.
-	step_title = make_cstep_str(p, cind, 0, &rv);
-	if(rv != 0) { goto error; }
+	// Make the label for this particular step
+	if(p->varied) {
+		step_title = make_cstep_str(p, cind, 0, &rv);
+		if(rv != 0) { goto error; }
+	} else {
+		step_title = malloc(strlen("[00000000]")+1);
+		sprintf(step_title, "[%d]", cind);
+	}
 	
 	// Generate the label fsave
 	dg = make_fs(step_title);
@@ -1216,7 +1235,10 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 		// If it's the first time through, create the main data group.
 		mg = make_fs(MCD_MAINDATA);
 		if(rv = put_fs(&dg, data, FS_DOUBLE, data_size)) { goto error; }
-		if(rv = fwrite_fs(f, &dg)) { goto error; }
+		if(rv = put_fs_container(&mg, &dg, 1)) { goto error; }
+		
+		fseek(f, 0, SEEK_END);
+		if(rv = fwrite_fs(f, &mg)) { goto error; }
 	} else {
 		// Otherwise we should find the main data group and append our data
 		long mgp = find_fsave_in_file(f, MCD_MAINDATA, MCF_EOF);

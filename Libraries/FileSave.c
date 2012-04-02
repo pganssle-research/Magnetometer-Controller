@@ -95,7 +95,7 @@ int fappend_data_to_fs(FILE *f, void *data, unsigned int data_size) {
 	fseek(f, -1*sizeof(unsigned int), SEEK_CUR);
 	unsigned int new_size = bfs.size + data_size;
 	
-	if(fwrite(&new_size, sizeof(unsigned int), 1, f)) { 
+	if(fwrite(&new_size, sizeof(unsigned int), 1, f) < 1) { 
 		rv = MCF_ERR_FILEWRITE;
 		goto error;
 	}
@@ -182,9 +182,8 @@ fsave make_fs(char *name) {
 }
 
 int put_fs(fsave *fs, void *val, unsigned int type, unsigned int NumElements) {
-	if(fs == NULL) { return -1; }
-	if(NumElements <= 0) { return -2; }
-	if(!is_valid_fs_type(type)) { return -3; }
+	if(fs == NULL) { return MCF_ERR_NOFSAVE; }
+	if(!is_valid_fs_type(type)) { return MCF_ERR_FS_NOTYPE; }
 	
 	fs->type = type;
 	fs->size = get_fs_type_size(type)*NumElements;
@@ -193,7 +192,9 @@ int put_fs(fsave *fs, void *val, unsigned int type, unsigned int NumElements) {
 	if(val == NULL) { 
 		fs->val.c = NULL; 
 		return 0;
-	}
+	} else if(NumElements == 0) { 
+		return MCF_ERR_EMPTYVAL; 
+	}  
 	
 	// May be able to remove this step by adding a void* in the union.
 	switch(type) {
@@ -315,8 +316,7 @@ int put_fs_custom(fsave *fs, void *val, unsigned int num_entries, unsigned int *
 	fs->size = size*NumElements + nsizesum; // The raw data contained in the fsave.
 	fs->size += si*(num_entries + 1);		// Space for the name sizes, plus one for num_entries.
 	fs->size += si8*num_entries; 			// Space for the type definitions
-	
-	
+
 	// Create the char array.
 	c = calloc(fs->size, 1);
 	char *pos = c;
@@ -381,6 +381,7 @@ long find_fsave_in_file(FILE *f, char *fs_name, long max_bytes) {
 	long init_pos = ftell(f);
 	long pos = MCF_ERR_FSAVE_NOT_FOUND;
 	int wrapped = 0;
+	fsave fsb = null_fs();
 	
 	if(feof(f) && max_bytes == MCF_WRAP) {
 		rewind(f);
@@ -388,33 +389,29 @@ long find_fsave_in_file(FILE *f, char *fs_name, long max_bytes) {
 	}
 	
 	int ns;
-	char *name = NULL;
 	int nlen = 0;
 	
 	size_t si = sizeof(unsigned int), si8 = sizeof(unsigned char);
 	
-	
+	int rv = 0;
 	while(!feof(f)) {
 		pos = ftell(f);
 		
-		if(fread(&ns, si, 1, f) < 1 && !feof(f)) {
-			pos = MCF_ERR_BADFNAME;
-			goto error;
-		}
-		
-		name = realloc_if_needed(name, &nlen, ns, 1);
-		if(fread(name, si8, ns, f) < ns && !feof(f)) {
-			pos = MCF_ERR_BADFNAME;
-			goto error;
-		}
-		
-		if(name != NULL && strcmp(name, fs_name) == 0) {
+		if(rv = get_fs_header_from_file(f, &fsb)) {
+			pos = rv;
 			break;
 		}
 		
+		if(fsb.name != NULL && strcmp(fsb.name, fs_name) == 0) {
+			break;
+		} else {
+			pos = MCF_ERR_FSAVE_NOT_FOUND;
+		}
+		
+		fseek(f, fsb.size, SEEK_CUR);
+		
 		if(feof(f) && max_bytes == MCF_WRAP) {
 			if(wrapped) {
-				pos = MCF_ERR_FSAVE_NOT_FOUND;
 				break;
 			} else {
 				rewind(f);
@@ -429,7 +426,9 @@ long find_fsave_in_file(FILE *f, char *fs_name, long max_bytes) {
 	}
 	
 	error:
-	if(name != NULL) { free(name); }
+	free_fsave(&fsb);
+	
+	fseek(f, init_pos, SEEK_SET);
 	
 	return pos;
 }
@@ -739,13 +738,15 @@ int get_fs_header_from_file(FILE *f, fsave *fs) {
 	size_t si = sizeof(unsigned int), si8 = sizeof(unsigned char);
 	
 	if(fread(&(fs->ns), si, 1, f) < 1) {
-		return MCF_ERR_BADFNAME;		
+		return MCF_ERR_FILEREAD;		
 	}
+	
+	if(fs->name != NULL) { free(fs->name); }
 	
 	if(fs->ns > 0) {
 		fs->name = malloc(fs->ns);
 		if(fread(fs->name, si8, fs->ns, f) < fs->ns) {
-			return MCF_ERR_BADFNAME;	
+			return MCF_ERR_FILEREAD;	
 		}
 	} else {
 		fs->name = malloc(1);

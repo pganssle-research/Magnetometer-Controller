@@ -264,14 +264,16 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	int loc;
 	for(i = 0; i < MCPP_PROPSNUM; i++) {
 		loc = plocs[i];
-		if(loc <= 0) { continue; }
+		if(loc < 0) { continue; }
 	
 		if(pfields[loc] == NULL) { continue; }
 		
 		switch(bfs[loc].type) {
 			case FS_INT:
-			case FS_UCHAR: // Anything stored as UCHAR in the file is actually stored as int in PPROGRAM.
 				*(int *)pfields[i] = *(bfs[loc].val.i);
+				break;
+			case FS_UCHAR: // Anything stored as UCHAR in the file is actually stored as int in PPROGRAM.
+				*(int *)pfields[i] = *(unsigned char *)(bfs[loc].val.c);
 				break;
 			case FS_DOUBLE:
 				*(double *)pfields[i] = *(bfs[loc].val.d);

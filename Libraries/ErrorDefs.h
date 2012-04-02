@@ -15,7 +15,7 @@
 
 // FSave Errors
 #define MCF_ERR_TITLE "File Saving Error"
-#define MCF_ERR_MAX -10501
+#define MCF_ERR_MAX -10751
 #define MCF_ERR_MIN -11000
 
 // Data Saving
@@ -44,35 +44,39 @@
 * 														   *
 ***********************************************************/
 
-#define MCF_ERR_INVALID_MAX_BYTES -10501
-#define MCF_ERR_FSAVE_NOT_FOUND -10502
-#define MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME -10503
-#define MCF_ERR_FSAVE_TYPE_MISMATCH -10504
-#define MCF_ERR_FSAVE_SIZE_MISMATCH -10505
-#define MCF_ERR_CANNOT_TRUNCATE -10506
-#define MCF_ERR_NOFILE -10507
-#define MCF_ERR_BADFNAME -10508
-#define MCF_ERR_NODATA -10509
-#define MCF_ERR_CUST_NOENTRIES -10510
-#define MCF_ERR_INVALID_TYPE -10511
-#define MCF_ERR_FLOC_NAME -10512
-#define MCF_ERR_FLOC_TYPE -10513
-#define MCF_ERR_FLOC_SIZE -10514
-#define MCF_ERR_NOFLOCS -10515
-#define MCF_ERR_FILEREAD -10516
-#define MCF_ERR_FILEWRITE -10517
-#define MCF_ERR_NOSTRING -10518
-#define MCF_ERR_FS_NOTYPE -10519
-#define MCF_ERR_FS_NOSIZE -10520
-#define MCF_ERR_FS_BADCONTENTS -10521
-#define MCF_ERR_NOARRAY -10522
-#define MCF_ERR_NOFSAVE -10523
+#define MCF_ERR_INVALID_MAX_BYTES -10751
+#define MCF_ERR_FSAVE_NOT_FOUND -10752
+#define MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME -10753
+#define MCF_ERR_FSAVE_TYPE_MISMATCH -10754
+#define MCF_ERR_FSAVE_SIZE_MISMATCH -10755
+#define MCF_ERR_CANNOT_TRUNCATE -10756
+#define MCF_ERR_NOFILE -10757
+#define MCF_ERR_BADFNAME -10758
+#define MCF_ERR_NODATA -10759
+#define MCF_ERR_CUST_NOENTRIES -10760
+#define MCF_ERR_INVALID_TYPE -10761
+#define MCF_ERR_FLOC_NAME -10762
+#define MCF_ERR_FLOC_TYPE -10763
+#define MCF_ERR_FLOC_SIZE -10764
+#define MCF_ERR_NOFLOCS -10765
+#define MCF_ERR_FILEREAD -10766
+#define MCF_ERR_FILEWRITE -10767
+#define MCF_ERR_NOSTRING -10768
+#define MCF_ERR_FS_NOTYPE -10769
+#define MCF_ERR_FS_NOSIZE -10770
+#define MCF_ERR_FS_BADCONTENTS -10771
+#define MCF_ERR_NOARRAY -10772
+#define MCF_ERR_NOFSAVE -10773
+#define MCF_ERR_EMPTYVAL -10774
+#define MCF_ERR_FS_NONS -10775
+#define MCF_ERR_FS_NONAME -10776
 
 #define MCF_ERR_INVALID_MAX_BYTES_STR "Invalid maximum bytes paramater passed."
 #define MCF_ERR_FSAVE_NOT_FOUND_STR "Requested fsave not found. This may not be an error."
 #define MCF_ERR_BAD_FSAVE_REPLACEMENT_NAME_STR "FSAVE names do not match, cannot replace safely!"
 #define MCF_ERR_FSAVE_TYPE_MISMATCH_STR "FSAVE types do not match. This may not be an error."
 #define MCF_ERR_FSAVE_SIZE_MISMATCH_STR "FSAVE sizes do not match. This may not be an error."
+#define MCF_ERR_CANNOT_TRUNCATE_STR "Cannot truncate file."
 #define MCF_ERR_NOFILE_STR "Invalid file passed to function."
 #define MCF_ERR_BADFNAME_STR "Invalid file name."
 #define MCF_ERR_NODATA_STR "Required data were not passed to function."
@@ -90,6 +94,9 @@
 #define MCF_ERR_FS_BADCONTENTS_STR "The contents of the fsave structure were not properly read."
 #define MCF_ERR_NOARRAY_STR "Required array not passed to function."
 #define MCF_ERR_NOFSAVE_STR "Invalid FSAVE struct passed to function."
+#define MCF_ERR_EMPTYVAL_STR "The value for the fsave was not provided, or size was 0."
+#define MCF_ERR_FS_NONS_STR "FSAVE has malformed header - missing name length."
+#define MCF_ERR_FS_NONAME_STR "FSAVE has malformed header - malformed name."
 
 /***********************************************************
 *  														   *
@@ -177,6 +184,9 @@
 #define MCPP_ERR_FIELDSMISSING_STR "Necessary fields are missing from a required item in PPROGRAM."
 #define MCPP_ERR_INVALIDTMODE_STR "Invalid transient indexing mode in PPROGRAM"
 #define MCPP_ERR_NOARRAY_STR "Null array passed to pulse program function"
+#define MCPP_ERR_FS_NOTYPE_STR "No type provided to fsave structure."
+#define MCPP_ERR_FS_NOSIZE_STR "No size provided for fsave structure."
+#define MCPP_ERR_FS_BADCONTENTS_STR "Bad contents passed to fsave structure."
 #define MCPP_ERR_NOSTRING_STR "Required string was not present."
 
 /***********************************************************

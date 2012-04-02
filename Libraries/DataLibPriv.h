@@ -8,6 +8,10 @@
 #include <NIDAQmx.h>
 #include <cviddc.h>
 
+// Cache filename.
+#define MCD_AVGCACHE_FNAME "AverageCache.mcd"
+#define MCD_DATCACHE_FNAME "DataCache.mcd"
+
 // Filename format
 #define MCD_FNAME_DATE_FORMAT "%y%m%d"
 #define MCD_FNAME_DATE_LEN 6
@@ -21,7 +25,7 @@
 #define MCD_DATE_FORMAT "%y%m%d"
 #define MCD_DATESTAMP_MAXSIZE 6
 
-#define MCD_TIME_FORMAT "%H:%m:%s, %a, %b %d, %Y"
+#define MCD_TIME_FORMAT "%H:%m:%S, %a, %b %d, %Y"
 #define MCD_TIMESTAMP_MAXSIZE 27
 
 // Data groups
@@ -86,8 +90,9 @@ extern int prepare_next_step_safe(PPROGRAM *p);
 
 /*********************** File I/O ************************/   
 // Data Saving
-extern int initialize_mcd(char *fname, char *basefname, unsigned int num, PPROGRAM *p, unsigned int nc, time_t start, int64 hash);
-extern int update_avg_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, int64 hash);
+extern int initialize_mcd(char *fname, char *basefname, unsigned int num, PPROGRAM *p, unsigned int nc, time_t start, __int64 hash);
+extern int initialize_mcd_safe(char *fname, char *basefname, unsigned int num, PPROGRAM *p, unsigned int nc, time_t start, __int64 hash);
+extern int update_avg_data_mcd(char *fname, double **avg_data, PPROGRAM *p, double *data, int cind, int nc, int64 hash);
 extern int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time_t done);
 
 // Data Loading

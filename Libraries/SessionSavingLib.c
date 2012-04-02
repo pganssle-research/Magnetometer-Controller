@@ -107,7 +107,13 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	// Now load the previous session
 	int rv = load_session(NULL, 1);
 	
-	if(rv) {  display_xml_error(rv); }
+	if(rv) {  
+		if(is_mc_error(rv)) {
+			display_error(rv);
+		} else {
+			display_xml_error(rv); 
+		}
+	}
 	
 	// Now load what UI stuff that needs to be loaded
 	setup_broken_ttls_safe();
