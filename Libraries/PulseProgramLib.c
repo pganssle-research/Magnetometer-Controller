@@ -241,6 +241,7 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	
 	// Initializations for legacy reasons:
 	p->use_pb = 1;
+	p->valid = 1;
 	
 	char *props[MCPP_PROPSNUM] = {MCPP_VERSION, MCPP_NP, MCPP_SR, MCPP_NT, MCPP_TRIGTTL, MCPP_TMODE, 
 								 MCPP_SCAN, MCPP_USE_PB, MCPP_VARIED, MCPP_NINST, MCPP_TOTALTIME, MCPP_NUINSTRS, 
@@ -1474,7 +1475,7 @@ int update_status_safe(int verbose) {
 //////////////////////////////////////////////////////////////
 /******************** General UI Functions *********************/
 PPROGRAM *get_current_program() { // This function gets the current program from the UI controls and dumps it into a PPROGRAM
-	PPROGRAM *p = malloc(sizeof(PPROGRAM));	// Dynamically allocate a PPROGRAM first
+	PPROGRAM *p = calloc(1, sizeof(PPROGRAM));	// Dynamically allocate a PPROGRAM first
 
 	ui_cleanup(0); // Clean up the interface and uipc variable so that we can trust it.
 
@@ -1484,6 +1485,7 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	p->nDims = uipc.nd;									// Number of indirect dimensions
 	p->nAout = uipc.anum;
 	p->use_pb = uipc.uses_pb;
+	p->valid = 1;
 	
 	int i;
 	int *steps = NULL;

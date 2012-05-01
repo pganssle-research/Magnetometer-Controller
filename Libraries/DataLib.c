@@ -1597,9 +1597,8 @@ double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
 	data = load_data_file(f, lindex, p, ev);
 	
 	error:
-	if(rv != 0 && p != NULL) {
-		free_pprog(p);	
-	}
+
+	fclose(f);
 	
 	*ev = rv;
 	return data;
@@ -1612,8 +1611,6 @@ double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
 	// Inputs:
 	// f:			The file to get data from.
 	// lindex:		Linear index to the data you want to retrieve.
-	//				Pass -1 to get the average data
-	//				Pass -2 to get an ND array of all data.
 	//
 	// Outputs:
 	// p:			Pulse program used in generating the file.
@@ -1622,14 +1619,18 @@ double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
 	// Returns:
 	// Returns a dynamically allocated double array, which needs to be freed.
 
+	fsave dg = null_fs();
+	fsave fdata = null_fs();
+	
 	double *data = NULL;
 	int rv = 0;
-	p = NULL;
-		
+	unsigned int fs_size = 0;
+	int null_p = (p == NULL);
+	
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 	rewind(f);
 	
-	if(p == NULL) { 
+	if(null_p || !p->valid) { 
 		p = load_pprogram(f, &rv);
 		if(rv < 0) { goto error; }
 	}
@@ -1638,6 +1639,9 @@ double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
 	
 	long loc = find_fsave_in_file(f, MCD_MAINDATA, MCF_WRAP);
 	if(loc < 0) { rv = MCD_ERR_NODATA; goto error; }
+	
+	fseek(f, loc, SEEK_SET);
+	if(rv = get_fs_header_from_file(f, &dg)) { goto error; }
 	
 	// Convert the lindex as expected into the lindex as it's stored.
 	// We're assuming that all navigation lindexes are calculated from
@@ -1650,10 +1654,39 @@ double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
 		}
 	}
 	
+	if(lindex >= 0) {
+		// Seek the lindex-th group in the file.
+		loc = find_fsave_in_file(f, MCD_MAINDATA, dg.size);
+		if(loc < 0) { 
+			rv = loc;
+			goto error; 
+		}
 	
+		// Get the data
+		fdata = read_fsave_from_file(f, &rv);
+		if(rv < 0) { goto error; }
+
+		if(fdata.val.d == NULL) { 
+			rv = MCD_ERR_NODATA;
+			goto error;
+		} else {
+			data = malloc(fdata.size);
+			memcpy(data, fdata.val.d, fdata.size);
+		}
+	} else {
+		rv = MCD_ERR_BADCIND;
+		goto error;
+	}
 	
 	error:
+	free_fsave(&dg);
+	free_fsave(&fdata);
 	
+	if(null_p && p != NULL) {
+		free_pprog(p);
+		p = NULL;
+	}
+
 	*ev = rv;
 	return data;
 

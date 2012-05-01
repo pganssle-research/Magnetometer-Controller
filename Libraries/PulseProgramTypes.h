@@ -100,5 +100,6 @@ typedef struct PPROGRAM // This is a structure for containing information about 
 	int *func_locs;			// The index corresponding the function. This is necessary because instructions are stored as ints.
 	pfunc **funcs;			// The functions themselves. 
 	
+	int valid;				// Is this PPROGRAM valid - used internally only
 } PPROGRAM;
 #endif

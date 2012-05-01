@@ -374,7 +374,7 @@ long find_nth_fsave_in_file(FILE *f, unsigned int num, long max_bytes) {
 	// than the requested number.
 	
 	int rv = MCF_ERR_FSAVE_NOT_FOUND;
-	long pos, init_pos = pos = ftell(f);
+	long pos, init_pos = pos = ftell(f), bytes = 0;
 	fsave fsb = null_fs();
 	
 	if(f == NULL) { return MCF_ERR_NOFILE; }
@@ -385,16 +385,31 @@ long find_nth_fsave_in_file(FILE *f, unsigned int num, long max_bytes) {
 	}
 	
 	int i = 0;
-	while(!feof(f) && i < num) {
+	int wrap = 0;
+	while(i < num && !feof(f)) {
 		if(rv = get_fs_header_from_file(f, &fsb)) { pos = rv; goto error; }
 		
 		fseek(f, fsb.size, SEEK_CUR);
 		i++;
 		
 		pos = ftell(f);
+
+		bytes = pos-init_pos;
+		if(max_bytes >= 0) {
+			if(bytes >= max_bytes) { break; }
+		} else {
+			if(feof(f) && max_bytes == MCF_WRAP) {
+				if(!wrapped) { 
+					rewind(f);
+					wrapped = 1;
+				} else {
+					break;
+				}
+			} 
+		}
 	}
 	
-	if(feof(f)) {
+	if(bytes >= maxbytes || feof(f)) {
 		pos = MCF_ERR_FSAVE_NOT_FOUND;	
 	}
 	

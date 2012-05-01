@@ -8,6 +8,10 @@
 #include <NIDAQmx.h>
 #include <cviddc.h>
 
+// Flags
+#define MCD_LOADAVG -1
+#define MCD_LOADALL -2
+
 // Cache filename.
 #define MCD_AVGCACHE_FNAME "AverageCache.mcd"
 #define MCD_DATCACHE_FNAME "DataCache.mcd"
