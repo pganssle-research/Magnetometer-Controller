@@ -6835,13 +6835,13 @@ int convert_lindex(PPROGRAM *p, int index, int old_mode, int new_mode) {
 	// linear index from a new mode.
 	if(p == NULL) { return MCPP_ERR_NOPROG; }
 
-	int old_mode = p->tmode;
+	int mode = p->tmode;
 	int rv = 0;
 	int *maxstep = NULL, *step = NULL;
 	
 	// Need this part for later indexing.
 	int tdiv = 1, nt = p->nt;
-	if(new_mode == MC_TMODE_PC && new_mode != old_mode) {
+	if(new_mode != old_mode && new_mode == MC_TMODE_PC || old_mode == MC_TMODE_PC) {
 		if(p->nCycles) {
 			for(int i = 0; i < p->nCycles; i++) {
 				tdiv *= p->maxsteps[i]; 		
@@ -6850,8 +6850,8 @@ int convert_lindex(PPROGRAM *p, int index, int old_mode, int new_mode) {
 			nt /= tdiv;
 			if(nt < 1) {
 				return MCPP_ERR_INVALIDTMODE;
-			} else if(nt == 1) {
-				new_mode = MC_TMODE_PC;
+			} else if(nt == 1 && new_mode == MC_TMODE_PC) {
+				new_mode = MC_TMODE_TF;
 			}
 		} else {
 			new_mode = MC_TMODE_ID;
@@ -6869,17 +6869,8 @@ int convert_lindex(PPROGRAM *p, int index, int old_mode, int new_mode) {
 		return index;
 	}
 	
-	if(old_mode == MC_TMODE_PC) {
-		tdiv = 1;
-		for(int i = 0; i < p->nCycles; i++) {
-			tdiv *= p->maxsteps[i];	
-		}
+	p->tmode = old_mode;
 	
-		if(tdiv == p->nt) {
-			return index;
-		}
-	}
-
 	int step_size = p->nDims + ((new_mode == MC_TMODE_PC)?p->nCycles:1);
 	maxstep = malloc(sizeof(unsigned int)*step_size);
 	step = malloc(sizeof(unsigned int)*step_size);
@@ -6927,6 +6918,8 @@ int convert_lindex(PPROGRAM *p, int index, int old_mode, int new_mode) {
 	error:
 	if(step != NULL) { free(step); }
 	if(maxstep != NULL) { free(maxstep); }
+	
+	p->tmode = mode;
 	
 	return rv;
 }

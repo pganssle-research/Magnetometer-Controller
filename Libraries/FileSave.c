@@ -361,6 +361,49 @@ int put_fs_custom(fsave *fs, void *val, unsigned int num_entries, unsigned int *
 	return rv;
 }
 
+long find_nth_fsave_in_file(FILE *f, unsigned int num, long max_bytes) {
+	// Retrieve the location in file of the Nth fsave, starting at the position
+	// you've started at. File is set to that position (not rewound), and the
+	// position from beginning of file is returned.
+	//
+	// If max_bytes is MCF_EOF, will stop at the end of the file
+	// If max_bytes is MCF_WRAP, will wrap back to the initial position.
+	// Other negative values to max_bytes will be interpreted as errors.
+	//
+	// Returns MCF_ERR_FSAVE_NOT_FOUND if the number of fsaves is less
+	// than the requested number.
+	
+	int rv = MCF_ERR_FSAVE_NOT_FOUND;
+	long pos, init_pos = pos = ftell(f);
+	fsave fsb = null_fs();
+	
+	if(f == NULL) { return MCF_ERR_NOFILE; }
+	if(max_bytes <= 0) { 
+		if(max_bytes != MCF_EOF && max_bytes != MCF_WRAP) { 
+			return MCF_ERR_INVALID_MAX_BYTES;
+		}
+	}
+	
+	int i = 0;
+	while(!feof(f) && i < num) {
+		if(rv = get_fs_header_from_file(f, &fsb)) { pos = rv; goto error; }
+		
+		fseek(f, fsb.size, SEEK_CUR);
+		i++;
+		
+		pos = ftell(f);
+	}
+	
+	if(feof(f)) {
+		pos = MCF_ERR_FSAVE_NOT_FOUND;	
+	}
+	
+	error:
+	free_fsave(&fsb);
+	
+	return pos;
+}
+
 long find_fsave_in_file(FILE *f, char *fs_name, long max_bytes) {
 	// If max_bytes is MCF_EOF, will stop at the end of the file
 	// If max_bytes is MCF_WRAP, will wrap back to the initial position.

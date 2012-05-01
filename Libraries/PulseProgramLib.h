@@ -227,6 +227,8 @@ extern int get_cyc_step(PPROGRAM *p, int cind, int *cyc_step);
 extern int get_dim_step(PPROGRAM *p, int cind, int *dim_step);
 extern int get_var_ind(PPROGRAM *p, int cind);
 
+extern int convert_lindex(PPROGRAM *p, int index, int old_mode, int new_mode);
+
 extern int pprogramcpy(PPROGRAM *p_f, PPROGRAM *p_t);
 extern int insert_instruction(PPROGRAM *p, PINSTR *instr, int num); 
 

@@ -1641,12 +1641,15 @@ double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
 	
 	// Convert the lindex as expected into the lindex as it's stored.
 	// We're assuming that all navigation lindexes are calculated from
-	// MC_TMODE_TF -> transients first.
-	if(lindex > 0 && p->tmode != MC_TMODE_TF && p->nDims > 1) {
-		// If p->nDims == 1, all modes are automatically MC_TMODE_TF
-		
-			
+	// MC_TMODE_TF (transients first)
+	if(lindex > 0) {
+		lindex = convert_lindex(p, lindex, MC_TMODE_TF, p->tmode);
+		if(lindex < 0) { 
+			rv = lindex;
+			goto error;
+		}
 	}
+	
 	
 	
 	error:
@@ -1674,12 +1677,12 @@ int *parse_cstep(char *step, int *ev) {
 	}
 	
 	cstep = calloc(s, sizeof(unsigned int));
-	char *m = s;
+	char *m = step;
 	int n;
 	for(i = 0; i < s; i++) {
 		n = sscanf(m, "%d", cstep+i);
 		if(n != 1) { 
-			rv = MCD_ERR_INVALIDSTRING;
+			rv = MCD_ERR_INVALIDSTR;
 			goto error;
 		}
 		
