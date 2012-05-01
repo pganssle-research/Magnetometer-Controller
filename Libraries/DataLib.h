@@ -16,6 +16,9 @@ extern void CVICALLBACK discardIdleAndGetData(int poolHandle, int functionID, un
 extern int load_experiment(char *filename);
 extern int load_experiment_safe(char *filename);
 
+extern double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev);
+extern double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev);
+
 extern double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv);
 extern double *load_data_safe(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv);
 

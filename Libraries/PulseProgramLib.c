@@ -6747,6 +6747,8 @@ int get_transient_from_step(PPROGRAM *p, int *step) {
 }
 
 int get_dim_step(PPROGRAM *p, int cind, int *dim_step) {
+	// Get dimension-only step information from the PPROGRAM
+	
 	if(p == NULL) { return MCPP_ERR_NOPROG; }
 	
 	int *cs = malloc(p->steps_size*sizeof(int));
@@ -6770,6 +6772,8 @@ int get_dim_step(PPROGRAM *p, int cind, int *dim_step) {
 }
 
 int get_cyc_step(PPROGRAM *p, int cind, int *cyc_step) {
+	// Get the the cycle-only step information from the PPROGRAM.
+	
 	if(p == NULL) { return MCPP_ERR_NOPROG; }
 	if(p->nCycles <= 0) { return 1; }
 	
@@ -6805,6 +6809,8 @@ int get_cyc_step(PPROGRAM *p, int cind, int *cyc_step) {
 }
 
 int get_var_ind(PPROGRAM *p, int cind) {
+	// Get the linear index from the cstep index (excludes transients)
+	
 	int rv = -1;
 	int *cs = malloc(p->nCycles+p->nDims);
 	
@@ -6823,6 +6829,110 @@ int get_var_ind(PPROGRAM *p, int cind) {
 	free(cs);
 	return rv;
 }
+									
+int convert_lindex(PPROGRAM *p, int index, int old_mode, int new_mode) {
+	// Convert the linear index as stored in the PPROGRAM to a
+	// linear index from a new mode.
+	if(p == NULL) { return MCPP_ERR_NOPROG; }
+
+	int old_mode = p->tmode;
+	int rv = 0;
+	int *maxstep = NULL, *step = NULL;
+	
+	// Need this part for later indexing.
+	int tdiv = 1, nt = p->nt;
+	if(new_mode == MC_TMODE_PC && new_mode != old_mode) {
+		if(p->nCycles) {
+			for(int i = 0; i < p->nCycles; i++) {
+				tdiv *= p->maxsteps[i]; 		
+			}
+			
+			nt /= tdiv;
+			if(nt < 1) {
+				return MCPP_ERR_INVALIDTMODE;
+			} else if(nt == 1) {
+				new_mode = MC_TMODE_PC;
+			}
+		} else {
+			new_mode = MC_TMODE_ID;
+		}
+	}
+	
+	// Check if conversion needs to be done. No need
+	// to convert the first index or if the modes are the
+	// same. Additionally, all modes operate the same way
+	// when there are no indirect dimensions.
+	//
+	// MC_TMODE_PC is equivalent to MC_TMODE_ID when there
+	// are no phase cycles.
+	if(index == 0 || old_mode == new_mode || p->nDims < 1) {
+		return index;
+	}
+	
+	if(old_mode == MC_TMODE_PC) {
+		tdiv = 1;
+		for(int i = 0; i < p->nCycles; i++) {
+			tdiv *= p->maxsteps[i];	
+		}
+	
+		if(tdiv == p->nt) {
+			return index;
+		}
+	}
+
+	int step_size = p->nDims + ((new_mode == MC_TMODE_PC)?p->nCycles:1);
+	maxstep = malloc(sizeof(unsigned int)*step_size);
+	step = malloc(sizeof(unsigned int)*step_size);
+	
+	int *dim_step = NULL;
+	int t = get_transient(p, index);
+	if(t < 0) {
+		rv = t;
+		goto error;
+	}
+	
+	switch(new_mode) {
+		case MC_TMODE_TF:
+			step[0] = t;
+			dim_step = step+1;
+			
+			maxstep[0] = nt;
+			memcpy(maxstep+1, p->maxsteps+p->nCycles, sizeof(unsigned int)*p->nDims);
+			break;
+		case MC_TMODE_ID:
+			step[p->nDims] = t;
+			dim_step = step;
+			
+			maxstep[p->nDims] = nt;
+			memcpy(maxstep, p->maxsteps+p->nCycles, sizeof(unsigned int)*p->nDims);
+			break;
+		case MC_TMODE_PC:
+			step[p->nCycles+p->nDims] = t;
+			dim_step = step+p->nCycles;
+			if(rv = get_cyc_step(p, index, step)) { goto error; }
+			
+			maxstep[p->nCycles+p->nDims] = nt;
+			memcpy(maxstep, p->maxsteps, sizeof(unsigned int)*(p->nDims+p->nCycles));
+			
+			break;
+		default:
+			rv = MCPP_ERR_INVALIDTMODE;
+			goto error;
+	}
+	
+	if(rv = get_dim_step(p, index, dim_step)) { goto error; }
+	
+	rv = get_lindex(step, maxstep, step_size);
+	
+	error:
+	if(step != NULL) { free(step); }
+	if(maxstep != NULL) { free(maxstep); }
+	
+	return rv;
+}
+
+
+
 //////////////////////////////////////////////////////////////
 // 															//
 //					General Utilities						//

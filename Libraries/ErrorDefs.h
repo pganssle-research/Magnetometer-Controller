@@ -114,6 +114,8 @@
 #define MCD_ERR_BADCIND -11008
 #define MCD_ERR_NOPATH -11009
 #define MCD_ERR_NOINPUTCHANS -11010
+#define MCD_ERR_NOSTEPSTR -11011
+#define MCD_ERR_INVALIDSTR -11012
 
 // Strings
 #define MCD_ERR_NOFILENAME_STR "No data filename provided."
@@ -126,6 +128,8 @@
 #define MCD_ERR_BADCIND_STR "Malformed current index passed to function."
 #define MCD_ERR_NOPATH_STR "No path was provided to a function that requires one."
 #define MCD_ERR_NOINPUTCHANS_STR "No input channels are available on this device."
+#define MCD_ERR_NOSTEPSTR_STR "No step title was provided to a function which requires one."
+#define MCD_ERR_INVALIDSTR_STR "An invalid string caused an error."
 
 /***********************************************************
 *  														   *

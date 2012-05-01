@@ -1234,7 +1234,6 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	if(cind == 0) {
 		// If it's the first time through, create the main data group.
 		mg = make_fs(MCD_MAINDATA);
-		if(rv = put_fs(&dg, data, FS_DOUBLE, data_size)) { goto error; }
 		if(rv = put_fs_container(&mg, &dg, 1)) { goto error; }
 		
 		fseek(f, 0, SEEK_END);
@@ -1245,7 +1244,7 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 		if(mgp < 0) { rv = mgp; goto error; }
 		
 		fseek(f, mgp, SEEK_SET);
-		if(rv = fappend_data_to_fs(f, data, data_size)) { goto error; }
+		if(rv = fadd_fs_to_container(f, &dg)) { goto error; }
 	}
 	
 	// Update the timestamp
@@ -1567,6 +1566,137 @@ int load_experiment_safe(char *filename) {
 	
 	return rv;
 }
+	
+double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
+	// Loads MCD data from a not-opened file.
+	// 
+	// Inputs:
+	// filename:	Path to the file you want to open
+	// lindex:		Linear index to the data you want to retrieve.
+	//				Pass -1 to get the average data
+	//				Pass -2 to get an ND array of all data.
+	//
+	// Outputs:
+	// p:			Pulse program used in generating the file.
+	// ev: 			Error value. Returns 0 on success, negative number on failure.
+	//
+	// Returns:
+	// Returns a dynamically allocated double array, which needs to be freed.
+	
+	double *data = NULL;
+	int rv = 0;
+	
+	if(filename == NULL) { rv = MCD_ERR_NOFILENAME; goto error; }
+	
+	// Now load the relevant data.
+	// Start by finding the data group.
+	// TODO: Allow loading all data into the data cache.
+	FILE *f = fopen(filename, "rb");
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	
+	data = load_data_file(f, lindex, p, ev);
+	
+	error:
+	if(rv != 0 && p != NULL) {
+		free_pprog(p);	
+	}
+	
+	*ev = rv;
+	return data;
+}
+
+double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
+	// Loads MCD data from an opened file. The file will be rewound when passed to this
+	// function, but not after.
+	// 
+	// Inputs:
+	// f:			The file to get data from.
+	// lindex:		Linear index to the data you want to retrieve.
+	//				Pass -1 to get the average data
+	//				Pass -2 to get an ND array of all data.
+	//
+	// Outputs:
+	// p:			Pulse program used in generating the file.
+	// ev: 			Error value. Returns 0 on success, negative number on failure.
+	//
+	// Returns:
+	// Returns a dynamically allocated double array, which needs to be freed.
+
+	double *data = NULL;
+	int rv = 0;
+	p = NULL;
+		
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	rewind(f);
+	
+	if(p == NULL) { 
+		p = load_pprogram(f, &rv);
+		if(rv < 0) { goto error; }
+	}
+	
+	if(p == NULL) { rv = MCD_ERR_NOPROG; goto error; }
+	
+	long loc = find_fsave_in_file(f, MCD_MAINDATA, MCF_WRAP);
+	if(loc < 0) { rv = MCD_ERR_NODATA; goto error; }
+	
+	// Convert the lindex as expected into the lindex as it's stored.
+	// We're assuming that all navigation lindexes are calculated from
+	// MC_TMODE_TF -> transients first.
+	if(lindex > 0 && p->tmode != MC_TMODE_TF && p->nDims > 1) {
+		// If p->nDims == 1, all modes are automatically MC_TMODE_TF
+		
+			
+	}
+	
+	
+	error:
+	
+	*ev = rv;
+	return data;
+
+}
+
+int *parse_cstep(char *step, int *ev) {
+	// Parses titles of the form [0, 0, 0, 0]
+	// If the result is not NULL, it is a dynamically allocated array which must be freed.
+	int rv = 0;
+	int *cstep = NULL;
+	int strl = 0;
+
+	if(step == NULL || (strl = strlen(step)) == 0) { rv = MCD_ERR_NOSTEPSTR; goto error; }
+	
+	// Figure out how many values there are first
+	int i, s = 1;
+	for(i = 0; i < strl; i++) {
+		if(step[i] == ',') { 
+			s++; 
+		}
+	}
+	
+	cstep = calloc(s, sizeof(unsigned int));
+	char *m = s;
+	int n;
+	for(i = 0; i < s; i++) {
+		n = sscanf(m, "%d", cstep+i);
+		if(n != 1) { 
+			rv = MCD_ERR_INVALIDSTRING;
+			goto error;
+		}
+		
+		m = strchr(m, ',');
+		if(m == NULL) { break; }
+	}
+
+	error:
+	
+	if(rv != 0) { 
+		free(cstep);
+		cstep = NULL;
+	}
+	
+	*ev = rv;
+	return cstep;
+}
 
 double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv) {
 	// Loads data from a not-opened file. If avg evaluates as TRUE, it gets from the 
@@ -1781,7 +1911,7 @@ void select_directory(char *path) {
 	DeleteListItem(mc.datafbox[1], mc.datafbox[0], 0, -1);	// Clear the list.
 	int ind = 0;											// Running tally of tine index
 	
-	char *spath = calloc(strlen(path)+strlen("*.tdm")+2, sizeof(char));
+	char *spath = calloc(strlen(path)+strlen("*.mcd")+2, sizeof(char));
 
 	int pchanged = 0;
 	
@@ -1814,7 +1944,7 @@ void select_directory(char *path) {
 	}
 	
 	// Now load all the files.
-	sprintf(spath, "%s\\%s", path, "*.tdm");
+	sprintf(spath, "%s\\%s", path, "*.mcd");
 	
 	rv = GetFirstFile(spath, 1, 0, 0, 0, 0, 1, filename);
 	while(rv == 0) {	// Get the rest of them.
