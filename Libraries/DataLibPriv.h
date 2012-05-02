@@ -38,7 +38,7 @@
 
 // Data header
 #define MCD_DATAHEADER "[Data Header]"
-#define MCD_DATANUM 10
+#define MCD_DATANUM 12
 
 #define MCD_FILENAME "filename"
 #define MCD_EXPNAME "ExperimentName"
@@ -49,6 +49,8 @@
 #define MCD_DATESTAMP "DateStamp"
 #define MCD_TIMESTART "TimeStarted"
 #define MCD_TIMEDONE "TimeDone"
+#define MCD_TSTART "TimeStartedEpoch"
+#define MCD_TDONE "TimeDoneEpoch"
 
 #define MCD_CIND "CurrentIndex"
 #define MCD_MAXSTEPS "MaxSteps"

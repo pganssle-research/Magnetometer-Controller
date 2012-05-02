@@ -6,6 +6,25 @@
 
 #include <PulseProgramTypes.h>
 
+typedef struct dheader {
+	// Type for containing information from a data header
+	// Much of this information will be stored in a CEXP.
+	
+	char *filename; 			// Path of the data
+	char *expname;				// Experiment name
+	int num;					// Indexing of experiments with the same name
+	__int64 hash;				// Unique identifier
+	
+	char *dstamp;				// Date stamp
+	time_t tstarted;			// Time started
+	time_t tdone;				// Time the last part of the experiment finished
+	
+	unsigned int nchans;		// Number of channels.
+	unsigned int cind;			// Current index.
+	unsigned int *maxsteps; 	// Maximum steps (see PPROGRAM)
+} dheader;
+	
+
 /*************************** Function Declarations ***************************/
 /************** Running Experiment Functions *************/
 
@@ -19,11 +38,17 @@ extern int load_experiment_safe(char *filename, int prog);
 extern int load_experiment_tdm(char *filename);
 extern int load_experiemnt_tdm_safe(char *filename);
 
+extern double ****load_all_data_file(FILE *f, PPROGRAM *p, int *cind, int *ev);
 extern double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev);
 extern double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev);
 
 extern double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv);
 extern double *load_data_safe(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv);
+
+// Data parsing
+dheader load_dataheader_file(FILE *f, int *ev);
+dheader free_dh(dheader *d);
+dheader null_dh(void);
 
 extern int *parse_cstep(char *step, int *ev);
 

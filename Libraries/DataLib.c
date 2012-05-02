@@ -19,6 +19,7 @@
 *****************************************************************************/
 
 // Includes
+
 #include <analysis.h>
 #include <userint.h>
 #include "toolbox.h"
@@ -117,6 +118,7 @@ int CVICALLBACK UpdateStatus (void *functiondata)
 	
 	return 0;
 }
+
 
 int run_experiment(PPROGRAM *p) {
 	// The main thread for running an experiment. This should be called from the main 
@@ -908,6 +910,13 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	fs[++cf] = make_fs(MCD_TIMEDONE);	// Time completed
 	if(rv = put_fs(&(fs[cf]), ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
 	
+	int epoch = (int)ts;
+	fs[++cf] = make_fs(MCD_TSTART);
+	if(rv = put_fs(&(fs[cf]), &epoch, FS_INT, 1)) { goto error; }
+	
+	fs[++cf] = make_fs(MCD_TDONE);
+	if(rv = put_fs(&(fs[cf]), &epoch, FS_INT, 1)) { goto error; }
+	
 	// Current step
 	unsigned int cind = 0;
 	fs[++cf] = make_fs(MCD_CIND);
@@ -1180,6 +1189,7 @@ int update_avg_data_mcd(char *fname, double **avg_data, PPROGRAM *p, double *dat
 	return rv;
 }
 
+
 int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time_t done) {
 	// Save data to existing file, with the header already written
 	// 
@@ -1210,7 +1220,7 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	FILE *f = NULL;
 	
 	unsigned int data_size = p->np * nc;
-	fsave mg = null_fs(), dg = null_fs(), tg = null_fs();
+	fsave mg = null_fs(), dg = null_fs(), tg = null_fs(), eg = null_fs();
 	char *step_title = NULL;
 	char *buff = NULL;
 	char *ds = NULL;
@@ -1256,6 +1266,10 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	
 	tg = make_fs(MCD_TIMEDONE);
 	if(rv = put_fs(&tg, ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
+	
+	int epoch = (int)done;
+	eg = make_fs(MCD_TDONE);
+	if(rv = put_fs(&eg, &epoch, FS_INT, 1)) { goto error; }
 	
 	rewind(f);
 	long h_pos = find_fsave_in_file(f, MCD_DATAHEADER, MCF_EOF);
@@ -1428,11 +1442,12 @@ int load_experiment(char *filename, int prog) {
 	
 	if(filename == NULL) { return MCD_ERR_NOFILENAME; }
 	
-	int rv = 0, i;
+	int rv = 0, i, cind = 0;
 	int *glocs = NULL;
 	char *ext = NULL, **names = NULL;
 	FILE *f = NULL;
 	PPROGRAM *p;
+	double ****data = NULL;
 	
 	fsave dhg = null_fs(), dg = null_fs(), dig = null_fs();
 	fsave *dhs = NULL, *dihs = NULL;
@@ -1658,6 +1673,10 @@ int load_experiment(char *filename, int prog) {
 	ce.p = load_pprogram(f, &rv);
 	if(rv < 0) { goto error; }
 
+	// Get the data
+	data = load_all_data_file(f, ce.p, &cind, &rv);
+	if(rv < 0) { goto error; }
+	//plot_data(data[0], ce.p->np, ce.p->sr, ce.nchan);
 	
 	error:
 	if(f != NULL) { fclose(f); }
@@ -1831,7 +1850,7 @@ int load_experiment_tdm_safe(char *filename) {
 	
 	return rv;
 }
-	
+
 double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
 	// Loads MCD data from a not-opened file.
 	// 
@@ -1861,6 +1880,7 @@ double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
 	
 	data = load_data_file(f, lindex, p, ev);
 	
+	
 	error:
 
 	fclose(f);
@@ -1869,19 +1889,22 @@ double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
 	return data;
 }
 
-double **load_all_data_file(FILE *f, PPROGRAM *p, int *cind, int *ev) {
+double ****load_all_data_file(FILE *f, PPROGRAM *p, int *cind, int *ev) {
 	// Loads all data from MCD. The file will be rewound when passed to this function,
 	// but not after. To retrieve the program, pass a dynamically allocated PPROGRAM
 	// with p->valid set to 0. Passing NULL to p will retrieve the program from the
 	// file, but it will not be passed to the calling function.
+	//
+	// The output is a 4D array:
+	// data[nt][dims][nc][points]
 	
 	fsave dhg = null_fs(), dg = null_fs();
 	fsave fsb = null_fs();
 	fsave *all_data = NULL;
-	int ind =-1, rv = 0;
+	int ind =-1, rv = 0, i;
 	int ad_size = 0;
 	
-	double **data = NULL;
+	double ****data = NULL;
 	int *cstep = NULL;  
 	
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
@@ -1940,8 +1963,18 @@ double **load_all_data_file(FILE *f, PPROGRAM *p, int *cind, int *ev) {
 	}
 	
 	// Storing this as a linear index as calculated from transients-first
-	data = calloc(ind, sizeof(double *));
-	for(int i = 0; i < ind; i++) {
+	// We'll allocate a full array, and just populate the ones that are available.
+	data = calloc(p->nt, sizeof(double *));
+	int ds = 1; 
+	for(i = 0; i < p->nDims; i++) {
+		ds *= p->maxsteps[i+p->nCycles];
+	}
+	
+	for(i = 0; i < p->nt; i++) {
+			
+	}
+	
+	for(i = 0; i < ind; i++) {
 		// Determine which one we're on.
 		cstep = parse_cstep(all_data[i].name, &rv);
 		if(rv < 0) { goto error; }
@@ -2063,48 +2096,6 @@ double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
 	*ev = rv;
 	return data;
 
-}
-
-int *parse_cstep(char *step, int *ev) {
-	// Parses titles of the form [0, 0, 0, 0]
-	// If the result is not NULL, it is a dynamically allocated array which must be freed.
-	int rv = 0;
-	int *cstep = NULL;
-	int strl = 0;
-
-	if(step == NULL || (strl = strlen(step)) == 0) { rv = MCD_ERR_NOSTEPSTR; goto error; }
-	
-	// Figure out how many values there are first
-	int i, s = 1;
-	for(i = 0; i < strl; i++) {
-		if(step[i] == ',') { 
-			s++; 
-		}
-	}
-	
-	cstep = calloc(s, sizeof(unsigned int));
-	char *m = step;
-	int n;
-	for(i = 0; i < s; i++) {
-		n = sscanf(m, "%d", cstep+i);
-		if(n != 1) { 
-			rv = MCD_ERR_INVALIDSTR;
-			goto error;
-		}
-		
-		m = strchr(m, ',');
-		if(m == NULL) { break; }
-	}
-
-	error:
-	
-	if(rv != 0) { 
-		free(cstep);
-		cstep = NULL;
-	}
-	
-	*ev = rv;
-	return cstep;
 }
 
 double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv) {
@@ -2279,13 +2270,210 @@ int get_ddc_channel_groups(DDCFileHandle file, char **names, int num, DDCChannel
 	return rv;
 }
 
- int get_ddc_channel_groups_safe(DDCFileHandle file, char **names, int num, DDCChannelGroupHandle *cgs) {
+int get_ddc_channel_groups_safe(DDCFileHandle file, char **names, int num, DDCChannelGroupHandle *cgs) {
 	CmtGetLock(lock_tdm);
 	int rv = get_ddc_channel_groups(file, names, num, cgs);
 	CmtReleaseLock(lock_tdm);
 	
 	return rv;
  }
+ 
+ // Data Parsing Functions
+dheader load_dataheader_file(FILE *f, int *ev) {
+	dheader d = null_dh();
+	fsave fsb = null_fs();
+	fsave dhg = null_fs();
+	fsave *dhs = NULL;
+
+	char *t_start = NULL, *t_done = NULL, **names = NULL;
+	int i, rv = 0;
+	int *glocs = NULL;
+	unsigned int dhs_size = 0;
+	
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	rewind(f);
+	
+	// Find the header.
+	long loc;
+	if((loc = find_fsave_in_file(f, MCD_DATAHEADER, MCF_EOF)) < 0) { rv = loc; goto error; }
+	fseek(f, loc, SEEK_SET);
+	if(rv = get_fs_header_from_file(f, &dhg)) { goto error; }
+	
+	dhs = read_all_fsaves_from_file(f, &rv, &dhs_size, dhg.size);
+	if(rv < 0) { goto error; }
+	
+	if(dhs_size == 0) {
+		rv = MCD_ERR_BADHEADER;
+		goto error;
+	}
+	
+	// Read out all these FSAVES into the relevant variables.
+	int tse = 0, tde = 0;
+	char *dh_names[MCD_DATANUM] = {MCD_FILENAME, MCD_EXPNAME, MCD_EXPNUM, MCD_HASH,
+								   MCD_NCHANS, MCD_DATESTAMP, MCD_TIMESTART, MCD_TIMEDONE,
+								   MCD_TSTART, MCD_TDONE, MCD_CIND, MCD_MAXSTEPS};
+	
+	char **dh_string_vals[MCD_DATANUM] = {&(d.filename), &(d.expname), NULL, NULL, NULL, &(d.dstamp),
+										  NULL, NULL, NULL, NULL, NULL, NULL};
+	
+	void *dh_vals[MCD_DATANUM] = {NULL, NULL, &(d.num), &(d.hash), &(d.nchans),
+								   NULL, NULL, NULL, &tse, &tde,  &(d.cind), d.maxsteps};
+
+	
+	names = calloc(dhs_size, sizeof(char*));
+	for(i = 0; i < dhs_size; i++) {
+		if(dhs[i].ns == 0 || dhs[i].name == NULL) { continue; }
+		names[i] = malloc(dhs[i].ns);
+		memcpy(names[i], dhs[i].name, dhs[i].ns);
+	}
+
+	glocs = strings_in_array(names, dh_names, dhs_size, MCD_DATANUM);
+	if(glocs == NULL) { rv = MCD_ERR_BADHEADER; goto error; }
+	
+	names = free_string_array(names, dhs_size);
+
+	int j;
+	char *sb;
+	
+	for(i = 0; i < MCD_DATANUM; i++) {
+		if( glocs[i] < 0 || (dh_vals[i] == NULL && dh_string_vals[i] == NULL)) { continue; }
+		j = glocs[i];
+		
+		fsb = dhs[j];
+		
+		switch(fsb.type) {
+			case FS_CHAR:
+				if(dh_string_vals[j] == NULL) { continue; }
+				
+				if(*dh_string_vals[j] != NULL) { 
+					free(*dh_string_vals[j]);
+					*dh_string_vals[j] = NULL;
+				}
+				
+				sb = malloc(fsb.size);
+				memcpy(sb, fsb.val.c, fsb.size);
+				*dh_string_vals[j] = sb;
+				break;
+			case FS_UINT:
+				if(dh_vals[j] == NULL) { continue; }
+				
+				*(unsigned int *)dh_vals[j] = *(fsb.val.ui);
+				break;
+			case FS_INT64:
+				*(__int64 *)dh_vals[j] = *(fsb.val.ll);
+				break;
+			case FS_UINT64:
+				*(unsigned __int64 *)dh_vals[j] = *(fsb.val.ull);
+				break;
+		}
+	}
+	
+	if(tse > 0) {
+		d.tstarted = (time_t)tse;
+	}
+	
+	if(tde > 0) {
+		d.tdone = (time_t)tde;	
+	}
+	
+	free(glocs);
+	glocs = NULL;
+	
+	dhs = free_fsave_array(dhs, dhs_size);
+	dhs_size = 0;
+	if(feof(f)) { rewind(f); }
+		
+	error:
+	*ev = rv;
+
+	return d;
+} 
+
+dheader free_dh(dheader *d) {
+	if(d != NULL) {
+		if(d->filename != NULL) { 
+			free(d->filename);
+			d->filename = NULL;
+		}
+		
+		if(d->expname != NULL) { 
+			free(d->expname); 
+			d->expname = NULL;
+		}
+		
+		if(d->dstamp != NULL) {
+			free(d->dstamp);
+			d->dstamp = NULL;
+		}
+		
+		if(d->maxsteps != NULL) {
+			free(d->maxsteps);
+			d->maxsteps = NULL;
+		}
+	}
+	
+	return null_dh();
+}
+
+dheader null_dh() {
+	// Returns a null dataheader.
+	
+	dheader d = {.filename = NULL,
+				 .expname = NULL,
+			  	 .num = -1,
+				 .hash = 0,
+				 .dstamp = NULL,
+				 .tstarted = NULL,
+				 .tdone = NULL,
+				 .nchans = 0,
+				 .cind = 0,
+				 .maxsteps = NULL};
+ 
+	return d;
+}
+ 
+ 
+int *parse_cstep(char *step, int *ev) {
+	// Parses titles of the form [0, 0, 0, 0]
+	// If the result is not NULL, it is a dynamically allocated array which must be freed.
+	int rv = 0;
+	int *cstep = NULL;
+	int strl = 0;
+
+	if(step == NULL || (strl = strlen(step)) == 0) { rv = MCD_ERR_NOSTEPSTR; goto error; }
+	
+	// Figure out how many values there are first
+	int i, s = 1;
+	for(i = 0; i < strl; i++) {
+		if(step[i] == ',') { 
+			s++; 
+		}
+	}
+	
+	cstep = calloc(s, sizeof(unsigned int));
+	char *m = step;
+	int n;
+	for(i = 0; i < s; i++) {
+		n = sscanf(m, "%d", cstep+i);
+		if(n != 1) { 
+			rv = MCD_ERR_INVALIDSTR;
+			goto error;
+		}
+		
+		m = strchr(m, ',');
+		if(m == NULL) { break; }
+	}
+
+	error:
+	
+	if(rv != 0) { 
+		free(cstep);
+		cstep = NULL;
+	}
+	
+	*ev = rv;
+	return cstep;
+}
 
 /******************** File Navigation *******************/
 void select_data_item() {
