@@ -70,6 +70,7 @@
 #define MCF_ERR_EMPTYVAL -10774
 #define MCF_ERR_FS_NONS -10775
 #define MCF_ERR_FS_NONAME -10776
+#define MCF_ERR_EOF -10777
 
 #define MCF_ERR_INVALID_MAX_BYTES_STR "Invalid maximum bytes paramater passed."
 #define MCF_ERR_FSAVE_NOT_FOUND_STR "Requested fsave not found. This may not be an error."
@@ -97,6 +98,7 @@
 #define MCF_ERR_EMPTYVAL_STR "The value for the fsave was not provided, or size was 0."
 #define MCF_ERR_FS_NONS_STR "FSAVE has malformed header - missing name length."
 #define MCF_ERR_FS_NONAME_STR "FSAVE has malformed header - malformed name."
+#define MCF_ERR_EOF_STR "End of file reached - this may not be an error."
 
 /***********************************************************
 *  														   *
@@ -116,6 +118,9 @@
 #define MCD_ERR_NOINPUTCHANS -11010
 #define MCD_ERR_NOSTEPSTR -11011
 #define MCD_ERR_INVALIDSTR -11012
+#define MCD_ERR_INVALID_EXTENSION -11013
+#define MCD_ERR_BADHEADER -11014
+#define MCD_ERR_MALFORMED_PROG - 11015
 
 // Strings
 #define MCD_ERR_NOFILENAME_STR "No data filename provided."
@@ -130,6 +135,9 @@
 #define MCD_ERR_NOINPUTCHANS_STR "No input channels are available on this device."
 #define MCD_ERR_NOSTEPSTR_STR "No step title was provided to a function which requires one."
 #define MCD_ERR_INVALIDSTR_STR "An invalid string caused an error."
+#define MCD_ERR_INVALID_EXTENSION_STR "Invalid extension passed to function."
+#define MCD_ERR_BADHEADER_STR "File contains a bad header."
+#define MCD_ERR_MALFORMED_PROG_STR "Pulse program does not match data."
 
 /***********************************************************
 *  														   *

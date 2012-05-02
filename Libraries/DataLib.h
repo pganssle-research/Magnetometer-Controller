@@ -13,14 +13,19 @@ extern int CVICALLBACK IdleAndGetData(void *functionData);
 extern void CVICALLBACK discardIdleAndGetData(int poolHandle, int functionID, unsigned int event, int value, void *callbackData);
 
 /*********************** File I/O ************************/
-extern int load_experiment(char *filename);
-extern int load_experiment_safe(char *filename);
+extern int load_experiment(char *filename, int prog);
+extern int load_experiment_safe(char *filename, int prog);
+
+extern int load_experiment_tdm(char *filename);
+extern int load_experiemnt_tdm_safe(char *filename);
 
 extern double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev);
 extern double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev);
 
 extern double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv);
 extern double *load_data_safe(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv);
+
+extern int *parse_cstep(char *step, int *ev);
 
 // File Navigation
 extern void select_data_item(void);

@@ -1416,7 +1416,272 @@ int save_data_safe(double *data, double **avg) {
 	
 }
 
-int load_experiment(char *filename) {
+int load_experiment(char *filename, int prog) {
+	// Loads the experiment from file into UIDC, data into the cache, etc.
+	// 
+	// Inputs:
+	// filename: 	The path to the experiment file. Must end in .mcd.
+	// prog:		Boolean - whether to load the program with it.
+	//
+	// Output:
+	// Returns 0 on success, negative on failure.
+	
+	if(filename == NULL) { return MCD_ERR_NOFILENAME; }
+	
+	int rv = 0, i;
+	int *glocs = NULL;
+	char *ext = NULL, **names = NULL;
+	FILE *f = NULL;
+	PPROGRAM *p;
+	
+	fsave dhg = null_fs(), dg = null_fs(), dig = null_fs();
+	fsave *dhs = NULL, *dihs = NULL;
+	
+	int dhs_size = 0, dihs_size = 0;
+	
+	ext = get_extension(filename);
+	if(ext != NULL && strcmp(MCD_EXTENSION, ext) != 0) {
+		
+		rv = MCD_ERR_INVALID_EXTENSION;
+		goto error;
+	}
+	
+	if((f = fopen(filename, "rb")) == NULL) {
+		rv = MCD_ERR_NOFILE;
+		goto error;
+	}
+	
+	// Start by reading out the data header.
+	long loc = 0;
+	if(loc = find_fsave_in_file(f, MCD_DATAHEADER, MCF_WRAP)) { goto error; }
+	if(loc < 0) { rv = loc; goto error; }
+	
+	fseek(f, loc, SEEK_SET);
+	if(rv = get_fs_header_from_file(f, &dhg)) { goto error; }
+	
+	dhs = read_all_fsaves_from_file(f, &rv, &dhs_size, dhg.size);
+	if(rv < 0) { goto error; }
+	
+	if(dhs_size == 0) {
+		rv = MCD_ERR_BADHEADER;
+		goto error;
+	}
+	
+	// Read out all these FSAVES into the relevant variables.
+	char *t_start = NULL, *t_done = NULL;
+	
+	char *dh_names[MCD_DATANUM] = {MCD_FILENAME, MCD_EXPNAME, MCD_EXPNUM, MCD_HASH,
+								   MCD_NCHANS, MCD_DATESTAMP, MCD_TIMESTART, MCD_TIMEDONE,
+								   MCD_CIND, MCD_MAXSTEPS};
+	
+	char **dh_string_vals[MCD_DATANUM] = {&(ce.fname), &(ce.bfname), NULL, NULL, NULL, NULL,
+										  &t_start, &t_done, NULL, NULL};
+	
+	void *dh_vals[MCD_DATANUM] = {NULL, NULL, &(ce.num), &(ce.hash), &(ce.nchan),
+								   NULL, NULL, NULL, &(ce.cind), NULL};
+
+	names = calloc(dhs_size, sizeof(char*));
+	for(i = 0; i < dhs_size; i++) {
+		if(dhs[i].ns == 0 || dhs[i].name == NULL) { continue; }
+		names[i] = malloc(dhs[i].ns);
+		memcpy(names[i], dhs[i].name, dhs[i].ns);
+	}
+
+	glocs = strings_in_array(names, dh_names, dhs_size, MCD_DATANUM);
+	if(glocs == NULL) { rv = MCD_ERR_BADHEADER; goto error; }
+	
+	names = free_string_array(names, dhs_size);
+
+	fsave fsb;
+	int j;
+	char *sb;
+	
+	for(i = 0; i < MCD_DATANUM; i++) {
+		if(dh_vals[i] == NULL || glocs[i] < 0) { continue; }
+		j = glocs[i];
+		
+		fsb = dhs[j];
+		
+		switch(fsb.type) {
+			case FS_CHAR:
+				if(dh_string_vals[j] == NULL) { continue; }
+				
+				if(*dh_string_vals[j] != NULL) { 
+					free(*dh_string_vals[j]);
+					*dh_string_vals[j] = NULL;
+				}
+				
+				sb = malloc(fsb.size);
+				memcpy(sb, fsb.val.c, fsb.size);
+				*dh_string_vals[j] = sb;
+				break;
+			case FS_UINT:
+				if(dh_vals[j] == NULL) { continue; }
+				
+				*(unsigned int *)dh_vals[j] = *(fsb.val.ui);
+				break;
+			case FS_INT64:
+				*(__int64 *)dh_vals[j] = *(fsb.val.ll);
+				break;
+			case FS_UINT64:
+				*(unsigned __int64 *)dh_vals[j] = *(fsb.val.ull);
+				break;
+		}
+	}
+	
+	if(t_start != NULL) {
+		// TODO: Parse the time stamps	
+	}
+	
+	if(t_done != NULL) {
+		// TODO: See above.
+	}
+	
+	free(glocs);
+	glocs = NULL;
+	
+	dhs = free_fsave_array(dhs, dhs_size);
+	dhs_size = 0;
+	if(feof(f)) { rewind(f); }
+
+	// Get the display values now - if they aren't found that's fine.
+	loc = 0;
+	if(loc = find_fsave_in_file(f, MCD_DISPHEADER, MCF_WRAP)) { goto error; }
+	if(loc < 0) { goto disp_err; }
+	
+	fseek(f, loc, SEEK_SET);
+	if(get_fs_header_from_file(f, &dig)) { goto disp_err; }
+	
+	dihs = read_all_fsaves_from_file(f, &rv, &dihs_size, dig.size);
+	if(rv < 0 || dihs_size == 0) { rv = 0; goto disp_err; }
+	
+	names = calloc(dihs_size, sizeof(char *));
+	for(i = 0; i < dihs_size; i++) { 
+		if(dihs[i].ns == 0 || dihs[i].val.c == 0) { continue; }
+		names[i] = malloc(dihs[i].ns);
+		memcpy(names[i], dihs[i].val.c, dihs[i].ns);
+	}
+	
+	char *dih_names[MCD_DISPNUM] = {MCD_POLYFITON, MCD_POLYFITORDER, MCD_PHASE, MCD_FFTCHAN,
+							  MCD_SGAINS, MCD_SOFFS, MCD_FGAINS, MCD_FOFFS,
+							  MCD_SCHANSON, MCD_FCHANSON};
+	
+	int phpos = 3;
+	
+	void *dih_vals[MCD_DISPNUM] = {&(uidc.polyon), &(uidc.polyord), &(uidc.schan), 
+								NULL, uidc.sgain, uidc.soff, uidc.fgain, uidc.foff,
+								uidc.schans, uidc.fchans};
+	
+	glocs = strings_in_array(names, dih_names, dihs_size, MCD_DISPNUM);
+	if(glocs == NULL) { goto disp_err; }
+	
+	int *ib;
+	float *fb;
+	
+	for(i = 0; i < MCD_DISPNUM; i++) {
+		if(dih_vals[i] == NULL || glocs[i] < 0) { continue; }
+		
+		j = glocs[i];
+		fsb = dihs[j];
+		int s = fsb.size/get_fs_type_size(fsb.type);
+		switch(fsb.type) {
+			case FS_UCHAR:
+				ib = (int *)dih_vals[j];
+				for(int k = 0; k < s; k++) {
+					ib[k] = (int)(fsb.val.uc[k]);
+				}
+				break;
+			case FS_UINT:
+				ib = (unsigned int *)dih_vals[j];
+				for(int k = 0; k < s; k++) {
+					ib[k] = fsb.val.ui[k];	
+				}
+				break;
+			case FS_INT:
+				ib = (int *)dih_vals[j];
+				for(int k = 0; k < s; k++) {
+					ib[k] = fsb.val.i[k];	
+				}
+				break;
+			case FS_FLOAT:
+				fb = (float *)dih_vals[j];
+				for(int k = 0; k < s; k++) {
+					fb[k] = fsb.val.f[k];	
+				}
+				break;
+		}
+	}
+	
+	// The phase is its own thing, linearly indexed.
+	if(glocs[phpos] >= 0) {
+		fsb = dihs[phpos];
+		int nc = (fsb.size/get_fs_type_size(fsb.type))/3;
+		if(nc > 8) { nc = 8; }
+		
+		for(j = 0; j < nc; j++) {
+			for(i = 0; i < 3; i++) {
+				uidc.sphase[j][i] = fsb.val.f[3*j+i];
+			}
+		}
+	}
+	
+	// Update the boxes and rings and shit.
+	update_chan_ring(dc.fid, dc.fcring, uidc.fchans);
+	update_chan_ring(dc.spec, dc.scring, uidc.schans);
+	
+	update_fid_chan_box();
+	update_spec_chan_box();
+	update_spec_fft_chan();
+	
+	disp_err:
+	if(glocs != NULL) {
+		free(glocs);
+		glocs = NULL;
+	}
+	
+	if(names != NULL) {
+		free(names);
+		names = NULL;
+	}
+	
+	dihs = free_fsave_array(dihs, dihs_size);
+	dihs_size = 0;
+	
+	if(feof(f)) { rewind(f); }
+	
+	// Grab the pulse program
+	if(ce.p == NULL) {
+		free_pprog(ce.p);
+		ce.p = calloc(1, sizeof(PPROGRAM));
+	}
+	
+	ce.p = load_pprogram(f, &rv);
+	if(rv < 0) { goto error; }
+
+	
+	error:
+	if(f != NULL) { fclose(f); }
+	
+	if(ext != NULL) { free(ext); }
+	
+	free_fsave(&dhg);
+	free_fsave(&dg);
+	free_fsave(&dig);
+	
+	free_fsave_array(dhs, dhs_size);
+	free_fsave_array(dihs, dihs_size);
+	
+	return rv;
+}
+
+int load_experiment_safe(char *filename, int prog) {
+	
+	int rv = load_experiment(filename, prog);	
+
+	return rv;
+}
+
+int load_experiment_tdm(char *filename) {
 	// Loads the experiment into the uidc file and loads the first experiment to the controls.
 	// Filename must end in .tdm
 	// Pass NULL to p if you are not interested in the program.
@@ -1553,12 +1818,12 @@ int load_experiment(char *filename) {
 	return ev;
 }
 
-int load_experiment_safe(char *filename) {
+int load_experiment_tdm_safe(char *filename) {
 	CmtGetLock(lock_tdm);
 	CmtGetLock(lock_ce);
 	CmtGetLock(lock_uidc);
 	
-	int rv = load_experiment(filename);
+	int rv = load_experiment_tdm(filename);
 	
 	CmtReleaseLock(lock_uidc);
 	CmtReleaseLock(lock_ce);
@@ -1604,6 +1869,108 @@ double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
 	return data;
 }
 
+double **load_all_data_file(FILE *f, PPROGRAM *p, int *cind, int *ev) {
+	// Loads all data from MCD. The file will be rewound when passed to this function,
+	// but not after. To retrieve the program, pass a dynamically allocated PPROGRAM
+	// with p->valid set to 0. Passing NULL to p will retrieve the program from the
+	// file, but it will not be passed to the calling function.
+	
+	fsave dhg = null_fs(), dg = null_fs();
+	fsave fsb = null_fs();
+	fsave *all_data = NULL;
+	int ind =-1, rv = 0;
+	int ad_size = 0;
+	
+	double **data = NULL;
+	int *cstep = NULL;  
+	
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	
+	rewind(f);
+	int null_p = (p == NULL);
+	
+	if(null_p) {
+		p = load_pprogram(f, &rv);
+		if(rv < 0) { goto error; }
+	} else if(!p->valid) {
+		PPROGRAM *pb = load_pprogram(f, &rv);
+		if(rv < 0) { goto error; }
+		memcpy(p, pb, sizeof(PPROGRAM));
+		
+		free_pprog(pb);
+	}
+	
+	// Need to get the current index.
+	long loc = find_fsave_in_file(f, MCD_DATAHEADER, MCF_WRAP);
+	if(loc <0) { rv = loc; goto error; }
+	
+	fseek(f, loc, SEEK_SET);
+	if(rv = get_fs_header_from_file(f, &dhg)) { goto error; }
+	
+	rv = find_fsave_in_file(f, MCD_CIND, dhg.size);
+	if(rv >= 0) {
+		fseek(f, rv, SEEK_SET);
+		fsb = read_fsave_from_file(f, &rv);
+		if(rv == 0) {
+			ind = *(fsb.val.ui);
+		}
+		
+		fsb = free_fsave(&fsb);
+	}
+	
+	// Grab the data now - first we grab it, then we parse it.
+	rewind(f);
+	loc = find_fsave_in_file(f, MCD_MAINDATA, MCF_WRAP);
+	if(loc < 0) { rv = MCD_ERR_NODATA; goto error; }
+	if(rv = get_fs_header_from_file(f, &dg)) { goto error; }
+	
+	all_data = read_all_fsaves_from_file(f, &rv, &ad_size, dg.size);
+	if(rv < 0) { goto error; }
+	
+	if(ad_size < 1) { rv = MCD_ERR_NODATA; goto error; }
+	
+	if(ind < 0 || ind > ad_size) {
+		ind = ad_size;	
+	}
+	
+	int np = all_data[0].size/(get_fs_type_size(all_data[0].type));
+	if(np != p->np) {
+		rv = MCD_ERR_MALFORMED_PROG;
+		goto error;
+	}
+	
+	// Storing this as a linear index as calculated from transients-first
+	data = calloc(ind, sizeof(double *));
+	for(int i = 0; i < ind; i++) {
+		// Determine which one we're on.
+		cstep = parse_cstep(all_data[i].name, &rv);
+		if(rv < 0) { goto error; }
+		
+		int lindex = get_lindex(cstep, p->steps, p->steps_size);
+		free(cstep);
+		cstep = NULL;
+	
+		lindex = convert_lindex(p, lindex, p->tmode, MC_TMODE_TF);
+		if(lindex < 0) { continue; }
+		
+		data[lindex] = malloc(sizeof(double)*p->np);
+		memcpy(data[lindex], all_data[i].val.d, sizeof(double)*p->np);
+	}
+	
+	error:
+	if(cind != NULL) { *cind = ind; }
+	
+	if(cstep != NULL) { free(cstep); }
+	
+	free_fsave(&dhg);
+	free_fsave(&dg);
+	
+	free_fsave_array(all_data, ad_size);
+	
+	*ev = rv;
+	return data;
+}
+
 double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
 	// Loads MCD data from an opened file. The file will be rewound when passed to this
 	// function, but not after.
@@ -1630,9 +1997,15 @@ double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 	rewind(f);
 	
-	if(null_p || !p->valid) { 
+	if(null_p) {
 		p = load_pprogram(f, &rv);
 		if(rv < 0) { goto error; }
+	} else if(!p->valid) {
+		PPROGRAM *pb = load_pprogram(f, &rv);
+		if(rv < 0) { goto error; }
+		memcpy(p, pb, sizeof(PPROGRAM));
+		
+		free_pprog(pb);
 	}
 	
 	if(p == NULL) { rv = MCD_ERR_NOPROG; goto error; }
@@ -2014,7 +2387,7 @@ void select_file(char *path) {
 	free(msg);
 	
 	if(rv) {
-		rv = load_experiment_safe(path);
+		rv = load_experiment_tdm_safe(path);
 		
 		if(rv != 0)
 			display_ddc_error(rv);
@@ -2137,7 +2510,7 @@ void load_data_popup() {
 		add_data_path_to_recent_safe(path);
 	}
 	
-	int err_val = load_experiment_safe(path);
+	int err_val = load_experiment_tdm_safe(path);
 	
 	free(path);
 	
