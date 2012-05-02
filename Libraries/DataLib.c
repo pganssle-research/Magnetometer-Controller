@@ -2285,10 +2285,10 @@ dheader load_dataheader_file(FILE *f, int *ev) {
 	fsave dhg = null_fs();
 	fsave *dhs = NULL;
 
-	char *t_start = NULL, *t_done = NULL, **names = NULL;
+	char **names = NULL;
 	int i, rv = 0;
 	int *glocs = NULL;
-	unsigned int dhs_size = 0;
+	unsigned int dhs_size = 0, nsize = 0;
 	
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 	rewind(f);
@@ -2319,9 +2319,9 @@ dheader load_dataheader_file(FILE *f, int *ev) {
 	void *dh_vals[MCD_DATANUM] = {NULL, NULL, &(d.num), &(d.hash), &(d.nchans),
 								   NULL, NULL, NULL, &tse, &tde,  &(d.cind), d.maxsteps};
 
-	
-	names = calloc(dhs_size, sizeof(char*));
-	for(i = 0; i < dhs_size; i++) {
+	nsize = dhs_size;
+	names = calloc(nsize, sizeof(char*));
+	for(i = 0; i < nsize; i++) {
 		if(dhs[i].ns == 0 || dhs[i].name == NULL) { continue; }
 		names[i] = malloc(dhs[i].ns);
 		memcpy(names[i], dhs[i].name, dhs[i].ns);
@@ -2329,8 +2329,6 @@ dheader load_dataheader_file(FILE *f, int *ev) {
 
 	glocs = strings_in_array(names, dh_names, dhs_size, MCD_DATANUM);
 	if(glocs == NULL) { rv = MCD_ERR_BADHEADER; goto error; }
-	
-	names = free_string_array(names, dhs_size);
 
 	int j;
 	char *sb;
@@ -2376,14 +2374,17 @@ dheader load_dataheader_file(FILE *f, int *ev) {
 		d.tdone = (time_t)tde;	
 	}
 	
-	free(glocs);
-	glocs = NULL;
+	rewind(f);
 	
-	dhs = free_fsave_array(dhs, dhs_size);
-	dhs_size = 0;
-	if(feof(f)) { rewind(f); }
-		
 	error:
+	if(glocs != NULL) { free(glocs); }
+	
+	free_fsave_array(dhs, dhs_size);
+	free_fsave(&dhg);
+	
+	free_string_array(names, nsize);
+	
+	if(rv < 0) { d = free_dh(&d); }
 	*ev = rv;
 
 	return d;
