@@ -121,6 +121,7 @@
 #define MCD_ERR_INVALID_EXTENSION -11013
 #define MCD_ERR_BADHEADER -11014
 #define MCD_ERR_MALFORMED_PROG - 11015
+#define MCD_ERR_NOCHANS -11016
 
 // Strings
 #define MCD_ERR_NOFILENAME_STR "No data filename provided."
@@ -138,6 +139,7 @@
 #define MCD_ERR_INVALID_EXTENSION_STR "Invalid extension passed to function."
 #define MCD_ERR_BADHEADER_STR "File contains a bad header."
 #define MCD_ERR_MALFORMED_PROG_STR "Pulse program does not match data."
+#define MCD_ERR_NOCHANS_STR "No channels were found in the data."
 
 /***********************************************************
 *  														   *

@@ -236,6 +236,9 @@ extern int insert_instruction(PPROGRAM *p, PINSTR *instr, int num);
 // Linear indexing
 extern int get_maxsteps(int *maxsteps);
 
+extern int *get_steps_array(int tmode, int *maxsteps, int nc, int nd, int nt);
+extern int get_steps_array_size(int tmode, int nc, int nd);
+
 // Loop manipulation
 extern int find_end_loop(int instr);
 extern int find_end_loop_instrs(int instr, PINSTR *instrs, int n_instrs);

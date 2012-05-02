@@ -169,12 +169,6 @@ extern constants *setup_constants_safe(void);
 extern void update_constants(constants *c, int *cstep);
 
 // Utilities
-extern void get_pinstr_array(PINSTR **ins_ar, PPROGRAM *p, int *cstep);
-
-extern int *get_steps_array(int tmode, int *maxsteps, int nc, int nd, int nt);
-
-extern int get_steps_array_size(int tmode, int nc, int nd);
-
-
+extern void get_pinstr_array(PINSTR **ins_ar, PPROGRAM *p, int *cstep); 
 
 #endif
