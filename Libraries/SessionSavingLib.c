@@ -716,6 +716,9 @@ void initialize_ce() {
 	ce.path = NULL;
 	ce.desc = NULL;
 	
+	ce.data = null_ds();
+	ce.adata = null_ds();
+	
 	ce.cind = -1;
 	
 	CmtReleaseLock(lock_ce);

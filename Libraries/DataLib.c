@@ -1638,7 +1638,7 @@ int load_experiment(char *filename, int prog) {
 	// Get the data
 	data = load_all_data_file(f, ce.p, &dh, &rv);
 	if(rv < 0) { goto error; }
-	//plot_data(data[0], ce.p->np, ce.p->sr, ce.nchan);
+	plot_data(data.data[0][0], data.np, ce.p->sr, data.nc);
 	
 	error:
 	if(f != NULL) { fclose(f); }
@@ -1650,6 +1650,7 @@ int load_experiment(char *filename, int prog) {
 	free_fsave_array(dihs, dihs_size);
 	
 	if(rv < 0) {
+		data = free_ds(&data);
 	}
 	
 	return rv;
@@ -1850,7 +1851,7 @@ double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
 	*ev = rv;
 	return data;
 }
-
+		 
 dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	// Loads all data from MCD. The file will be rewound when passed to this function,
 	// but not after. To retrieve the program, pass a dynamically allocated PPROGRAM
@@ -1867,7 +1868,7 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	int ind =-1, rv = 0, i, nc = 0;
 	int ad_size = 0;
 	
-	dstor ds = null_ds();
+	dstor ds = null_ds(), ads = null_ds();
 	int *cstep = NULL;  
 	
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
@@ -1924,6 +1925,7 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	// Generate the data storage structure metadata.
 	ds.nt = p->nt;
 	ds.maxds = 1;
+	ds.nd = p->nDims;
 	ds.np = np;
 	ds.nc = nc;
 	
@@ -1967,6 +1969,10 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 		}
 	}
 	
+	if(ds.valid) {
+		ads = get_avg_data(ds);	
+	}
+	
 	error:
 	if(cstep != NULL) { free(cstep); }
 	
@@ -1980,7 +1986,12 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	ds.valid = 1;
 	if(rv < 0) {
 		ds = free_ds(&ds);
+		ce.adata = free_ds(&ds);
+	} else {
+		ce.adata = get_avg_data(ds);	
 	}
+	
+	ce.data = ds;
 	
 	*ev = rv;
 	
@@ -2262,6 +2273,52 @@ int get_ddc_channel_groups_safe(DDCFileHandle file, char **names, int num, DDCCh
  }
  
  // Data Parsing Functions
+dstor get_avg_data(dstor ds) {
+	// Creates a new dstor containing the averaged data.
+	dstor ads = null_ds();
+
+	ads.nt = 1;
+	ads.maxds = ds.maxds;
+	ads.np = ds.np;
+	ads.nc = ds.nc;
+	
+	if(ds.nd > 0) {
+		ads.dim_step = malloc(ds.nd*sizeof(int));	
+		
+		memcpy(ads.dim_step, ds.dim_step, ds.nd*sizeof(int));
+	}
+	
+	calloc_ds(&ads);
+	
+	int i, j, k, l;
+	double w1 = 1.0, w2 = 1.0;
+	int ps = ds.np*ds.nc;
+	for(j = 0; j < ds.maxds; j++) {
+		l = 0;
+		for(i = 0; i < ds.nt; i++) {
+			if(ds.data[i][j] != NULL) {
+				if(ads.data[0][j] == NULL) { 
+					ads.data[0][j] = calloc(ps, sizeof(double));
+				}
+				
+				l++;
+				w1 = (l-1)/l;	// For a running average where we won't have to 
+				w2 = 1/l;		// worry about overflows, hopefully.
+				
+				for(k = 0; k < ps; k++) {
+					ads.data[0][j][k] = ads.data[0][j][k]*w1 + ds.data[i][j][k]*w2;	
+				}
+				
+				for(k = 0; k < ds.nc; k++) {
+					ads.data4[0][j][k] = &(ads.data[0][j][ds.np*k]);	
+				}
+			}
+		}
+	}
+	
+	return ads;
+}
+
 int calloc_ds(dstor *ds) {
 	int rv = 0;
 	
@@ -2322,6 +2379,7 @@ dstor null_ds() {
 				.maxds = -1,
 				.np = -1,
 				.nc = -1,
+				.nd = -1,
 				.dim_step = NULL,
 				.data = NULL,
 				.data4 = NULL,

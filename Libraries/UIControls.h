@@ -4,6 +4,7 @@
 
 #include <NIDAQmx.h>
 #include <PulseProgramTypes.h>
+#include <DataTypes.h>
 
 /******************* Constant Definitions *******************/
 #define MC_FID	0
@@ -414,6 +415,9 @@ typedef struct CEXP {
 	unsigned int num;		// Experiment number. 
 	char *desc;				// Description of the experiment.
 	
+	dstor data;				// Cached data
+	dstor adata;			// Cached data average
+	
 	char *ctname;			// Counter task name
 	char *atname;			// Acquisition task name
 	
@@ -431,6 +435,7 @@ typedef struct CEXP {
 							// 2: MC_TMODE_ID [{dim1, ..., dimn}, nt]
 							// 3: MC_TMODE_TF [nt, {dim1, ... dimn}, nt]
 							// 4: MC_TMODE_PC [{pc1, ... , pcn}, {dim1, ..., dimn}, nt/npc]
+
 							
 	int ninst;				// Number of instructions in this run
 	PINSTR *ilist;			// List of instructions for this run.
