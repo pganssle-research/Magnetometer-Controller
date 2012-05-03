@@ -6,6 +6,24 @@
 
 #include <PulseProgramTypes.h>
 
+typedef struct dstor {
+	// Structure for storing data (in caches and such).	
+	int nt;					// Number of transients
+	int maxds;				// Maximum dimension step
+	int np;					// Number of points
+	int nc;					// Number of channels
+	int *dim_step;			// Dimension step for de-indexing
+	
+	double ***data;			// 3D Array for the data [nt][maxds][np*nc] 
+	double ****data4;		// 4D Array for the data [nt][maxds][nc][np]
+							// This should actually point to the same
+							// place in memory as the 3D array, so only
+							// free the top two layers.
+	
+	int valid;
+	
+} dstor;
+
 typedef struct dheader {
 	// Type for containing information from a data header
 	// Much of this information will be stored in a CEXP.
@@ -40,7 +58,7 @@ extern int load_experiment_safe(char *filename, int prog);
 extern int load_experiment_tdm(char *filename);
 extern int load_experiemnt_tdm_safe(char *filename);
 
-extern double ****load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev);
+extern dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev);
 extern double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev);
 extern double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev);
 
@@ -48,11 +66,13 @@ extern double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int n
 extern double *load_data_safe(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv);
 
 // Data parsing
-double ****free_data_4d(double ****data, int nt, int ds, int nc);
+extern int calloc_ds(dstor *ds);
+extern dstor free_ds(dstor *ds);
+extern dstor null_ds(void);
 
-dheader load_dataheader_file(FILE *f, int *ev);
-dheader free_dh(dheader *d);
-dheader null_dh(void);
+extern dheader load_dataheader_file(FILE *f, int *ev);
+extern dheader free_dh(dheader *d);
+extern dheader null_dh(void);
 
 extern int *parse_cstep(char *step, int *ev);
 

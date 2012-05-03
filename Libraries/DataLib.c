@@ -1448,7 +1448,7 @@ int load_experiment(char *filename, int prog) {
 	char *ext = NULL, **names = NULL;
 	FILE *f = NULL;
 	PPROGRAM *p;
-	double ****data = NULL;
+	dstor data = null_ds();
 	
 	fsave dg = null_fs(), dig = null_fs();
 	fsave *dihs = NULL;
@@ -1638,7 +1638,7 @@ int load_experiment(char *filename, int prog) {
 	// Get the data
 	data = load_all_data_file(f, ce.p, &dh, &rv);
 	if(rv < 0) { goto error; }
-	plot_data(data[0], ce.p->np, ce.p->sr, ce.nchan);
+	//plot_data(data[0], ce.p->np, ce.p->sr, ce.nchan);
 	
 	error:
 	if(f != NULL) { fclose(f); }
@@ -1649,13 +1649,7 @@ int load_experiment(char *filename, int prog) {
 	free_fsave(&dig);
 	free_fsave_array(dihs, dihs_size);
 	
-	if(rv < 0 && data != NULL && ce.p != NULL) {
-		int ds = 1;
-		for(i = 0; i < ce.p->nDims; i++) {
-			ds *= p->maxsteps[p->nCycles+i];	
-		}
-		
-		data = free_data_4d(data, ce.p->nt, ds, ce.nchan);
+	if(rv < 0) {
 	}
 	
 	return rv;
@@ -1857,7 +1851,7 @@ double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
 	return data;
 }
 
-double ****load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
+dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	// Loads all data from MCD. The file will be rewound when passed to this function,
 	// but not after. To retrieve the program, pass a dynamically allocated PPROGRAM
 	// with p->valid set to 0. Passing NULL to p will retrieve the program from the
@@ -1870,10 +1864,10 @@ double ****load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	fsave fsb = null_fs();
 	fsave *all_data = NULL;
 	dheader d = null_dh();
-	int ind =-1, rv = 0, i, nc = 0, ds = 0;
+	int ind =-1, rv = 0, i, nc = 0;
 	int ad_size = 0;
 	
-	double ****data = NULL;
+	dstor ds = null_ds();
 	int *cstep = NULL;  
 	
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
@@ -1927,23 +1921,29 @@ double ****load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 		goto error;
 	}
 	
-	// Storing this as a linear index as calculated from transients-first
-	// We'll allocate a full array, and just populate the ones that are available.
-	data = calloc(p->nt, sizeof(double ***));
-	ds = 1; 
-	for(i = 0; i < p->nDims; i++) {
-		ds *= p->maxsteps[i+p->nCycles];
+	// Generate the data storage structure metadata.
+	ds.nt = p->nt;
+	ds.maxds = 1;
+	ds.np = np;
+	ds.nc = nc;
+	
+	if(p->nDims >= 1) {
+		ds.dim_step = malloc(sizeof(int)*p->nDims);
+	} else {
+		rv = MCD_ERR_MALFORMED_PROG;
+		goto error;
 	}
 	
-	for(i = 0; i < p->nt; i++) {
-		data[i] = calloc(ds, sizeof(double **));
-		for(int j = 0; j < ds; j++) {
-			data[i][j] = calloc(nc, sizeof(double *));	
-		}
+	for(i = 0; i < p->nDims; i++) {
+		ds.dim_step[i] = p->maxsteps[i+p->nCycles];
+		ds.maxds *= p->maxsteps[i+p->nCycles];
 	}
+	
+	// Now we can allocate the data storage structure.
+	if(rv = calloc_ds(&ds)) { goto error; }
 	
 	int t = 0;
-	int *dim_step = calloc(p->nDims, sizeof(unsigned int));
+	int *dim_step = calloc(p->nDims, sizeof(int));
 	
 	for(i = 0; i < ind; i++) {
 		// Determine which one we're on.
@@ -1959,15 +1959,12 @@ double ****load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 		get_dim_step(p, lindex, dim_step);
 		lindex = get_lindex(dim_step, p->maxsteps + p->nCycles, p->nDims);
 		
-		for(int j = 0; j < nc; j++) {
-			memcpy(data[t][lindex][j], all_data[i].val.d + j*np, np*sizeof(double));	
-		}
-	
-		lindex = convert_lindex(p, lindex, p->tmode, MC_TMODE_TF);
-		if(lindex < 0) { continue; }
+		memcpy(ds.data[t][lindex], all_data[i].val.d, nc*np*sizeof(double));
 		
-		data[lindex] = malloc(sizeof(double)*p->np);
-		memcpy(data[lindex], all_data[i].val.d, sizeof(double)*p->np);
+		// Stored two ways for convenience.
+		for(int j = 0; j < nc; j++) {
+			ds.data4[t][lindex][j] = &(ds.data[t][lindex][j*np]);	
+		}
 	}
 	
 	error:
@@ -1980,12 +1977,14 @@ double ****load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	
 	if(!null_d) { *dhead = d; }
 	
-	if(rv < 0 && data != NULL) {
-		
+	ds.valid = 1;
+	if(rv < 0) {
+		ds = free_ds(&ds);
 	}
 	
 	*ev = rv;
-	return data;
+	
+	return ds;
 }
 
 double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
@@ -2263,24 +2262,72 @@ int get_ddc_channel_groups_safe(DDCFileHandle file, char **names, int num, DDCCh
  }
  
  // Data Parsing Functions
-double ****free_data_4d(double ****data, int nt, int ds, int nc) {
-	int i, j, k;
+int calloc_ds(dstor *ds) {
+	int rv = 0;
 	
-	if(data != NULL) {
-		for(i = 0; i < nt; i++) {
-			for(j = 0; i < ds; j++) {
-				for(k = 0; k < nc; k++) {
-					if(data[i][j][k] != NULL) { free(data[i][j][k]); data[i][j][k] = NULL; }
-				}
-				if(data[i][j] != NULL) { free(data[i][j]); data[i][j] = NULL; }
-			}
-			if(data[i] != NULL) { free(data[i]); data[i] = NULL; }
+	if(ds->nt < 1 || ds->maxds < 1) { return MCD_ERR_NODATA; }
+	
+	ds->data = calloc(ds->nt, sizeof(double **));
+	ds->data4 = calloc(ds->nt, sizeof(double ***));
+	
+	for(int i = 0; i < ds->nt; i++) {
+		ds->data[i] = calloc(ds->maxds, sizeof(double *));
+		ds->data4[i] = calloc(ds->maxds, sizeof(double **));
+		for(int j = 0; j < ds->maxds; j++) {
+			ds->data4[j] = calloc(ds->nc, sizeof(double *));	
 		}
-		free(data);
-		data = NULL;
 	}
 	
-	return data;
+	return rv;
+}
+
+dstor free_ds(dstor *ds) {
+	// Need to free dim_step, data and data4.
+	// The [nc] level to data4 points to the data stored in data, and so it should
+	// not be freed.
+	if(ds->dim_step != NULL) {
+		free(ds->dim_step);
+		ds->dim_step = NULL;
+	}
+	
+	if(ds->nt > 0 && ds->maxds > 0 && ds->nc > 0 &&
+		(ds->data != NULL || ds->data4 != NULL)) {
+		int i, j;
+		for(i = 0; i < ds->nt; i++) {
+			for(j = 0; j < ds->maxds; j++) {
+				if(ds->data[i] != NULL && ds->data[i][j] != NULL) {
+					free(ds->data[i][j]);
+					ds->data[i][j] = NULL;
+				}
+				
+				if(ds->data4[i] != NULL && ds->data4[i][j] != NULL) {
+					free(ds->data4[i][j]);
+					ds->data4[i][j] = NULL;
+				}
+			}
+			
+			if(ds->data[i] != NULL) { free(ds->data[i]); }
+			if(ds->data4[i] != NULL) { free(ds->data4[i]); }
+		}
+		
+		if(ds->data != NULL) { free(ds->data); ds->data = NULL; }
+		if(ds->data4 != NULL) { free(ds->data4); ds->data4 = NULL; }
+	}
+	
+	return null_ds();
+}
+
+dstor null_ds() {
+	dstor ds = {.nt = -1,
+				.maxds = -1,
+				.np = -1,
+				.nc = -1,
+				.dim_step = NULL,
+				.data = NULL,
+				.data4 = NULL,
+				.valid = 0};
+	
+	return ds;
 }
 
 dheader load_dataheader_file(FILE *f, int *ev) {
