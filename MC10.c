@@ -1889,11 +1889,10 @@ void CVICALLBACK ChangeTransientView (int menuBar, int menuItem, void *callbackD
 	new = mc.vtviewopts[uidc.disp_update];
 	
 	// Update which one's checked.
-	if(new != old) {
-		SetMenuBarAttribute(mc.mainmenu, new, ATTR_CHECKED, 1);
-		SetMenuBarAttribute(mc.mainmenu, old, ATTR_CHECKED, 0);
+	for(int i = 0; i < 3; i++) {
+		SetMenuBarAttribute(mc.mainmenu, mc.vtviewopts[i], ATTR_CHECKED, (uidc.disp_update == i));	
 	}
-	
+		
 	CmtReleaseLock(lock_uidc);
 }
 

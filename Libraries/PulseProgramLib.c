@@ -1673,7 +1673,7 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	
 	steps = get_steps_array(p->tmode, p->maxsteps, p->nCycles, p->nDims, p->nt);
 	if(steps != NULL) {
-		memcpy(p->steps, steps, p->steps_size);
+		memcpy(p->steps, steps, sizeof(int)*p->steps_size);
 		free(steps);
 		steps = NULL;
 	}
@@ -1897,6 +1897,23 @@ int *get_steps_array(int tmode, int *maxsteps, int nc, int nd, int nt) {
 	int size = get_steps_array_size(tmode, nc, nd);
 	
 	if(size <= 0) { goto error; }
+	
+	steps = malloc(sizeof(int)*size);
+	
+	switch(tmode) {
+		case MC_TMODE_ID:
+			steps[nd] = nt;
+			memcpy(steps, maxsteps + nc, sizeof(int)*nd);
+			break;
+		case MC_TMODE_TF:
+			steps[0] = nt;
+			memcpy(steps+1, maxsteps+nc, sizeof(int)*nd);
+			break;
+		case MC_TMODE_PC:
+			steps[nc+nd] = nt/nc;
+			memcpy(steps, maxsteps, sizeof(int)*(nd+nc));
+			break;
+	}
 	
 	error:
 	

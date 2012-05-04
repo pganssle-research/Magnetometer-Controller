@@ -808,7 +808,7 @@ int get_cstep(int lindex, int *cstep, int *maxsteps, int size) {
 	if(place == 0 || lindex < 0)
 		return -2; 				// Size is 0 or other issue
 
-	if(lindex == maxsteps[size]*place)
+	if(lindex >= maxsteps[size]*place)
 		return -1;				// End of array condition met
 	
 	int remainder = lindex, step;

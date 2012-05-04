@@ -150,14 +150,25 @@ int run_experiment(PPROGRAM *p) {
 	ce.cind = 0;
 	ce.p = p;
 	
-/*	if(ce.cstep != NULL) {			// In case this has been allocated already.
+	if(ce.cstep != NULL) {			// In case this has been allocated already.
 		free(ce.cstep);
 		ce.cstep = NULL;
-	}  */
+	}
+	
+	if(ce.steps != NULL) {
+		free(ce.steps);
+		ce.steps = NULL;
+	}
+	
+	ce.steps_size = 0;
 	
 	if(p->varied) {
-//		ce.cstep = malloc(sizeof(int)*(p->nCycles+p->nDims));
-//		get_cstep(0, ce.cstep, p->maxsteps, p->nCycles+p->nDims); 
+		ce.steps_size = get_steps_array_size(ce.p->tmode, ce.p->nCycles, ce.p->nDims);
+		
+		if(ce.steps_size > 0) {
+			ce.steps = get_steps_array(ce.p->tmode,  ce.p->maxsteps, ce.p->nCycles, ce.p->nDims, ce.p->nt);
+			ce.cstep = calloc(ce.steps_size, sizeof(int));
+		}
 	}
 	
 	if(scan) {
@@ -198,10 +209,10 @@ int run_experiment(PPROGRAM *p) {
 	if(cont_mode && p->varied) {  SetCtrlVal(pc.rc[1], pc.rc[0], 0); }
 	
 	// Main loop to keep track of where we're at in the experiment, etc.
-	while(!GetQuitIdle() && ct <= p->nt) {
+	while(!GetQuitIdle() && !done) {
 		if(cont_mode) { GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode); }
 			
-		if(done = prepare_next_step_safe(p) != 0)
+		if((done = prepare_next_step_safe(p)) != 0)
 		{
 			/* if(cont_mode && done == 1) {
 				CmtGetLock(lock_ce);		// No possibility of break/goto, don't need to set ce_locked
@@ -299,13 +310,6 @@ int run_experiment(PPROGRAM *p) {
 				daq_locked = 0;
 				
 				if(ev)  { goto error; }
-			
-				// Update the navigation controls.
-				if(ce.p->nDims) { 
-					update_experiment_nav(); 
-				} else {	
-					update_transients(); 
-				}
 
 				// Only request the average data if you need it.
 				if(avg_data != NULL) {
@@ -323,13 +327,20 @@ int run_experiment(PPROGRAM *p) {
 				
 				if(ev = save_data_mcd(ce.path, p, data, ce.cind, ce.nchan, ce.tdone)) { goto error; }
 				
+				// Update the navigation controls.
+				if(ce.p->nDims) { 
+					update_experiment_nav(); 
+				} else {	
+					update_transients(); 
+				}
+				
 				CmtGetLock(lock_uidc);
 				
 				if(uidc.disp_update < 2) {	// We're plotting stuff for 0 (Avg) or 1 (Latest)
 					CmtGetLock(lock_ce);
-					if(uidc.disp_update && ct > 1) { 
+					if(uidc.disp_update == 0 && ct > 1) { 
 						plot_data(avg_data, p->np, p->sr, ce.nchan);
-					} else {
+					} else if(uidc.disp_update == 1) {
 						plot_data(data, p->np, p->sr, ce.nchan);
 					}
 					
@@ -525,7 +536,6 @@ int prepare_next_step (PPROGRAM *p) {
 	}
 	
 	int end = get_cstep(ce.cind, ce.cstep, ce.steps, ce.steps_size);
-	
 	if(end != 1) {
 		return 1;	
 	} else if(p->skip) {
@@ -780,7 +790,7 @@ char *make_cstep_str(PPROGRAM *p, int cind, int avg, int *ev) {
 	} else {
 		nsteps = p->steps_size;
 		steps = malloc(sizeof(unsigned int) * p->steps_size);
-		memcpy(steps, p->steps, p->steps_size * sizeof(unsigned int));
+		get_cstep(cind, steps, p->steps, p->steps_size);
 	}
 	
 	out = malloc(nsteps*(ndigits+1)+2);
@@ -791,7 +801,7 @@ char *make_cstep_str(PPROGRAM *p, int cind, int avg, int *ev) {
 	sprintf(title_format, "%%0%dd,", ndigits);
 	strcpy(out, "[");
 	
-	for(i = 1; i < nsteps; i++) {		   
+	for(i = 0; i < nsteps; i++) {		   
 		sprintf(buff, title_format, steps[i]);
 		strcat(out, buff);
 	}
@@ -1989,7 +1999,6 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 		}
 		
 		ds.data[t][lindex] = malloc(nc*np*sizeof(double));
-		ds.data4[t][lindex] = calloc(nc, sizeof(double *));
 		memcpy(ds.data[t][lindex], all_data[i].val.d, nc*np*sizeof(double));
 		
 		// Stored two ways for convenience.
@@ -2321,11 +2330,7 @@ dstor get_avg_data(dstor ds) {
 				if(ads.data[0][j] == NULL) { 
 					ads.data[0][j] = calloc(ps, sizeof(double));
 				}
-				
-				if(ads.data4[0][j] == NULL) {
-					ads.data4[0][j] = calloc(ps, sizeof(double));	
-				}
-				
+			
 				l++;
 				w1 = (l-1.0)/l;	// For a running average where we won't have to 
 				w2 = 1.0/l;		// worry about overflows, hopefully.
@@ -2358,7 +2363,7 @@ int calloc_ds(dstor *ds) {
 		ds->data[i] = calloc(ds->maxds, sizeof(double *));
 		ds->data4[i] = calloc(ds->maxds, sizeof(double **));
 		for(int j = 0; j < ds->maxds; j++) {
-			ds->data4[j] = calloc(ds->nc, sizeof(double *));	
+			ds->data4[i][j] = calloc(ds->nc, sizeof(double *));	
 		}
 	}
 	
@@ -2613,6 +2618,7 @@ int *parse_cstep(char *step, int *ev) {
 		
 		m = strchr(m, ',');
 		if(m == NULL) { break; }
+		m++;
 	}
 
 	error:
@@ -3307,8 +3313,11 @@ void set_nav_from_lind(int lind, int panel, int avg) {
 	if(get_cstep(lind, cstep, steps, p->nDims+1) != 1) { return; }	// Return on error
 	
 	// Set the values, then we're done.
-	SetCtrlVal(panel, dc.ctrans, avg?0:cstep[0]+1);
 	for(i = 0; i < p->nDims; i++) { SetCtrlVal(panel, dc.idrings[i], cstep[i+1]); }
+	
+	update_transients();
+	
+	SetCtrlIndex(panel, dc.ctrans, avg?0:cstep[0]+1);
 	
 	free(cstep);
 	free(steps);
@@ -3493,14 +3502,14 @@ int calculate_num_transients(int cind, int ind, int nt) {
 	// including transients. cind should be [nt {dim1, ..., dimn}]
 	
 	if(nt > cind)
-		return cind;
+		return cind+1;
 	
 	int cindid = (int)(floor(cind/nt)); 	// This is the position in acquisition space we're in.
 	
 	if(ind > cindid)
 		return -1; // Invalid position.
 	else if(ind == cindid)
-		return cind-(cindid*nt); 			// The number of transients completed in the most recent acquisition.
+		return cind-(cindid*nt)+1; 			// The number of transients completed in the most recent acquisition.
 	else
 		return nt;							// All transients should be available.
 }
