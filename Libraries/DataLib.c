@@ -1631,10 +1631,6 @@ int load_experiment(char *filename, int prog) {
 	data = load_all_data_file(f, ce.p, &dh, &rv);
 	if(rv < 0) { goto error; }
 	
-	// Load the UI portions of this
-	plot_data(data.data[0][0], data.np, ce.p->sr, data.nc);
-	
-	
 	if(prog) {
 		set_current_program(ce.p);
 	}	
@@ -1643,6 +1639,17 @@ int load_experiment(char *filename, int prog) {
 	update_spec_chan_box();
 	update_spec_fft_chan();
 	update_experiment_nav();  
+	
+	// Update ce.
+	ce.data = data;
+	ce.adata = get_avg_data(data);
+	
+	if(ce.path != NULL) { free(ce.path); ce.path = NULL; }
+	ce.path = malloc(strlen(filename)+1);
+	strcpy(ce.path, filename);
+	
+	// Load the UI portions of this
+	set_data_from_nav(dc.cloc[0]);
 	
 	error:
 	if(f != NULL) { fclose(f); }
@@ -1654,13 +1661,11 @@ int load_experiment(char *filename, int prog) {
 	free_fsave_array(dihs, dihs_size);
 	
 	if(rv < 0) {
-		data = free_ds(&data);
+		ce.data = free_ds(&ce.data);	
 		ce.adata = free_ds(&ce.adata);
-	} else {
-		ce.adata = get_avg_data(data);	
+		
+		free_ds(&data);
 	}
-	
-	ce.data = data;
 	
 	return rv;
 }
@@ -2322,8 +2327,8 @@ dstor get_avg_data(dstor ds) {
 				}
 				
 				l++;
-				w1 = (l-1)/l;	// For a running average where we won't have to 
-				w2 = 1/l;		// worry about overflows, hopefully.
+				w1 = (l-1.0)/l;	// For a running average where we won't have to 
+				w2 = 1.0/l;		// worry about overflows, hopefully.
 				
 				for(k = 0; k < ps; k++) {
 					ads.data[0][j][k] = ads.data[0][j][k]*w1 + ds.data[i][j][k]*w2;	
@@ -3229,7 +3234,7 @@ void update_transients() {
 			ind = get_selected_ind(pan, 0, NULL);
 			nt = calculate_num_transients(ce.cind, ind, p->nt);
 		} else {
-			nt = ce.cind;
+			nt = ce.cind+1;
 		}
 		
 		if(nt)
@@ -3319,6 +3324,7 @@ void set_data_from_nav(int panel) {
 	// Grabs the current index from the nav and plots the data from the file.
 	// Panel should be a CurrentLoc panel
 	int lind, t;
+	int rv = 0;
 	
 	// Gets the position from the nav.
 	GetCtrlVal(panel, dc.ctrans, &t);
@@ -3326,22 +3332,40 @@ void set_data_from_nav(int panel) {
 	if(ce.p->nDims) {
 		lind = get_selected_ind(panel, (t != 0), NULL); // If t == 0, we're getting an average. 
 		set_nav_from_lind(lind, dc.cloc[(panel == dc.cloc[0])?1:0], (t == 0));	// Setup the corresponding other tab.
+		
+		lind = get_selected_ind(panel, 0, NULL); // We no longer want the transient in the lindex.
 	} else
-		lind = (t == 0)?0:t-1;
+		lind = 0;
 	
-	int rv = 0;
+	if(!ce.data.valid && ce.path != NULL) {			
+		FILE *f = fopen(ce.path, "rb");
+		
+		ce.data = load_all_data_file(f, ce.p, NULL, &rv);
+		
+		fclose(f);
+		
+		if(rv < 0) { goto error; }
+	}
 	
-	double *data = load_data(ce.path, lind, ce.p, (t == 0), ce.nchan, &rv);
+	if(!ce.adata.valid) {
+		if(ce.data.valid) {
+			ce.adata = get_avg_data(ce.data);	
+		}
+	}
 	
-	if(rv != 0) {
-		display_ddc_error(rv);
-		goto error;
-	} 
+	dstor data = null_ds();
 	
-	plot_data(data, ce.p->np, ce.p->sr, ce.nchan);	// Plot the data.
+	if(t == 0) {
+		data = ce.adata;
+	} else {
+		data = ce.data;
+		t--;
+	}
+	
+	plot_data(data.data[t][lind], data.np, ce.p->sr, data.nc);	// Plot the data.
 	
 	error:
-	if(data != NULL) { free(data); }
+	if(rv != 0) { display_error(rv); }
 }
 
 void set_data_from_nav_safe(int panel) {
