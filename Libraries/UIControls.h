@@ -41,6 +41,39 @@
 
 /******************* Structure Definitions *******************/
 // Structures for containing pointers to UI objects
+// ec - > Structure for indexing the experimental parameters panel
+struct {
+	int ep;				// Experiment Panel
+	int chan;			// Channel choice ring
+	
+	int name; 			// Name of the channel (string)
+	int desc;			// Description of the channel (textbox)
+	
+	int phys_led;		// Physical channel LED toggle
+	int phys_ring;		// Ring containing the potential physical channels  (string, ring)
+	
+	int dev_led;		// Physical device LED toggle
+	int dev_ring;		// Device ring (string, ring)
+	
+	int unit_mag;		// Magnitude of the base units (short int, ring)
+	int unit_base;		// Choice of units. (short int, ring)
+	
+	int again_led;		// Amplifier gain toggle LED.
+	int again;			// Amplifier gain (numeric, double)
+	
+	int res_led;		// Resistor LED
+	int res_val;		// Resistor value (in Ohms)
+	
+	int cal_unit;		// Calibration units (short int, ring)
+	int cal_val;		// Calibration value (numeric, double)
+	
+	int cal_off_unit;	// Units for calibration offset
+	int cal_off_val;	// Calibration offset value.
+	
+	int cal_func_led;	// Calibration function toggle LED.
+	int cal_func;		// Calibration function (string)
+} ec;
+
 // pc - > Structure for indexing the UI controls and panels related to pulse programming
 struct {
 	// Panels
@@ -214,6 +247,7 @@ struct {
 struct {
 	// Panels
 	int mp;					// The main panel
+	int ep;					// Experiment parameters panel
 	
 	// Menu Bars
 	int mainmenu;			// Main menu bar
@@ -268,6 +302,7 @@ struct {
 	
 	// Setup controls
 	int supdaq;				// Setup > Update DAQ
+	int separams;			// Setup > Experimental Parameters
 	int ssaveconfig;		// Setup > Save Current Config
 	int ssaveconfig_file;	// Setup > Save Current Config to File
 	int sloadconfig;		// Setup > Load Config from File

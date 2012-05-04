@@ -101,28 +101,26 @@
 #define  EParams_CancelButton             2       /* callback function: CancelExperimentalParameters */
 #define  EParams_SaveAndCloseButton       3       /* callback function: SaveAndCloseExperimentalParams */
 #define  EParams_SaveButton               4       /* callback function: SaveExperimentalParams */
-#define  EParams_CalUnits_2               5
+#define  EParams_CalOffUnits              5
 #define  EParams_CalUnits                 6
 #define  EParams_UnitName                 7
-#define  EParams_DefaultUnit              8
-#define  EParams_DefaultChan_3            9
-#define  EParams_DefaultChan_2            10
-#define  EParams_DefaultChan              11
-#define  EParams_ChanPrefs                12      /* callback function: ChangeFIDChanPrefs */
-#define  EParams_ChannelBox               13
-#define  EParams_CalibrationFunction      14
-#define  EParams_ChannelName              15
-#define  EParams_CalOffset                16
-#define  EParams_Calibration              17
-#define  EParams_HasDevice                18      /* callback function: ToggleHasDevice */
-#define  EParams_HasFunction              19      /* callback function: ToggleEPFunction */
-#define  EParams_HasResistor              20      /* callback function: ToggleEPResistance */
-#define  EParams_HasPhysChan              21      /* callback function: TogglePhysChan */
-#define  EParams_HasDefaultChan           22      /* callback function: ToggleEPAmp */
-#define  EParams_HasAmp                   23      /* callback function: ToggleEPAmp */
-#define  EParams_AmpGain_2                24
-#define  EParams_AmpGain                  25
-#define  EParams_ChannelDesc              26
+#define  EParams_UnitMag                  8
+#define  EParams_Device                   9
+#define  EParams_PhysChan                 10
+#define  EParams_ChanPrefs                11      /* callback function: ChangeFIDChanPrefs */
+#define  EParams_ChannelBox               12
+#define  EParams_CalibrationFunction      13
+#define  EParams_ChannelName              14      /* callback function: ChangeChannelName */
+#define  EParams_CalOffset                15
+#define  EParams_Calibration              16
+#define  EParams_HasDevice                17      /* callback function: ToggleEPParameter */
+#define  EParams_HasResistor              18      /* callback function: ToggleEPParameter */
+#define  EParams_HasPhysChan              19      /* callback function: ToggleEPParameter */
+#define  EParams_HasFunction              20      /* callback function: ToggleEPFunction */
+#define  EParams_HasAmp                   21      /* callback function: ToggleEPParameter */
+#define  EParams_Resistor                 22
+#define  EParams_AmpGain                  23
+#define  EParams_ChannelDesc              24
 
 #define  HiddenVals                       7
 #define  HiddenVals_PolySubtractOnOffRing 2
@@ -381,12 +379,13 @@
 #define  MainMenu_View_ChangeDimension    27      /* callback function: ChangeNDPointMenu */
 #define  MainMenu_SetupMenu               28
 #define  MainMenu_SetupMenu_UpdateDAQ     29      /* callback function: UpdateDAQMenuCallback */
-#define  MainMenu_SetupMenu_SEPARATOR_3   30
-#define  MainMenu_SetupMenu_SaveCurrentConfig 31  /* callback function: SaveConfig */
-#define  MainMenu_SetupMenu_SaveConfig    32      /* callback function: SaveConfigToFile */
-#define  MainMenu_SetupMenu_LoadConfigFromFile 33 /* callback function: LoadConfigurationFromFile */
-#define  MainMenu_SetupMenu_SEPARATOR_4   34
-#define  MainMenu_SetupMenu_BrokenTTLsMenu 35     /* callback function: BrokenTTLsMenu */
+#define  MainMenu_SetupMenu_ExperimentParams 30   /* callback function: LaunchEParams */
+#define  MainMenu_SetupMenu_SEPARATOR_3   31
+#define  MainMenu_SetupMenu_SaveCurrentConfig 32  /* callback function: SaveConfig */
+#define  MainMenu_SetupMenu_SaveConfig    33      /* callback function: SaveConfigToFile */
+#define  MainMenu_SetupMenu_LoadConfigFromFile 34 /* callback function: LoadConfigurationFromFile */
+#define  MainMenu_SetupMenu_SEPARATOR_4   35
+#define  MainMenu_SetupMenu_BrokenTTLsMenu 36     /* callback function: BrokenTTLsMenu */
 
 #define  RCMenus                          2
 #define  RCMenus_AcquisitionTime          2
@@ -434,6 +433,7 @@ int  CVICALLBACK ChangeAOFinVal(int panel, int control, int event, void *callbac
 int  CVICALLBACK ChangeAOIncVal(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeAOutChan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeAOVal(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ChangeChannelName(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeChannelRange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeChanNumSteps(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeCurrentChan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
@@ -496,6 +496,7 @@ int  CVICALLBACK InstNumChange(int panel, int control, int event, void *callback
 int  CVICALLBACK InstrCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstrChangeCycleNum(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstrDataCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+void CVICALLBACK LaunchEParams(int menubar, int menuItem, void *callbackData, int panel);
 void CVICALLBACK LoadConfigurationFromFile(int menubar, int menuItem, void *callbackData, int panel);
 void CVICALLBACK LoadDataMenu(int menubar, int menuItem, void *callbackData, int panel);
 int  CVICALLBACK LoadProgram(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
@@ -527,13 +528,10 @@ int  CVICALLBACK StartProgram(int panel, int control, int event, void *callbackD
 int  CVICALLBACK StopProgram(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK TestCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ToggleBrokenTTL(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
-int  CVICALLBACK ToggleEPAmp(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ToggleEPFunction(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
-int  CVICALLBACK ToggleEPResistance(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK ToggleEPParameter(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ToggleFIDChan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
-int  CVICALLBACK ToggleHasDevice(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ToggleND(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
-int  CVICALLBACK TogglePhysChan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ToggleSpecChan(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK UpdateDAQMenuCallback(int menubar, int menuItem, void *callbackData, int panel);
 void CVICALLBACK ViewProgramChart(int menubar, int menuItem, void *callbackData, int panel);

@@ -4,6 +4,9 @@
 #ifndef VERSION_H
 #define VERSION_H
 
+// UI Filename
+#define MC_UI "Magnetometer Controller.uir"
+
 // Program version number and string.
 #define MC_VERSION 1.1
 #define MC_VNUMSTR "1.1"

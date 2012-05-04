@@ -99,6 +99,7 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	initialize_data();
 	initialize_program();
 	initialize_ce();
+	initialize_ec();
 	
 	// Load the DAQ and PB values.
 	load_DAQ_info_safe(1, 1, 1);
@@ -678,6 +679,39 @@ void initialize_uicontrols() {
 	pc.aodev = AOInstPan_ChanDev;
 	pc.aochan = AOInstPan_AOutChan;
 	pc.axbutton = AOInstPan_xButton;
+}
+
+void initialize_ec() {
+	ec.ep = -1;
+	
+	ec.chan = EParams_ChanPrefs;
+	
+	ec.name = EParams_ChannelName;
+	ec.desc = EParams_ChannelDesc;
+	
+	ec.phys_led = EParams_HasPhysChan;
+	ec.phys_ring = EParams_PhysChan;
+	
+	ec.dev_led = EParams_HasDevice;
+	ec.dev_ring = EParams_Device;
+	
+	ec.unit_mag = EParams_UnitMag;
+	ec.unit_base = EParams_UnitName;
+	
+	ec.again_led = EParams_HasAmp;
+	ec.again = EParams_AmpGain;
+	
+	ec.res_led = EParams_HasResistor;
+	ec.res_val = EParams_Resistor;
+	
+	ec.cal_unit = EParams_CalUnits;
+	ec.cal_val = EParams_Calibration;
+	
+	ec.cal_off_unit = EParams_CalOffUnits;
+	ec.cal_off_val = EParams_CalOffset;
+	
+	ec.cal_func_led = EParams_HasFunction;
+	ec.cal_func = EParams_CalibrationFunction;
 }
 
 void initialize_ce() {

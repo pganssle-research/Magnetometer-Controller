@@ -17,6 +17,7 @@ extern void initialize_program(void);
 extern void initialize_data(void);
 extern void initialize_uicontrols(void);
 extern void initialize_ce(void);
+extern void initialize_ec(void);
 extern int *get_broken_ttl_ctrls(void);
 
 // File I/O

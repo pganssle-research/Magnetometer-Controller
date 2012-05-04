@@ -2523,3 +2523,133 @@ int CVICALLBACK ChangeUsePB (int panel, int control, int event,
 	}
 	return 0;
 }
+
+int CVICALLBACK SaveExperimentalParams (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK SaveAndCloseExperimentalParams (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK CancelExperimentalParameters (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			HidePanel(ec.ep);
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ToggleEPParameter(int panel, int control, int event, void *callbackData, int eventData1, int eventData2) {
+	switch(event) {
+		case EVENT_COMMIT:
+			int val, nc  = -1;
+			GetCtrlVal(panel, control, &val);
+			
+			const int phys = ec.phys_led;
+			const int dev = ec.dev_led;
+			const int again = ec.again_led;
+			const int res = ec.res_led;
+			
+			if(control == ec.phys_led) {
+				nc = ec.phys_ring;	
+			} else if(control == ec.dev_led) {
+				nc = ec.dev_ring;
+			} else if(control == ec.again_led) {
+				nc = ec.again;
+			} else if(control == ec.res_led) {
+				nc = ec.res_val;
+			}
+			
+			if(nc >= 0) { 
+				SetCtrlAttribute(panel, nc, ATTR_DIMMED, !val);
+			}
+			
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ToggleEPFunction (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+void CVICALLBACK LaunchEParams (int menuBar, int menuItem, void *callbackData,
+		int panel)
+{
+	if(ec.ep < 0) {
+		ec.ep = LoadPanel(0, MC_UI, EParams);
+	}
+	
+	DisplayPanel(ec.ep);
+}
+
+int CVICALLBACK ChangeChannelName (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			int val, ind;
+			int sl;
+			char *sval = NULL;
+			
+			int nl = 0;
+			GetNumListItems(ec.ep, ec.chan, &nl);
+			
+			if(nl == 0) { 
+				InsertListItem(ec.ep, ec.chan, -1, "+ New Channel", -1);	
+				nl++;
+			}
+			
+			GetCtrlValStringLength(ec.ep, ec.name, &sl);
+			sval = malloc(++sl);
+			GetCtrlVal(ec.ep, ec.name, sval);
+			
+			GetCtrlVal(ec.ep, ec.chan, &val);
+			if(val == -1) {
+				ind = nl-1;
+			} else {
+				GetCtrlIndex(ec.ep, ec.chan, &ind);
+				DeleteListItem(ec.ep, ec.chan, ind, 1);
+				
+			}
+			
+			InsertListItem(ec.ep, ec.chan, ind, sval, ind);
+			SetCtrlIndex(ec.ep, ec.chan, ind);
+			
+			
+			if(sval != NULL) { free(sval); }
+			
+			break;
+	}
+	return 0;
+}
