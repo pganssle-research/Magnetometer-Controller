@@ -912,10 +912,10 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	
 	int epoch = (int)ts;
 	fs[++cf] = make_fs(MCD_TSTART);
-	if(rv = put_fs(&(fs[cf]), &epoch, FS_INT, 1)) { goto error; }
+	if(rv = put_fs(&(fs[cf]), &epoch, FS_UINT, 1)) { goto error; }
 	
 	fs[++cf] = make_fs(MCD_TDONE);
-	if(rv = put_fs(&(fs[cf]), &epoch, FS_INT, 1)) { goto error; }
+	if(rv = put_fs(&(fs[cf]), &epoch, FS_UINT, 1)) { goto error; }
 	
 	// Current step
 	unsigned int cind = 0;
@@ -924,7 +924,12 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	
 	// Max steps
 	fs[++cf] = make_fs(MCD_MAXSTEPS);
-	if(rv = put_fs(&(fs[cf]), p->maxsteps, FS_INT, p->nDims + p->nCycles)) { goto error; }
+	int one = 1;
+	if(p->nDims + p->nCycles > 1) {
+		if(rv = put_fs(&(fs[cf]), p->maxsteps, FS_INT, p->nDims + p->nCycles)) { goto error; }
+	} else {
+		if(rv = put_fs(&(fs[cf]), &one, FS_INT, 1)) { goto error; }	
+	}
 	
 	// Generate the container
 	header = make_fs(MCD_DATAHEADER);
@@ -1220,10 +1225,12 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	FILE *f = NULL;
 	
 	unsigned int data_size = p->np * nc;
-	fsave mg = null_fs(), dg = null_fs(), tg = null_fs(), eg = null_fs();
+	fsave mg = null_fs(), dg = null_fs(), *rgs = NULL;
 	char *step_title = NULL;
 	char *buff = NULL;
 	char *ds = NULL;
+	
+	int num_rgs = 3;
 	
 	f = fopen(fname, "rb+");	// If it doesn't exist, there's a problem.
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
@@ -1257,31 +1264,30 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 		if(rv = fadd_fs_to_container(f, &dg)) { goto error; }
 	}
 	
-	// Update the timestamp
+	// Update the data header
+	rgs = calloc(num_rgs, sizeof(fsave));
+	int cf = 0;
+	
 	struct tm *tptr;
 	tptr = localtime(&done);
 	
 	ds = calloc(MCD_TIMESTAMP_MAXSIZE+1, 1);
 	strftime(ds, MCD_TIMESTAMP_MAXSIZE, MCD_TIME_FORMAT, tptr);
 	
-	tg = make_fs(MCD_TIMEDONE);
-	if(rv = put_fs(&tg, ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
+	rgs[cf] = make_fs(MCD_TIMEDONE);
+	if(rv = put_fs(&(rgs[cf]), ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
 	
 	int epoch = (int)done;
-	eg = make_fs(MCD_TDONE);
-	if(rv = put_fs(&eg, &epoch, FS_INT, 1)) { goto error; }
+	rgs[++cf] = make_fs(MCD_TDONE);
+	if(rv = put_fs(&(rgs[cf]), &epoch, FS_UINT, 1)) { goto error; }
+	
+	rgs[++cf] = make_fs(MCD_CIND);
+	if(rv = put_fs(&(rgs[cf]), &cind, FS_UINT, 1)) { goto error; }
 	
 	rewind(f);
-	long h_pos = find_fsave_in_file(f, MCD_DATAHEADER, MCF_EOF);
-	if(h_pos < 0) { rv = h_pos; goto error; }
 	
-	fseek(f, h_pos, SEEK_SET);
+	if(rv = replace_fsaves(f, MCD_DATAHEADER, rgs, num_rgs, NULL)) { goto error; }
 	
-	fsave dh = null_fs();
-	if(rv = get_fs_header_from_file(f, &dh)) { goto error; }
-	
-	if(rv = find_and_overwrite_fsave_in_file(f, &tg, dh.size)) { goto error; }
-												
 	error:
 	if(f != NULL) { fclose(f); }
 	
@@ -1289,7 +1295,7 @@ int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time
 	if(buff != NULL) { free(buff); }
 	if(ds != NULL) { free(ds); }
 	
-	free_fsave(&tg);
+	free_fsave_array(rgs, num_rgs);
 	free_fsave(&mg);
 	free_fsave(&dg);
 	
@@ -1456,7 +1462,7 @@ int load_experiment(char *filename, int prog) {
 	int dhs_size = 0, dihs_size = 0;
 	
 	ext = get_extension(filename);
-	if(ext != NULL && strcmp(MCD_EXTENSION, ext) != 0) {
+	if(ext == NULL || strcmp(MCD_EXTENSION, ext+1) != 0) {
 		
 		rv = MCD_ERR_INVALID_EXTENSION;
 		goto error;
@@ -1520,8 +1526,7 @@ int load_experiment(char *filename, int prog) {
 	}
 	
 	// Get the display values now - if they aren't found that's fine.
-	long loc = 0;
-	if(loc = find_fsave_in_file(f, MCD_DISPHEADER, MCF_WRAP)) { goto error; }
+	long loc = find_fsave_in_file(f, MCD_DISPHEADER, MCF_WRAP);
 	if(loc < 0) { goto disp_err; }
 	
 	fseek(f, loc, SEEK_SET);
@@ -1532,9 +1537,9 @@ int load_experiment(char *filename, int prog) {
 	
 	names = calloc(dihs_size, sizeof(char *));
 	for(i = 0; i < dihs_size; i++) { 
-		if(dihs[i].ns == 0 || dihs[i].val.c == 0) { continue; }
+		if(dihs[i].ns == 0 || dihs[i].name == NULL) { continue; }
 		names[i] = malloc(dihs[i].ns);
-		memcpy(names[i], dihs[i].val.c, dihs[i].ns);
+		memcpy(names[i], dihs[i].name, dihs[i].ns);
 	}
 	
 	char *dih_names[MCD_DISPNUM] = {MCD_POLYFITON, MCD_POLYFITORDER, MCD_PHASE, MCD_FFTCHAN,
@@ -1543,8 +1548,8 @@ int load_experiment(char *filename, int prog) {
 	
 	int phpos = 3;
 	
-	void *dih_vals[MCD_DISPNUM] = {&(uidc.polyon), &(uidc.polyord), &(uidc.schan), 
-								NULL, uidc.sgain, uidc.soff, uidc.fgain, uidc.foff,
+	void *dih_vals[MCD_DISPNUM] = {&(uidc.polyon), &(uidc.polyord), NULL, 
+								&(uidc.schan), uidc.sgain, uidc.soff, uidc.fgain, uidc.foff,
 								uidc.schans, uidc.fchans};
 	
 	glocs = strings_in_array(names, dih_names, dihs_size, MCD_DISPNUM);
@@ -1606,10 +1611,6 @@ int load_experiment(char *filename, int prog) {
 	update_chan_ring(dc.fid, dc.fcring, uidc.fchans);
 	update_chan_ring(dc.spec, dc.scring, uidc.schans);
 	
-	update_fid_chan_box();
-	update_spec_chan_box();
-	update_spec_fft_chan();
-	
 	disp_err:
 	if(glocs != NULL) {
 		free(glocs);
@@ -1625,20 +1626,23 @@ int load_experiment(char *filename, int prog) {
 	dihs_size = 0;
 	
 	if(feof(f)) { rewind(f); }
-	
-	// Grab the pulse program
-	if(ce.p == NULL) {
-		free_pprog(ce.p);
-		ce.p = calloc(1, sizeof(PPROGRAM));
-	}
-	
-	ce.p = load_pprogram(f, &rv);
-	if(rv < 0) { goto error; }
 
 	// Get the data
 	data = load_all_data_file(f, ce.p, &dh, &rv);
 	if(rv < 0) { goto error; }
+	
+	// Load the UI portions of this
 	plot_data(data.data[0][0], data.np, ce.p->sr, data.nc);
+	
+	
+	if(prog) {
+		set_current_program(ce.p);
+	}	
+	
+	update_fid_chan_box();
+	update_spec_chan_box();
+	update_spec_fft_chan();
+	update_experiment_nav();  
 	
 	error:
 	if(f != NULL) { fclose(f); }
@@ -1651,7 +1655,12 @@ int load_experiment(char *filename, int prog) {
 	
 	if(rv < 0) {
 		data = free_ds(&data);
+		ce.adata = free_ds(&ce.adata);
+	} else {
+		ce.adata = get_avg_data(data);	
 	}
+	
+	ce.data = data;
 	
 	return rv;
 }
@@ -1845,7 +1854,6 @@ double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
 	
 	
 	error:
-
 	fclose(f);
 	
 	*ev = rv;
@@ -1870,6 +1878,7 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	
 	dstor ds = null_ds(), ads = null_ds();
 	int *cstep = NULL;  
+	int *dim_step = NULL;
 	
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 	
@@ -1905,7 +1914,10 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	// Grab the data now - first we grab it, then we parse it.
 	long loc = find_fsave_in_file(f, MCD_MAINDATA, MCF_WRAP);
 	if(loc < 0) { rv = MCD_ERR_NODATA; goto error; }
+	fseek(f, loc, SEEK_SET);    
+		
 	if(rv = get_fs_header_from_file(f, &dg)) { goto error; }
+
 	
 	all_data = read_all_fsaves_from_file(f, &rv, &ad_size, dg.size);
 	if(rv < 0) { goto error; }
@@ -1925,12 +1937,12 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	// Generate the data storage structure metadata.
 	ds.nt = p->nt;
 	ds.maxds = 1;
-	ds.nd = p->nDims;
+	ds.nd = (p->nDims < 1)?1:p->nDims;
 	ds.np = np;
 	ds.nc = nc;
 	
-	if(p->nDims >= 1) {
-		ds.dim_step = malloc(sizeof(int)*p->nDims);
+	if(p->nDims >= 0) {
+		ds.dim_step = malloc(sizeof(int)*((p->nDims == 0)?1:p->nDims));
 	} else {
 		rv = MCD_ERR_MALFORMED_PROG;
 		goto error;
@@ -1941,26 +1953,38 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 		ds.maxds *= p->maxsteps[i+p->nCycles];
 	}
 	
+	if(p->nDims < 1) {
+		ds.dim_step[0] = 1;	
+	}
+	
 	// Now we can allocate the data storage structure.
 	if(rv = calloc_ds(&ds)) { goto error; }
 	
-	int t = 0;
-	int *dim_step = calloc(p->nDims, sizeof(int));
+	int t = 0, lindex = 0;
+	dim_step = calloc(p->nDims, sizeof(int));
 	
-	for(i = 0; i < ind; i++) {
+	for(i = 0; i <= ind; i++) {
 		// Determine which one we're on.
 		cstep = parse_cstep(all_data[i].name, &rv);
 		if(rv < 0) { goto error; }
 		
-		int lindex = get_lindex(cstep, p->steps, p->steps_size);
-		free(cstep);
-		cstep = NULL;
+		if(p->nDims) {
+			lindex = get_lindex(cstep, p->steps, p->steps_size);
+			free(cstep);
+			cstep = NULL;
 		
-		// Get the transient and dimensions-only linear index.
-		t = get_transient(p, lindex);
-		get_dim_step(p, lindex, dim_step);
-		lindex = get_lindex(dim_step, p->maxsteps + p->nCycles, p->nDims);
+			// Get the transient and dimensions-only linear index.
+			t = get_transient(p, lindex);
 		
+			get_dim_step(p, lindex, dim_step);
+			lindex = get_lindex(dim_step, p->maxsteps + p->nCycles, p->nDims);
+		} else {
+			t = cstep[0];
+			lindex = 0;	
+		}
+		
+		ds.data[t][lindex] = malloc(nc*np*sizeof(double));
+		ds.data4[t][lindex] = calloc(nc, sizeof(double *));
 		memcpy(ds.data[t][lindex], all_data[i].val.d, nc*np*sizeof(double));
 		
 		// Stored two ways for convenience.
@@ -1969,12 +1993,9 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 		}
 	}
 	
-	if(ds.valid) {
-		ads = get_avg_data(ds);	
-	}
-	
 	error:
 	if(cstep != NULL) { free(cstep); }
+	if(dim_step != NULL) { free(dim_step); }
 	
 	free_fsave(&dhg);
 	free_fsave(&dg);
@@ -1986,12 +2007,7 @@ dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
 	ds.valid = 1;
 	if(rv < 0) {
 		ds = free_ds(&ds);
-		ce.adata = free_ds(&ds);
-	} else {
-		ce.adata = get_avg_data(ds);	
 	}
-	
-	ce.data = ds;
 	
 	*ev = rv;
 	
@@ -2301,6 +2317,10 @@ dstor get_avg_data(dstor ds) {
 					ads.data[0][j] = calloc(ps, sizeof(double));
 				}
 				
+				if(ads.data4[0][j] == NULL) {
+					ads.data4[0][j] = calloc(ps, sizeof(double));	
+				}
+				
 				l++;
 				w1 = (l-1)/l;	// For a running average where we won't have to 
 				w2 = 1/l;		// worry about overflows, hopefully.
@@ -2315,6 +2335,8 @@ dstor get_avg_data(dstor ds) {
 			}
 		}
 	}
+	
+	ads.valid = 1;
 	
 	return ads;
 }
@@ -2418,6 +2440,7 @@ dheader load_dataheader_file(FILE *f, int *ev) {
 	
 	// Read out all these FSAVES into the relevant variables.
 	int tse = 0, tde = 0;
+	int mspos = 11;
 	char *dh_names[MCD_DATANUM] = {MCD_FILENAME, MCD_EXPNAME, MCD_EXPNUM, MCD_HASH,
 								   MCD_NCHANS, MCD_DATESTAMP, MCD_TIMESTART, MCD_TIMEDONE,
 								   MCD_TSTART, MCD_TDONE, MCD_CIND, MCD_MAXSTEPS};
@@ -2426,7 +2449,7 @@ dheader load_dataheader_file(FILE *f, int *ev) {
 										  NULL, NULL, NULL, NULL, NULL, NULL};
 	
 	void *dh_vals[MCD_DATANUM] = {NULL, NULL, &(d.num), &(d.hash), &(d.nchans),
-								   NULL, NULL, NULL, &tse, &tde,  &(d.cind), d.maxsteps};
+								   NULL, NULL, NULL, &tse, &tde,  &(d.cind), NULL};
 
 	nsize = dhs_size;
 	names = calloc(nsize, sizeof(char*));
@@ -2461,6 +2484,9 @@ dheader load_dataheader_file(FILE *f, int *ev) {
 				memcpy(sb, fsb.val.c, fsb.size);
 				*dh_string_vals[j] = sb;
 				break;
+			case FS_INT:
+				if(dh_vals[j] == NULL) { continue; }
+				memcpy(dh_vals[j], fsb.val.i, fsb.size);
 			case FS_UINT:
 				if(dh_vals[j] == NULL) { continue; }
 				
@@ -2473,6 +2499,13 @@ dheader load_dataheader_file(FILE *f, int *ev) {
 				*(unsigned __int64 *)dh_vals[j] = *(fsb.val.ull);
 				break;
 		}
+	}
+	
+	if(glocs[mspos] >= 0) {
+		fsb = dhs[glocs[mspos]];
+		d.maxsteps = malloc(fsb.size);
+		
+		memcpy(d.maxsteps, fsb.val.i, fsb.size);
 	}
 	
 	if(tse > 0) {
@@ -2564,10 +2597,10 @@ int *parse_cstep(char *step, int *ev) {
 	}
 	
 	cstep = calloc(s, sizeof(unsigned int));
-	char *m = step;
+	char *m = step+1; // Skip the opening bracket.
 	int n;
 	for(i = 0; i < s; i++) {
-		n = sscanf(m, "%d", cstep+i);
+		n = sscanf(m, "%d%*s", cstep+i);
 		if(n != 1) { 
 			rv = MCD_ERR_INVALIDSTR;
 			goto error;
@@ -2688,10 +2721,10 @@ void select_file(char *path) {
 	free(msg);
 	
 	if(rv) {
-		rv = load_experiment_tdm_safe(path);
+		rv = load_experiment(path, 1);
 		
 		if(rv != 0)
-			display_ddc_error(rv);
+			display_error(rv);
 	}
 }
 

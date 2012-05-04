@@ -467,6 +467,67 @@ long find_nth_fsave_in_file(FILE *f, unsigned int num, long max_bytes) {
 	return pos;
 }
 
+int replace_fsaves(FILE *f, char *parent, fsave *list, int nfs, int *found) {
+	// To replace nfs fsaves in the top-level container container_name,
+	// within a file. For now, if you want to replace a list within a
+	// non-top-level container, just position the file at the beginning
+	// of its parent container (the file won't be rewound).
+	//
+	// This function only works with constant-size fsaves, so if you use this
+	// make sure it's pre-allocated or you'll corrupt the file.
+	
+	
+	int i, rv = 0;
+	fsave fp = null_fs();
+	flocs inf = null_flocs();
+	int null_f = (found == NULL);
+	int *locs = NULL;
+	
+	char **names = NULL;
+	
+	if(f == NULL) { rv = MCF_ERR_NOFILE; goto error; }
+	if(list == NULL || nfs < 1) { rv = MCF_ERR_FLOC_NAME; goto error; }
+
+	long pos = find_fsave_in_file(f, parent, MCF_WRAP);
+	if(pos < 0) { rv = pos; goto error; }
+	
+	fseek(f, pos, SEEK_SET);
+
+	if(rv = get_fs_header_from_file(f, &fp)) { goto error; }
+	
+	names = calloc(nfs, sizeof(char *));
+	for(i = 0; i < nfs; i++) {
+		names[i] = malloc(list[i].ns);
+		memcpy(names[i], list[i].name, list[i].ns);	
+	}
+	
+	inf = read_flocs_from_file(f, &rv, fp.size);
+	
+	locs = strings_in_array(inf.name, names, inf.num, nfs);
+	if(null_f) {
+		found = calloc(nfs, sizeof(int));	
+	} else {
+		memset(found, 0, sizeof(int)*nfs);	
+	}							
+	
+	for(i = 0; i < nfs; i++) {
+		if(!(found[i] = (locs[i] >= 0))) { continue; }
+		
+		fseek(f, inf.pos[locs[i]], SEEK_SET);
+		fwrite(list[i].val.c, sizeof(char), list[i].size, f);
+	}
+	
+	error:
+	if(locs != NULL) { free(locs); }
+	if(null_f && found != NULL) { free(found); }
+	
+	free_string_array(names, nfs);
+	free_fsave(&fp);
+	free_flocs(&inf);
+	
+	return rv;
+}
+
 long find_fsave_in_file(FILE *f, char *fs_name, long max_bytes) {
 	// If max_bytes is MCF_EOF, will stop at the end of the file
 	// If max_bytes is MCF_WRAP, will wrap back to the initial position.
@@ -515,6 +576,8 @@ long find_fsave_in_file(FILE *f, char *fs_name, long max_bytes) {
 		}
 		
 		fseek(f, fsb.size, SEEK_CUR);
+		
+		if(fgetc(f) != EOF) { fseek(f, -1, SEEK_CUR); } // Check if we're one away from EOF.
 		
 		if(feof(f) && max_bytes == MCF_WRAP) {
 			if(wrapped) {
@@ -923,9 +986,7 @@ flocs read_flocs_from_file(FILE *f, int *ev, long max_bytes) {
 	size_t nlen, clen;
 	size_t si = sizeof(unsigned int), si8 = sizeof(unsigned char);
 	unsigned int type;
-	
-	rewind(f);
-	
+
 	// Read the first bit.
 	unsigned long int pos;
 	size_t count = fread(&nlen, si, 1, f);
@@ -946,12 +1007,18 @@ flocs read_flocs_from_file(FILE *f, int *ev, long max_bytes) {
 	for(int i = 0; i < fl.num; i++) {
 		// First read out the one we've already found.
 		fl.name = malloc_or_realloc(fl.name, sizeof(char*)*fl.num);
+		fl.ns = malloc_or_realloc(fl.ns, sizeof(unsigned int)*fl.num);
 		fl.size = malloc_or_realloc(fl.size, sizeof(unsigned int)*fl.num);
-		fl.pos = malloc_or_realloc(fl.pos, sizeof(unsigned long int)*fl.num);
+		fl.hpos = malloc_or_realloc(fl.hpos, sizeof(unsigned int)*fl.num);
+		fl.pos = malloc_or_realloc(fl.pos, sizeof(unsigned int)*fl.num);
+		
 		fl.type = malloc_or_realloc(fl.type, sizeof(unsigned char)*fl.num);
 		
 		fl.name[i] = calloc(nlen, 1);
 
+		fl.ns[i] = nlen;
+		fl.hpos[i] = ftell(f)-si; // We've already read one 
+			
 		count = fread(fl.name[i], 1, nlen, f);
 		if(count != nlen) {
 			rv = MCF_ERR_FLOC_NAME;
@@ -971,9 +1038,10 @@ flocs read_flocs_from_file(FILE *f, int *ev, long max_bytes) {
 		}
 		
 		fl.pos[i] = ftell(f);	// Save the position.
-		
 		// Now seek the next one.
 		fseek(f, fl.size[i], SEEK_CUR);
+		
+		if(!(fgetc(f) == EOF)) { fseek(f, -1, SEEK_CUR); }
 		if(feof(f) || (max_bytes != MCF_EOF && ftell(f)-init_pos > max_bytes)) { break; }
 		
 		count = fread(&nlen, si, 1, f);
@@ -1019,7 +1087,9 @@ flocs read_flocs_from_char(char *array, int *ev, size_t size) {
 		}
 		
 		fl.name = malloc_or_realloc(fl.name, sizeof(char *)*fl.num);
-		fl.pos = malloc_or_realloc(fl.pos, sizeof(unsigned long int)*fl.num);
+		fl.ns = malloc_or_realloc(fl.ns, sizeof(unsigned int)*fl.num);
+		fl.hpos = malloc_or_realloc(fl.hpos, sizeof(unsigned int)*fl.num);
+		fl.pos = malloc_or_realloc(fl.pos, sizeof(unsigned int)*fl.num);
 		fl.size = malloc_or_realloc(fl.pos, si*fl.num);
 		fl.type = malloc_or_realloc(fl.pos, si8*fl.num);
 		
@@ -1028,6 +1098,9 @@ flocs read_flocs_from_char(char *array, int *ev, size_t size) {
 		} else { 
 			fl.name[i] = NULL;
 		}
+		
+		fl.ns[i] = nlen;
+		fl.hpos[i] = (unsigned int)(cpos - array - si);
 		
 		memcpy(&(fl.name[i]), cpos, nlen);
 		cpos += nlen;
@@ -1043,7 +1116,7 @@ flocs read_flocs_from_char(char *array, int *ev, size_t size) {
 		memcpy(&(fl.size[i]), cpos, si);
 		cpos += si;
 		
-		fl.pos[i] = (unsigned long int)(cpos-array);
+		fl.pos[i] = (unsigned int)(cpos-array);
 		
 		if((fl.pos[i] + fl.size[i]) >= size) { break; }
 		
@@ -1063,7 +1136,13 @@ flocs read_flocs_from_char(char *array, int *ev, size_t size) {
 
 flocs null_flocs() {
 	int rv = 0;
-	flocs fl = {.name = NULL, .size = NULL, .pos = NULL, .type = NULL, .num = 0 }; 
+	flocs fl = {.name = NULL,
+				.ns = NULL,
+				.size = NULL,
+				.hpos = NULL,
+				.pos = NULL,
+				.type = NULL,
+				.num = 0 }; 
 
 	return fl;
 }
@@ -1071,9 +1150,11 @@ flocs null_flocs() {
 flocs free_flocs(flocs *fl) {
 	if(fl != NULL) { 
 		if(fl->name != NULL) { free_string_array(fl->name, fl->num); }
-		if(fl->size != NULL) { free(fl->size); }
-		if(fl->pos != NULL) { free(fl->pos); }
-		if(fl->type != NULL) { free(fl->type); }
+		if(fl->ns != NULL) { free(fl->ns); fl->ns = NULL; }
+		if(fl->size != NULL) { free(fl->size); fl->size = NULL; }
+		if(fl->hpos != NULL) { free(fl->hpos); fl->hpos = NULL; }
+		if(fl->pos != NULL) { free(fl->pos); fl->pos = NULL; }
+		if(fl->type != NULL) { free(fl->type); fl->type = NULL; }
 	}
 	
 	return null_flocs();

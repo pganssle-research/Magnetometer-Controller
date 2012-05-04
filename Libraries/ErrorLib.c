@@ -97,6 +97,8 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCF_ERR_FS_NONS_STR;
 					case MCF_ERR_FS_NONAME:
 						return MCF_ERR_FS_NONAME_STR;
+					case MCF_ERR_EOF:
+						return MCF_ERR_EOF_STR;
 				}
 				break;
 			case MCD_ERR:
@@ -122,6 +124,18 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCD_ERR_NOPATH_STR;
 					case MCD_ERR_NOINPUTCHANS:
 						return MCD_ERR_NOINPUTCHANS_STR;
+					case MCD_ERR_NOSTEPSTR:
+						return MCD_ERR_NOSTEPSTR_STR;
+					case MCD_ERR_INVALIDSTR:
+						return MCD_ERR_INVALIDSTR_STR;
+					case MCD_ERR_INVALID_EXTENSION:
+						return MCD_ERR_INVALID_EXTENSION_STR;
+					case MCD_ERR_BADHEADER:
+						return MCD_ERR_BADHEADER_STR;
+					case MCD_ERR_MALFORMED_PROG:
+						return MCD_ERR_MALFORMED_PROG_STR;
+					case MCD_ERR_NOCHANS:
+						return MCD_ERR_NOCHANS_STR;
 				}
 				break;
 			case MCPP_ERR:

@@ -13,6 +13,7 @@ extern int fadd_fs_to_container(FILE *f, fsave *fs);
 extern int fappend_data_to_fs(FILE *f, void *data, unsigned int data_size);
 extern int overwrite_fsave_in_file(FILE *f, fsave *fs);
 extern int find_and_overwrite_fsave_in_file(FILE *f, fsave *fs, unsigned int max_bytes);
+extern int replace_fsaves(FILE *f, char *parent, fsave *list, int nfs, int *found);
 
 /************ FSave Functions *************/
 extern fsave make_fs(char *name);

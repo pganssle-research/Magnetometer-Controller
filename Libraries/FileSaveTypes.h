@@ -27,11 +27,13 @@ typedef struct fsave {
 } fsave;
 
 typedef struct flocs {
-	char **name;
+	char **name;				// An array of the names of each thing
+	unsigned int *ns;			// Name size.
 	
-	unsigned int *size;
-	unsigned long int *pos;
-	unsigned char *type;
+	unsigned int *size;			// The size of the data (header can be inferred from the name 
+	unsigned int *hpos;			// Position of the header.
+	unsigned int *pos;			// Position of the data 
+	unsigned char *type;		// Data type
 	
 	int num;
 } flocs;
