@@ -62,6 +62,7 @@ extern void clear_plots(void);
 extern void clear_plots_safe(void);
 extern int change_phase(int chan, double phase, int order);
 extern int change_phase_safe(int chan, double phase, int order);
+extern int polynomial_subtraction(double *data, int np, int order, int skip);
 
 extern void update_experiment_nav(void);
 extern void update_experiment_nav_safe(void);

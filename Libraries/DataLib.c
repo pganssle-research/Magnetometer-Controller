@@ -2915,6 +2915,8 @@ int plot_data(double *data, int np, double sr, int nc) {
 	
 	int ev = 0;
 	
+	double *db = NULL;
+	
 	// If the inputs are invalid, return 1.
 	if(np <= 0 || sr <= 0.0 || nc <= 0 || data == NULL) { return 1; }
 	
@@ -2965,6 +2967,7 @@ int plot_data(double *data, int np, double sr, int nc) {
 	for(i = 0; i < nc; i++) {  // Iterate through the channels
 		// Get the data for this channel
 		// Pre-scale the data to have 0 change in the power spectrum - i.e. multiply by (2/np)
+
 		for(j = 0; j < np; j++) {
 			curr_data[j] = data[j+i*np]*2/np;
 		}
@@ -2973,7 +2976,11 @@ int plot_data(double *data, int np, double sr, int nc) {
 		
 		if(uidc.fgain[i] != 1.0 || uidc.foff[i] != 0.0) {
 			for(j = 0; j < np; j++)
-				curr_data[j] = curr_data[j]*uidc.fgain[i] + uidc.foff[i];
+				curr_data[j] = data[j+i*np]*uidc.fgain[i] + uidc.foff[i];
+		}
+		
+		if(uidc.polyon) {
+			polynomial_subtraction(curr_data, np, uidc.polyord, 0);	// 0 Skip for now
 		}
 		
 		uidc.fplotids[i] = PlotY(dc.fid, dc.fgraph, curr_data, np, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, uidc.fchans[i]?uidc.fcol[i]:VAL_TRANSPARENT);
@@ -3119,6 +3126,62 @@ int change_phase_safe(int chan, double phase, int order) {
 	CmtReleaseLock(lock_uidc);
 	
 	return rv;
+}
+
+int polynomial_subtraction(double *data, int np, int order, int skip) {
+	// Performs a polynomial subtraction on the data in data.
+	// Polynomial fit will be of order "order" and will skip the first
+	// "skip" points.
+	
+	int i, rv = 0;
+	double *x = NULL, *output = NULL, *coef = NULL;
+	double err;
+	
+	if(skip < 0) { skip = 0; }
+	
+	if(order > 0) {
+		x = malloc(sizeof(double)*(np));
+		
+		for(i = 0; i< np; i++)
+			x[i] = (double)i;
+		
+		output = calloc(np, sizeof(double));
+		coef = malloc((order+1)*sizeof(double));
+		
+		// This will give us the polynomial fit for all the points after skip. 
+		if(PolyFit(&(x[skip]), &(data[skip]), np-skip, order, &(output[skip]), coef, &err) < 0) {
+			rv = MCD_ERR_POLYFIT;
+			goto error;
+		}
+		
+		// Back-fill the pars we skipped.
+		if(skip > 0) {
+			if(PolyEv1D(x, skip, coef, order+1, output) < 0) { 
+				rv = MCD_ERR_POLY_BACK; 
+				goto error;
+			}
+		}
+		
+		for(i = 0; i < np; i++) {
+			data[i] -= output[i];
+		}
+		
+	} else {
+		double mean = 0;
+		Mean(data+skip, np-skip, &mean);
+		
+		for(i = 0; i < np; i++) {
+			data[i] -= mean;	
+		}
+	}
+	
+	error:
+	
+	if(coef != NULL) { free(coef); }
+	if(x != NULL) { free(x); }
+	if(output != NULL) { free(output); }
+	
+	return 0;
 }
 
 

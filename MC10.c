@@ -1917,7 +1917,8 @@ int CVICALLBACK ChangePolySubtract (int panel, int control, int event,
 			
 			CmtReleaseLock(lock_uidc);
 			
-			// TODO: Implement the actual subtraction.
+			set_data_from_nav_safe(dc.cloc[0]);
+			
 			
 			break;
 	}
@@ -1937,13 +1938,11 @@ int CVICALLBACK ChangePolyFitOrder (int panel, int control, int event,
 			int is_fid = (panel == dc.fid);
 			SetCtrlVal(is_fid?dc.spec:dc.fid, is_fid?dc.spsorder:dc.fpsorder, uidc.polyord);
 			
-			// TODO: Implement the actual subtraction.
-			if(uidc.polyon) {
-				// Subraction goes here.	
-			}
-			
 			CmtReleaseLock(lock_uidc);
 			
+			if(uidc.polyon) {
+				set_data_from_nav_safe(dc.cloc[0]);
+			}
 			
 			break;
 	}

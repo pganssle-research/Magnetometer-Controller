@@ -122,6 +122,8 @@
 #define MCD_ERR_BADHEADER -11014
 #define MCD_ERR_MALFORMED_PROG - 11015
 #define MCD_ERR_NOCHANS -11016
+#define MCD_ERR_POLYFIT -11017
+#define MCD_ERR_POLY_BACK -11018
 
 // Strings
 #define MCD_ERR_NOFILENAME_STR "No data filename provided."
@@ -140,6 +142,8 @@
 #define MCD_ERR_BADHEADER_STR "File contains a bad header."
 #define MCD_ERR_MALFORMED_PROG_STR "Pulse program does not match data."
 #define MCD_ERR_NOCHANS_STR "No channels were found in the data."
+#define MCD_ERR_POLYFIT_STR "Polynomial fitting failed."
+#define MCD_ERR_POLY_BACK_STR "Failure back-projecting the skipped points."
 
 /***********************************************************
 *  														   *
