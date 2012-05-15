@@ -26,7 +26,7 @@
 #include <userint.h>
 #include <ansi_c.h>
 #include <formatio.h>  
-#include <spinapi.h>					// SpinCore functions
+#include <c:/SpinCore/SpinAPI/spinapi_source/spinapi.h>					// SpinCore functions
 
 #include <PulseProgramTypes.h>
 #include <cvitdms.h>

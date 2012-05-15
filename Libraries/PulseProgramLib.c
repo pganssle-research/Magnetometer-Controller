@@ -58,7 +58,7 @@ Desrip	: Need to add a few things to PPROGRAM that I did not consider at
 #include "toolbox.h"
 #include <userint.h>
 #include <ansi_c.h>
-#include <spinapi.h>					// SpinCore functions
+#include <c:/SpinCore/SpinAPI/spinapi_source/spinapi.h>					// SpinCore functions
 #include <NIDAQmx.h>
 
 #include <PulseProgramTypes.h>

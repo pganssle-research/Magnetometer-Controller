@@ -127,7 +127,7 @@ Descrip	: Since changing over to this new system, you've broken all the
 #include <ctype.h>
 #include <string.h>
 
-#include <spinapi.h>					// Then the external libraries
+#include <c:/SpinCore/SpinAPI/spinapi_source/spinapi.h>					// Then the external libraries
 #include <NIDAQmx.h>
 
 #include <Magnetometer Controller.h>	// Then the libraries specific to

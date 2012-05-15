@@ -249,34 +249,34 @@ Project Flags = 0
 Folder = "Source Files"
 
 [File 0020]
-File Type = "Include"
+File Type = "DLL"
 Res Id = 20
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "../../../../../SpinCore/SpinAPI64/spinapi_source/spinapi.h"
-Path = "/c/SpinCore/SpinAPI64/spinapi_source/spinapi.h"
-Exclude = False
-Project Flags = 0
-Folder = "Include Files"
-
-[File 0021]
-File Type = "DLL"
-Res Id = 21
-Path Is Rel = True
-Path Rel To = "Project"
-Path Rel Path = "../../../../../SpinCore/SpinAPI64/dll/spinapi64.dll"
-Path = "/c/SpinCore/SpinAPI64/dll/spinapi64.dll"
+Path Rel Path = "../../../../../SpinCore/SpinAPI/dll/spinapi.dll"
+Path = "/c/SpinCore/SpinAPI/dll/spinapi.dll"
 Exclude = False
 Project Flags = 0
 Folder = "Not In A Folder"
+
+[File 0021]
+File Type = "Include"
+Res Id = 21
+Path Is Rel = True
+Path Rel To = "Project"
+Path Rel Path = "../../../../../SpinCore/SpinAPI/spinapi_source/spinapi.h"
+Path = "/c/SpinCore/SpinAPI/spinapi_source/spinapi.h"
+Exclude = False
+Project Flags = 0
+Folder = "Include Files"
 
 [File 0022]
 File Type = "Library"
 Res Id = 22
 Path Is Rel = True
 Path Rel To = "Project"
-Path Rel Path = "../../../../../SpinCore/SpinAPI64/dll/spinapi64.lib"
-Path = "/c/SpinCore/SpinAPI64/dll/spinapi64.lib"
+Path Rel Path = "../../../../../SpinCore/SpinAPI/dll/spinapi.lib"
+Path = "/c/SpinCore/SpinAPI/dll/spinapi.lib"
 Exclude = False
 Project Flags = 0
 Folder = "Not In A Folder"
