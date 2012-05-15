@@ -2753,6 +2753,7 @@ int load_AO_info() {
 	
 	int rv = 0, nl, len, i, j, anc = uipc.max_anum;
 	char **old_ao_chans = NULL;
+	char *chans = NULL;
 	
 	// Store old string values from analog outputs
 	if(anc > 0 && uipc.ao_chans != NULL && uipc.ao_all_chans != NULL) {
@@ -2808,7 +2809,7 @@ int load_AO_info() {
 	uipc.anum_avail_chans = calloc(uipc.anum_devs, sizeof(int));
 
 	int buff_size, c_size = 0, nc, devlen;
-	char *chans = NULL, *chan_name = NULL;
+	char *chan_name = NULL;
 	char *p = NULL, *p2 = NULL;
 	
 

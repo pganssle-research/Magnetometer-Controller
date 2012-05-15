@@ -6601,7 +6601,7 @@ char **generate_char_num_array(int first, int last, int *elems) {
 	int maxlen;
 	if(last == 0 && last == first)			// log10(0) is undefined.
 		maxlen = 2;		
-	if(last <= 0)
+	else if(last <= 0)
 		maxlen=(int)log10(abs(first))+2; 	// Need to allocate space for the sign
 	else									// and the null termination
 		maxlen=(int)log10(abs(last))+1;
