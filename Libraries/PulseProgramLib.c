@@ -2635,36 +2635,36 @@ int ui_cleanup_safe(int verbose) {
 
 void change_instr_units(int panel) {
 	// Function for changing the units of a given instruction.
-	// Old units can be inferred from max value.
-	int newunits;
-	
-	// Minimum step size for spincore is 10ns, and apparently the number
-	// of steps is stored in 31 bits, so the maximum single delay value
-	// is (2^31)*10.
-	const double m_val = 21474836480.0; 
-	GetCtrlIndex(panel, pc.delayu, &newunits);
-	double max = m_val/pow(1000, newunits);
-	double min = 0; 	// Minimum is 0ns
-	double oldmax, oldmin;
-	
-	GetCtrlAttribute(panel, pc.delay, ATTR_MAX_VALUE, &oldmax);
-	GetCtrlAttribute(panel, pc.delay, ATTR_MIN_VALUE, &oldmin);
-	
-	// Deal with overflows.
-	double delay;
-	GetCtrlVal(panel, pc.delay, &delay);
-	SetCtrlAttribute(panel, pc.delay, ATTR_MAX_VALUE, m_val/pow(1000, newunits));  
-	SetCtrlAttribute(panel, pc.delay, ATTR_MIN_VALUE, 100/pow(1000, newunits));
-	
-	// If it would be coerced, just keep the actual value as represented by
-	// the original units.
-	if (delay == oldmax || delay == oldmin) {
-		GetCtrlAttribute(panel, pc.delay, ATTR_DFLT_VALUE, &delay);
-		SetCtrlVal(panel, pc.delay, delay);
-	} else if(delay > max || delay < min)
-		SetCtrlAttribute(panel, pc.delay, ATTR_DFLT_VALUE, delay); 
+	change_any_instr_units(panel, pc.delay, pc.delayu);
 	
 	change_instr_delay(panel);
+}
+
+void change_any_instr_units(int panel, int del, int unit) {
+	int newunits;
+	GetCtrlVal(panel, unit, &newunits);
+				 
+	double unitm = pow(1000, newunits);
+	double min = MCPP_MIN_TIME/unitm;	// In ns (should be 0 anyway)
+	double max = MCPP_MAX_TIME/unitm; // In nanoseconds
+	
+	// Deal with overflows and set the new values.
+	double delay, oldmax, oldmin;
+	GetCtrlVal(panel, del, &delay);
+
+	// Normally we just keep the nomainal "delay", but if we're going to run
+	// into an overflow, we'll actually interpret the value.
+	if(delay > max || delay < min) {
+		double old_max;
+		GetCtrlAttribute(panel, unit, ATTR_MAX_VALUE, &old_max);
+		
+		delay /= old_max/max;
+		SetCtrlVal(panel, del, delay);
+	}
+	
+	SetCtrlAttribute(panel, unit, ATTR_MIN_VALUE, max);
+	SetCtrlAttribute(panel, unit, ATTR_MAX_VALUE, max);
+	
 }
 
 /********************* Basic Program Setup *********************/

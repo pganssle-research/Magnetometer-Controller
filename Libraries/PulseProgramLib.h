@@ -18,7 +18,8 @@
 #define MCUI_DEL_PREC 5		// Precision for delay controls.
 
 // Pulseblaster params
-#define MCPP_MAX_TIME 21474836480 // Maxint * 10
+#define MCPP_MIN_TIME 0.0
+#define MCPP_MAX_TIME 21474836480.0 // Maxint * 10
 
 /************************* Function Declarations *************************/
 extern PPROGRAM *LoadPulseProgram(char *fname, int safe, int *ev);
@@ -50,6 +51,7 @@ extern void add_prog_path_to_recent(char *path);
 extern void add_prog_path_to_recent_safe(char *path);
 
 extern void change_instr_units(int panel);
+extern void change_any_instr_units(int panel, int del, int unit);
 
 extern void clear_program(void);
 extern void clear_program_safe(void);
@@ -72,6 +74,8 @@ extern void set_scan_panel(int panel, int state);
 
 extern void change_instr_delay(int panel);
 extern void change_instr_data(int panel);
+
+extern void change_fr_instr_delay(int panel);
 
 extern void change_instruction(int num);
 extern void change_instruction_panel(int panel);

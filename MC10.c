@@ -2726,7 +2726,7 @@ int CVICALLBACK ChangeFRInstDelay (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+			change_fr_instr_delay(panel);
 			break;
 	}
 	return 0;
@@ -2738,7 +2738,7 @@ int CVICALLBACK ChangeFRTUnits (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+			
 			break;
 	}
 	return 0;
@@ -2750,7 +2750,7 @@ int CVICALLBACK InstrFRCallback (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+			change_fr_instr_pan(panel);
 			break;
 	}
 	return 0;
@@ -2762,7 +2762,6 @@ int CVICALLBACK InstrFRDataCallback (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
 			break;
 	}
 	return 0;
