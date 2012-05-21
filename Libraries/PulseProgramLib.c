@@ -2656,14 +2656,14 @@ void change_any_instr_units(int panel, int del, int unit) {
 	// into an overflow, we'll actually interpret the value.
 	if(delay > max || delay < min) {
 		double old_max;
-		GetCtrlAttribute(panel, unit, ATTR_MAX_VALUE, &old_max);
+		GetCtrlAttribute(panel, del, ATTR_MAX_VALUE, &old_max);
 		
 		delay /= old_max/max;
 		SetCtrlVal(panel, del, delay);
 	}
 	
-	SetCtrlAttribute(panel, unit, ATTR_MIN_VALUE, max);
-	SetCtrlAttribute(panel, unit, ATTR_MAX_VALUE, max);
+	SetCtrlAttribute(panel, del, ATTR_MIN_VALUE, min);
+	SetCtrlAttribute(panel, del, ATTR_MAX_VALUE, max);
 	
 }
 
@@ -5496,7 +5496,7 @@ int move_fr_inst(int to, int from) {
 	
 	for(i = s; i < e; i++) {
 		j = n_array[i];
-		SetPanelAttribute(pc.finst[i], ATTR_HEIGHT, MC_FR_INST_OFF+(pan_height+MC_FR_INST_SEP)*j);
+		SetPanelAttribute(pc.finst[i], ATTR_TOP, MC_FR_INST_OFF+(pan_height+MC_FR_INST_SEP)*j);
 		SetCtrlVal(pc.finst[i], pc.fr_inum, j);
 		
 		pc.finst[i] = inst_buff[j];

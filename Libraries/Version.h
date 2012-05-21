@@ -25,6 +25,6 @@
 // Display options
 #define MCD_NPHASEORDERS 3
 
-#define MC_FR_INST_SEP 10
-#define MC_FR_INST_OFF 10 
+#define MC_FR_INST_SEP 5
+#define MC_FR_INST_OFF 3 
 #endif

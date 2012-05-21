@@ -104,7 +104,7 @@
 
 // Default stuff.
 #define MCPP_DEFAULT_DELAY 100000000 // 100ms
-#define MCPP_DEFAULT_UNITS 3 		// ms
+#define MCPP_DEFAULT_UNITS 2 		// ms
 
 
 /************************* Function Declarations *************************/   

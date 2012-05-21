@@ -2686,16 +2686,16 @@ int CVICALLBACK MoveFRInstButton (int panel, int control, int event,
 			int diff;
 			
 			if(control == pc.fr_upbutton) {
-				diff = 1;
-			} else if(control == pc.fr_downbutton) {
 				diff = -1;
+			} else if(control == pc.fr_downbutton) {
+				diff = 1;
 			} else {
 				break;	
 			}
 			
 			int to, from;
 			
-			GetCtrlVal(panel, control, &from);
+			GetCtrlVal(panel, pc.fr_inum, &from);
 			
 			to = from+diff;
 			
@@ -2713,7 +2713,7 @@ int CVICALLBACK MoveFRInstButton (int panel, int control, int event,
 			GetPanelAttribute(pc.finst[to], ATTR_TOP, &top1);
 			GetPanelAttribute(pc.finst[from], ATTR_TOP, &top2);
 			
-			SetCursorPos(pos.x+top1-top2, pos.y);
+			SetCursorPos(pos.x, pos.y+top1-top2);
 			
 			break;
 	}
@@ -2738,6 +2738,9 @@ int CVICALLBACK ChangeFRTUnits (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			
+			change_any_instr_units(panel, pc.fr_delay, pc.fr_delay_u);
+			change_fr_instr_delay(panel);
 			
 			break;
 	}

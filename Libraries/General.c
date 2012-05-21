@@ -170,7 +170,7 @@ int *generate_mover_array(int to, int from, int size) {
 	int s, e, d;
 	if(to>from) {
 		s = from;
-		e = to-1;
+		e = to;
 		d = 1;
 	} else {
 		s = to;
