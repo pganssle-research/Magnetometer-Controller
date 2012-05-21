@@ -2328,6 +2328,7 @@ void clear_program() {
 	// Clear all the instructions
 	for(int i = 0; i < uipc.max_ni; i++) { clear_instruction(i); }
 	for(int i = 0; i < uipc.max_anum; i++) { clear_aout(i); }
+	for(int i = 0; i < uipc.fr_max_ni; i++) { clear_fr_instr(i); }
 	
 	// Update the number of instructions and analog outputs
 	SetCtrlVal(pc.ninst[1], pc.ninst[0], 1);
@@ -2335,6 +2336,9 @@ void clear_program() {
 	
 	SetCtrlVal(pc.anum[1], pc.anum[0], 0);
 	change_num_aouts();
+	
+	SetCtrlVal(pc.FRPan, pc.fninst, 1);
+	change_fr_num_instrs(1);
 	
 	// Update the ND information
 	SetCtrlVal(pc.numcycles[1], pc.numcycles[0], 0);
@@ -2801,6 +2805,7 @@ int set_fr_instr(int num, PINSTR instr) {
 	// Pass this the program controls, instr number and it sets the controls appropriately.
 	int ni;
 	GetCtrlVal(pc.FRPan, pc.fninst, &ni);
+	
 	if(num > ni) {
 		return MCUI_ERR_INVALID_INST;	
 	}
@@ -2817,7 +2822,10 @@ void set_fr_instr_panel(int panel, PINSTR instr) {
 	set_fr_flags_panel(panel, instr.flags);
 	
 	SetCtrlIndex(panel, pc.fr_inst, instr.instr);
-	SetCtrlVal(panel, pc.fr_delay, instr.instr_time);
+	double delay = instr.instr_time/(instr.time_units?pow(1000, instr.time_units):1);
+	
+	SetCtrlVal(panel, pc.fr_delay, delay);
+	SetCtrlIndex(panel, pc.delayu, instr.time_units);
 	
 	if(takes_instr_data(instr.instr)) {						 
 		SetCtrlAttribute(panel, pc.fr_inst_d, ATTR_DIMMED, 0);
@@ -2867,7 +2875,6 @@ void set_instr_panel(int panel, PINSTR *instr) {
 		}
 	} else {
 		SetCtrlAttribute(panel, pc.delay, ATTR_DIMMED, 0);	// Undim them if it's an atomic function
-		SetCtrlAttribute(panel, pc.delay, ATTR_DIMMED, 0);
 	}
 	
 	// Undim the instruction data control if it needs it, otherwise, set to 0 and dim it.
@@ -2911,6 +2918,16 @@ void set_scan_panel(int panel, int state) {
 	// Called when you try and toggle the scan button. Sets the val and the trigger ttl
 	SetCtrlVal(panel, pc.scan, state);
 	SetCtrlVal(panel, pc.TTLs[uipc.trigger_ttl], state);
+}
+
+void change_fr_instr_delay(int panel) {
+	double val;
+	int units;
+	
+	GetCtrlVal(panel,  pc.fr_delay, &val);
+	GetCtrlVal(panel, pc.fr_delay_u, &units);
+	
+	SetCtrlAttribute(panel, pc.fr_delay, ATTR_PRECISION, get_precision(val, MCUI_DEL_PREC));
 }
 
 void change_instr_delay(int panel) {
@@ -5716,6 +5733,10 @@ void change_fr_num_instrs(int num) {
 		
 		uipc.fr_max_ni = num;
 		setup_broken_ttls();
+	}
+	
+	for(i = uipc.fr_ni; i < num; i++) {
+		DisplayPanel(pc.finst[i]);	
 	}
 	
 	uipc.fr_ni = num;

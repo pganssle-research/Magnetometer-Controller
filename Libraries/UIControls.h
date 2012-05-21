@@ -176,11 +176,15 @@ struct {
 	// Controls on the first run inst panels
 	int fr_inum;		// Instruction number
 	int fr_TTLs[24];	// TTLs;
-	int fr_xbutton;		// Delete button
 	int fr_instr;		// Instruction
 	int fr_inst_d;		// Instruction data
 	int fr_delay;		// Instruction delay
 	int fr_delay_u;		// Instruction delay units
+
+	int fr_xbutton;		// Delete button
+	int fr_upbutton;	// Up button
+	int fr_downbutton;	// Down button
+	
 	
 	// Analog output window controls
 	int anum[2];		// Number of analog output channels.

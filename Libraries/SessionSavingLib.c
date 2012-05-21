@@ -247,6 +247,9 @@ void initialize_program() {
 
 	CmtGetLock(lock_uipc);
 	
+	uipc.fr_ni = 1;
+	uipc.fr_max_ni = 1;
+	
 	uipc.ni = 1;
 	uipc.max_ni = 1;
 	uipc.broken_ttls = 0;
@@ -332,8 +335,7 @@ void initialize_program() {
 	DisplayPanel(pc.ainst[0]);
 	set_aout_dimmed_safe(0, 1, 0);
 	
-	SetPanelPos(pc.finst[0], 25, 7);
-	SetPanelAttribute(pc.finst[0], ATTR_DIMMED, 1);
+	SetPanelPos(pc.finst[0], MC_FR_INST_OFF, 7);
 	DisplayPanel(pc.finst[0]);
 	
 	// Set up the initial callback data for np, sr and at callbacks.
@@ -681,12 +683,18 @@ void initialize_uicontrols() {
 	pc.vary = MDInstr_VaryInstr;
 	
 	// First run panels
+	pc.fninst = FirstRun_NumInst;
+	pc.fnrep = FirstRun_NReps;
+	pc.fron = FirstRun_UseFirstRun;
+	
 	pc.fr_inum = BasicInstr_InstNum;
 	pc.fr_instr = BasicInstr_Instructions;
 	pc.fr_inst_d = BasicInstr_Instr_Data;
 	pc.fr_delay = BasicInstr_InstDelay;
 	pc.fr_delay_u = BasicInstr_TimeUnits;
 	pc.fr_xbutton = BasicInstr_xButton;
+	pc.fr_upbutton = BasicInstr_UpButton;
+	pc.fr_downbutton = BasicInstr_DownButton;
 	
 	pc.fr_TTLs[0] = BasicInstr_TTL0;	 	// Each TTL is its own control
 	pc.fr_TTLs[1] = BasicInstr_TTL1;	 	

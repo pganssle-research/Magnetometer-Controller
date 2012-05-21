@@ -17,6 +17,9 @@
 // Some UI parameters.
 #define MCUI_DEL_PREC 5		// Precision for delay controls.
 
+// Pulseblaster params
+#define MCPP_MAX_TIME 21474836480 // Maxint * 10
+
 /************************* Function Declarations *************************/
 extern PPROGRAM *LoadPulseProgram(char *fname, int safe, int *ev);
 extern int SavePulseProgram(PPROGRAM *p, char *fname, int safe);

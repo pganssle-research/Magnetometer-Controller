@@ -2652,3 +2652,150 @@ int CVICALLBACK ChangeChannelName (int panel, int control, int event,
 	}
 	return 0;
 }
+
+// First Run Callbacks
+
+int CVICALLBACK MoveFRInst (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			int to, from;
+			
+			CmtGetLock(lock_uipc);
+			from = int_in_array(pc.finst, panel, uipc.fr_ni);
+			CmtReleaseLock(lock_uipc);
+			
+			GetCtrlVal(panel, pc.fr_inum, &to);
+			
+			move_fr_inst_safe(to, from);
+			
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK MoveFRInstButton (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			int diff;
+			
+			if(control == pc.fr_upbutton) {
+				diff = 1;
+			} else if(control == pc.fr_downbutton) {
+				diff = -1;
+			} else {
+				break;	
+			}
+			
+			int to, from;
+			
+			GetCtrlVal(panel, control, &from);
+			
+			to = from+diff;
+			
+			if(to >= uipc.fr_ni || to < 0) {
+				break;
+			}
+			
+			move_fr_inst_safe(to, from);
+			
+			POINT pos;
+			GetCursorPos(&pos);
+			
+			int top1, top2;
+			
+			GetPanelAttribute(pc.finst[to], ATTR_TOP, &top1);
+			GetPanelAttribute(pc.finst[from], ATTR_TOP, &top2);
+			
+			SetCursorPos(pos.x+top1-top2, pos.y);
+			
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeFRInstDelay (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeFRTUnits (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK InstrFRCallback (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK InstrFRDataCallback (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK DeleteFRInstructionCallback (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			CmtGetLock(lock_uipc);
+			int num = int_in_array(pc.finst, panel, uipc.fr_ni);
+			CmtReleaseLock(lock_uipc);
+			
+			delete_fr_instr_safe(num);
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK InstNumFRChange (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			int num;
+			GetCtrlVal(panel, control, &num);
+			
+			change_fr_num_instrs_safe(num);
+			
+			break;
+	}
+	return 0;
+}
