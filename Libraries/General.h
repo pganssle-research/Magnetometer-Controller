@@ -21,6 +21,10 @@ extern int double_in_array(double *array, double val, int size);
 
 extern void remove_array_item(int *array, int index, int num_items);
 extern void remove_array_item_void(void *array, int index, int num_items, int type);
+
+extern int *generate_mover_array(int to, int from, int size);
+extern int *move_int_in_array(int *array, int to, int from, int size);
+
 extern int constant_array_double(double *array, int size);
 extern int constant_array_int(int *array, int size);
 

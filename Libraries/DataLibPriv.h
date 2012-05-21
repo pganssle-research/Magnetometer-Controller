@@ -38,11 +38,12 @@
 
 // Data header
 #define MCD_DATAHEADER "[Data Header]"
-#define MCD_DATANUM 12
+#define MCD_DATANUM 13
 
 #define MCD_FILENAME "filename"
 #define MCD_EXPNAME "ExperimentName"
 #define MCD_EXPNUM "ExperimentNum"
+#define MCD_DATADESC "Description"
 #define MCD_HASH "HashCode"  
 #define MCD_NCHANS "NumChans"  
 
@@ -96,8 +97,8 @@ extern int prepare_next_step_safe(PPROGRAM *p);
 
 /*********************** File I/O ************************/   
 // Data Saving
-extern int initialize_mcd(char *fname, char *basefname, unsigned int num, PPROGRAM *p, unsigned int nc, time_t start, __int64 hash);
-extern int initialize_mcd_safe(char *fname, char *basefname, unsigned int num, PPROGRAM *p, unsigned int nc, time_t start, __int64 hash);
+extern int initialize_mcd(char *fname, PPROGRAM *p, dheader d);   
+extern int initialize_mcd_safe(char *fname, PPROGRAM *p, dheader d);   
 extern int update_avg_data_mcd(char *fname, double **avg_data, PPROGRAM *p, double *data, int cind, int nc, int64 hash);
 extern int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time_t done);
 

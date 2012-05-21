@@ -1669,13 +1669,15 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	create_pprogram(p);
 	
 	// Now we can assign what arrays we've got already.
-	memcpy(p->maxsteps, maxsteps, sizeof(int)*(p->nDims+p->nCycles));
+	if(p->varied) {
+		memcpy(p->maxsteps, maxsteps, sizeof(int)*(p->nDims+p->nCycles));
 	
-	steps = get_steps_array(p->tmode, p->maxsteps, p->nCycles, p->nDims, p->nt);
-	if(steps != NULL) {
-		memcpy(p->steps, steps, sizeof(int)*p->steps_size);
-		free(steps);
-		steps = NULL;
+		steps = get_steps_array(p->tmode, p->maxsteps, p->nCycles, p->nDims, p->nt);
+		if(steps != NULL) {
+			memcpy(p->steps, steps, sizeof(int)*p->steps_size);
+			free(steps);
+			steps = NULL;
+		}
 	}
 	
 	// Add in the analog outputs
@@ -4070,10 +4072,7 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 	}
 	
 	// Build the basic cstep
-	cstep = malloc(sizeof(int)*(uipc.nc+uipc.nd));
-	for(i = 0; i<(uipc.nc+uipc.nd); i++)
-		cstep[i] = 0;	// Just set everything we don't care about to the first one, it's not important
-	
+	cstep = calloc(uipc.nd+uipc.nc, sizeof(int));
 	
 	int err_del = 0, err_dat = 0;			// Error values
 	constants *c = setup_constants(); 		// Initializes the static constants
@@ -4796,13 +4795,13 @@ void update_cyc_instr(int num, PINSTR *instr, int step) {
 
 	// Make this array the right size.
 	if(uipc.c_instrs[num] == NULL) {
-		uipc.c_instrs[num] = malloc(sizeof(PINSTR*)*(step+1));
+		uipc.c_instrs[num] = calloc((step+1), sizeof(PINSTR*));
 	} else if (uipc.max_cinstrs[num] <= step) {
 		uipc.c_instrs[num] = realloc(uipc.c_instrs[num], sizeof(PINSTR*)*(step+1));
 	}
 	
 	if(step >= uipc.max_cinstrs[num]) {					// Matches exclusively both of the above conditions
-		memset(&uipc.c_instrs[num], 0, sizeof(PINSTR*)*((step-uipc.max_cinstrs[num])+1));
+		memset(uipc.c_instrs[num]+step, 0, sizeof(PINSTR*)*((step-uipc.max_cinstrs[num])+1));
 		uipc.max_cinstrs[num] = step+1;
 	}
 	
@@ -5386,6 +5385,58 @@ int move_instruction_safe(int to, int from) {
 	return rv;
 }
 
+
+int move_fr_inst(int to, int from) {
+	// Moves first-run instructions.
+	//
+	// 0 on no change
+	// 1 on success.
+	if(to > uipc.fr_ni || from > uipc.fr_ni || from < 0 || to < 0 || from == to) {
+		return 0;
+	}
+	
+	int *n_array = generate_mover_array(to, from, ((to>from)?to:from)+1);
+	if(n_array == NULL) { return 0; }
+	
+	int pan_height;
+	GetPanelAttribute(pc.finst[0], ATTR_HEIGHT, &pan_height);
+	
+	int i, j;
+	
+	int s, e;
+	if(to > from) {
+		s = from;
+		e = to+1;
+	} else {
+		s = to;
+		e = from+1;
+	}
+				  
+	int *inst_buff = malloc(sizeof(int)*e);
+	memcpy(inst_buff, pc.finst, sizeof(int)*e);
+	
+	for(i = s; i < e; i++) {
+		j = n_array[i];
+		SetPanelAttribute(pc.finst[i], ATTR_HEIGHT, MC_FR_INST_OFF+(pan_height+MC_FR_INST_SEP)*j);
+		SetCtrlVal(pc.finst[i], pc.fr_inum, j);
+		
+		pc.finst[i] = inst_buff[j];
+	}
+	
+	free(inst_buff);
+	free(n_array); 
+	
+	return 1;
+}
+
+int move_fr_inst_safe(int to, int from) {
+	CmtGetLock(lock_uipc);
+	int rv = move_fr_inst(to, from);
+	CmtReleaseLock(lock_uipc);
+	
+	return rv;
+}
+
 void clear_instruction(int num) {
 	// Takes an instruction and restores it to defaults.
 	
@@ -5472,7 +5523,7 @@ void change_number_of_instructions() {
 	
 	if(num == uipc.ni)
 		return;			// No change needed
-	
+																   
 	if(num<uipc.ni) {						// In this case, we just hide the panels
 		for(i = num; i<uipc.max_ni; i++) {
 			HidePanel(pc.inst[i]);
@@ -5551,6 +5602,62 @@ void change_number_of_instructions() {
 void change_number_of_instructions_safe() {
 	CmtGetLock(lock_uipc);
 	change_number_of_instructions();
+	CmtReleaseLock(lock_uipc);
+}
+
+void change_fr_num_instrs(int num) {
+	// Change the number of instructions in the "first run" instructions.
+	int i;
+	
+	if(num < 1) {
+		num = 1;	
+	}
+	
+	if(num == uipc.fr_ni) {
+		return;
+	}
+	
+	if(num < uipc.fr_ni) {
+		for(i = num; i < uipc.fr_max_ni; i++) {
+			HidePanel(pc.finst[i]);
+		}
+		
+		uipc.fr_ni = num;
+		return;
+	}
+
+	if(num > uipc.fr_max_ni) {
+		int left, height;
+		GetPanelAttribute(pc.finst[0], ATTR_HEIGHT, &height);
+		GetPanelAttribute(pc.finst[0], ATTR_LEFT, &left);
+		
+		pc.finst = realloc(pc.finst, sizeof(int)*num);
+		double del;
+		
+		for(i = uipc.fr_max_ni; i < num; i++) {
+			pc.finst[i] = LoadPanel(pc.FRCPan, MC_UI, pc.fr_inst);
+			
+			SetPanelPos(pc.finst[i], MC_FR_INST_OFF+(height+MC_FR_INST_SEP)*i, left);
+			SetCtrlAttribute(pc.finst[i], ATTR_DISABLE_PANEL_THEME, 1);
+			
+			GetCtrlVal(pc.inst[i], pc.fr_delay, &del);
+			SetCtrlAttribute(pc.finst[i], pc.fr_delay, ATTR_PRECISION, get_precision(del, MCUI_DEL_PREC));
+			
+			SetCtrlVal(pc.finst[i], pc.fr_inum, i);
+			
+			DisplayPanel(pc.finst[i]);
+		}
+		
+		uipc.fr_max_ni = num;
+		setup_broken_ttls();
+	}
+	
+	uipc.fr_ni = num;
+}
+
+void change_fr_num_instrs_safe(int num) {
+	CmtGetLock(lock_uipc);
+	change_fr_num_instrs(num);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -6430,7 +6537,7 @@ constants *setup_constants_safe() {
 }
 
 void update_constants(constants *c, int *cstep) { // Updates the constants for a given position in acq. space
-	// cstep must be a position in acqusition space of size uipc.nd+uipc.nc
+	// cstep must be a position in acqusition space of size uipc.nd+uipc.nc+1
 	char *current_var = malloc(5);
 	int i;
 	
@@ -6555,6 +6662,9 @@ void free_pprog(PPROGRAM *p) {
 			free(p->skip_expr);
 		}
 	}
+	
+	if(p->steps != NULL) { free(p->steps); }
+	
 	// Free all the dynamically allocated pointers in these arrays of pointers
 	for(int i = 0; i<p->nFuncs; i++)			// The condition will never be met if nFuncs == 0 
 		free(p->funcs[i]);
@@ -6831,17 +6941,20 @@ int get_var_ind(PPROGRAM *p, int cind) {
 	// Get the linear index from the cstep index (excludes transients)
 	
 	int rv = -1;
-	int *cs = malloc(p->nCycles+p->nDims);
+	int *cs = malloc((p->nCycles+p->nDims)*sizeof(int));
 	
-	if(p->nCycles) {
-		if(rv = get_cyc_step(p, cind, cs)) { goto error; }	
+	if(p->varied) {
+		if(p->nCycles) {
+			if(rv = get_cyc_step(p, cind, cs)) { goto error; }	
+		}
+		if(p->nDims) {
+			if(rv = get_dim_step(p, cind, cs + p->nCycles)) { goto error; } 
+		}
+	
+		rv = get_lindex(cs, p->maxsteps, p->nDims+p->nCycles);
+	} else {
+		rv = cind;	
 	}
-	
-	if(p->nDims) {
-		if(rv = get_dim_step(p, cind, cs + p->nCycles)) { goto error; } 
-	}
-	
-	rv = get_lindex(cs, p->maxsteps, p->nDims+p->nCycles);
 	
 	error:
 	

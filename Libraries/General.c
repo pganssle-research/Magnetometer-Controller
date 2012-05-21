@@ -159,6 +159,72 @@ void remove_array_item_void(void *array, int index, int num_items, int type) {
 
 }
 
+int *generate_mover_array(int to, int from, int size) {
+	// Generates an array of indices for moving, starting at the lower number
+	// ending at the higher number.
+	
+	if(to == from) {
+		return NULL;	
+	}
+	
+	int s, e, d;
+	if(to>from) {
+		s = from;
+		e = to-1;
+		d = 1;
+	} else {
+		s = to;
+		e = from;
+		d = -1;
+	}
+	
+	int *out = malloc(sizeof(int)*size);
+	
+	for(int i = 0; i < s; i++) {
+		out[i] = i;	
+	}
+	
+	for(int i = s; i <=e; i++) {
+		out[i] = i+d;	
+	}
+	
+	out[to] = from;
+	
+	if(++e < size) { 
+		for(int i = e; i < size; i++) {
+			out[i] = i;	
+		}
+	}
+	
+	return out;	
+}
+
+int *move_int_in_array(int *array, int to, int from, int size) {
+	if(to > size || from > size || size == 0) 
+		return NULL;
+	
+	// Start with the output being the input.
+	int *out = malloc(sizeof(int)*size);
+	memcpy(out, array, sizeof(int)*size);
+	
+	if(to == from) { return out; }
+	
+	int s, e, b = out[from];
+	if(to > from) {
+		for(int i = from; i < to; i++) {
+			out[i] = out[i+1];
+		}
+	} else {
+		for(int i = from; i > to; i--) {
+			out[i] = out[i-1];	
+		}
+	}
+	
+	out[to] = b;
+	
+	return out;
+}
+
 
 //////////////////////////////////////////////////////////////
 // 															//

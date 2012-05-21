@@ -38,7 +38,41 @@
 #define  AOInstPan_ChanNumSteps           10      /* callback function: ChangeChanNumSteps */
 #define  AOInstPan_xButton                11      /* callback function: DeleteAOInstr */
 
-#define  BrokenTTLs                       3
+#define  BasicInstr                       3
+#define  BasicInstr_InstNum               2       /* callback function: MoveInst */
+#define  BasicInstr_Instructions          3       /* callback function: InstrCallback */
+#define  BasicInstr_Instr_Data            4       /* callback function: InstrDataCallback */
+#define  BasicInstr_TTL23                 5
+#define  BasicInstr_TTL22                 6
+#define  BasicInstr_TTL21                 7
+#define  BasicInstr_TTL20                 8
+#define  BasicInstr_TTL19                 9
+#define  BasicInstr_TTL18                 10
+#define  BasicInstr_TTL17                 11
+#define  BasicInstr_TTL16                 12
+#define  BasicInstr_TTL15                 13
+#define  BasicInstr_TTL14                 14
+#define  BasicInstr_TTL13                 15
+#define  BasicInstr_TTL12                 16
+#define  BasicInstr_TTL11                 17
+#define  BasicInstr_TTL10                 18
+#define  BasicInstr_TTL9                  19
+#define  BasicInstr_TTL8                  20
+#define  BasicInstr_TTL7                  21
+#define  BasicInstr_TTL6                  22
+#define  BasicInstr_TTL5                  23
+#define  BasicInstr_TTL4                  24
+#define  BasicInstr_TTL3                  25
+#define  BasicInstr_TTL2                  26
+#define  BasicInstr_TTL1                  27
+#define  BasicInstr_TTL0                  28
+#define  BasicInstr_InstDelay             29      /* callback function: ChangeInstDelay */
+#define  BasicInstr_TimeUnits             30      /* callback function: ChangeTUnits */
+#define  BasicInstr_UpButton              31      /* callback function: MoveInstButton */
+#define  BasicInstr_DownButton            32      /* callback function: MoveInstButton */
+#define  BasicInstr_xButton               33      /* callback function: DeleteInstructionCallback */
+
+#define  BrokenTTLs                       4
 #define  BrokenTTLs_TTL23                 2       /* callback function: ToggleBrokenTTL */
 #define  BrokenTTLs_TTL22                 3       /* callback function: ToggleBrokenTTL */
 #define  BrokenTTLs_TTL21                 4       /* callback function: ToggleBrokenTTL */
@@ -66,7 +100,7 @@
 #define  BrokenTTLs_Exit                  26      /* callback function: BrokenTTLsExit */
 #define  BrokenTTLs_ClearAll              27      /* callback function: BrokenTTLsClearAll */
 
-#define  CurrentLoc                       4
+#define  CurrentLoc                       5
 #define  CurrentLoc_TransientNum          2       /* callback function: ChangeViewingTransient */
 #define  CurrentLoc_ID8                   3
 #define  CurrentLoc_ID7                   4
@@ -85,7 +119,7 @@
 #define  CurrentLoc_IDVal2                17      /* callback function: DatChangeIDPos */
 #define  CurrentLoc_IDVal1                18      /* callback function: DatChangeIDPos */
 
-#define  EditFunc                         5
+#define  EditFunc                         6
 #define  EditFunc_QUITBUTTON              2       /* callback function: FuncEditQuit */
 #define  EditFunc_NewFunc                 3       /* callback function: FENewFunc */
 #define  EditFunc_Save                    4       /* callback function: FuncEditSave */
@@ -97,7 +131,7 @@
 #define  EditFunc_EnableDelay             10      /* callback function: FEEnableDelay */
 #define  EditFunc_EnableInstrData         11      /* callback function: FEEnableInstrData */
 
-#define  EParams                          6
+#define  EParams                          7
 #define  EParams_CancelButton             2       /* callback function: CancelExperimentalParameters */
 #define  EParams_SaveAndCloseButton       3       /* callback function: SaveAndCloseExperimentalParams */
 #define  EParams_SaveButton               4       /* callback function: SaveExperimentalParams */
@@ -122,7 +156,9 @@
 #define  EParams_AmpGain                  23
 #define  EParams_ChannelDesc              24
 
-#define  HiddenVals                       7
+#define  FRCPanel                         8
+
+#define  HiddenVals                       9
 #define  HiddenVals_PolySubtractOnOffRing 2
 #define  HiddenVals_PolyOrderValues       3
 #define  HiddenVals_PhaseCorrectionValues 4
@@ -142,7 +178,7 @@
 #define  HiddenVals_FIDChanColor          18      /* callback function: ColorVal */
 #define  HiddenVals_TTLBroken             19
 
-#define  MainPanel                        8
+#define  MainPanel                        10
 #define  MainPanel_MainTabs               2       /* callback function: PopoutTab */
 #define  MainPanel_Start                  3       /* callback function: StartProgram */
 #define  MainPanel_Stop                   4       /* callback function: StopProgram */
@@ -165,7 +201,7 @@
 #define  MainPanel_DataDirectory          21      /* callback function: ChangeDataBox */
 #define  MainPanel_LoadInfoMode           22      /* callback function: ChangeLoadInfoMode */
 
-#define  MDInstr                          9
+#define  MDInstr                          11
 #define  MDInstr_InstrNum                 2
 #define  MDInstr_Instructions             3
 #define  MDInstr_VaryInstr                4       /* callback function: ChangeInstrVary */
@@ -186,7 +222,7 @@
 #define  MDInstr_IncDataExpression        19      /* callback function: EditExpression */
 #define  MDInstr_IncDelayExpression       20      /* callback function: EditExpression */
 
-#define  PPConfigP                        10
+#define  PPConfigP                        12
 #define  PPConfigP_VaryingLabel           2
 #define  PPConfigP_NumStepsLabel          3
 #define  PPConfigP_FinalLabel             4
@@ -194,7 +230,7 @@
 #define  PPConfigP_InitialLabel           6
 #define  PPConfigP_InstrLabel             7
 
-#define  PPPanel                          11
+#define  PPPanel                          13
 #define  PPPanel_PhaseCycleLabel          2
 #define  PPPanel_ScanLabel                3
 #define  PPPanel_InstrLabel               4
@@ -202,7 +238,7 @@
 #define  PPPanel_InstrNumLabel            6
 #define  PPPanel_TTLsLabel                7
 
-#define  PulseInstP                       12
+#define  PulseInstP                       14
 #define  PulseInstP_InstNum               2       /* callback function: MoveInst */
 #define  PulseInstP_Instructions          3       /* callback function: InstrCallback */
 #define  PulseInstP_Instr_Data            4       /* callback function: InstrDataCallback */
@@ -346,6 +382,11 @@
 #define  Spectrum_ChanColor               23      /* callback function: ChangeSpectrumChanColor */
 #define  Spectrum_Autoscale               24
 #define  Spectrum_PolyFitLabel            25
+
+     /* tab page panel controls */
+#define  TABPANEL_UseFirstRun             2
+#define  TABPANEL_NReps                   3       /* callback function: ChangeTransients */
+#define  TABPANEL_NumInst                 4       /* callback function: InstNumFRChange */
 
 
      /* Menu Bars, Menus, and Menu Items: */
@@ -493,6 +534,7 @@ int  CVICALLBACK FuncEditQuit(int panel, int control, int event, void *callbackD
 int  CVICALLBACK FuncEditSave(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK FuncEditSaveAndClose(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstNumChange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK InstNumFRChange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstrCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstrChangeCycleNum(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstrDataCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);

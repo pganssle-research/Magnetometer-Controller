@@ -143,11 +143,17 @@ extern void delete_expanded_instruction_safe(int num, int step);
 extern int move_instruction(int to, int from);
 extern int move_instruction_safe(int to, int from);
 
+extern int move_fr_inst(int to, int from);
+extern int move_fr_inst_safe(int to, int from);
+
 extern void clear_instruction(int num);
 extern void clear_instruction_safe(int num);
 
 extern void change_number_of_instructions(void);
 extern void change_number_of_instructions_safe(void);
+
+extern void change_fr_num_instrs(int num);
+extern void change_fr_num_instrs_safe(int num);
 
 extern void delete_instruction(int num);
 extern void delete_instruction_safe(int num);

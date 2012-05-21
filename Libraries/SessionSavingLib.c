@@ -49,6 +49,7 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	
 	pc.pulse_inst = PulseInstP;
 	pc.md_inst = MDInstr;
+	pc.fr_inst = BasicInstr;
 	pc.a_inst = AOInstPan;
 	
 	// Start building the tabs now.
@@ -60,20 +61,23 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	GetPanelHandleFromTabPage(mc.mp, MainPanel_MainTabs, 1, &dc.spec);
 	GetPanelHandleFromTabPage(mc.mp, MainPanel_MainTabs, 2, &pc.PProgPan);
 	GetPanelHandleFromTabPage(mc.mp, MainPanel_MainTabs, 3, &pc.PPConfigPan);
-	GetPanelHandleFromTabPage(mc.mp, MainPanel_MainTabs, 4, &pc.AOutPan);
+	GetPanelHandleFromTabPage(mc.mp, MainPanel_MainTabs, 4, &pc.FRPan);
+	GetPanelHandleFromTabPage(mc.mp, MainPanel_MainTabs, 5, &pc.AOutPan);
 
 	// Then the menu bars
 	mc.mainmenu = GetPanelMenuBar(mc.mp); 	// Main menu
-	mc.rcmenu = LoadMenuBar(0, uifname, RCMenus);	// Right click menu
+	mc.rcmenu = LoadMenuBar(0, MC_UI, RCMenus);	// Right click menu
 
 	// Then the container panels								 
-	pc.PProgCPan = LoadPanel(pc.PProgPan, uifname, PPPanel); // Pulse program instr container
-	pc.PPConfigCPan = LoadPanel(pc.PPConfigPan, uifname, PPConfigP); // ND instr container
-	pc.AOutCPan = LoadPanel(pc.AOutPan, uifname, AOConP);
+	pc.PProgCPan = LoadPanel(pc.PProgPan, MC_UI, PPPanel); // Pulse program instr container
+	pc.PPConfigCPan = LoadPanel(pc.PPConfigPan, MC_UI, PPConfigP); // ND instr container
+	pc.AOutCPan = LoadPanel(pc.AOutPan, MC_UI, AOConP);
+	pc.FRCPan = LoadPanel(pc.FRPan, MC_UI, FRCPanel);
+	
 	
 	// Create two panels for containing the current location in acquisition space.
-	dc.fcloc = dc.cloc[0] = LoadPanel(dc.fid, uifname, CurrentLoc);
-	dc.scloc = dc.cloc[1] = LoadPanel(dc.spec, uifname, CurrentLoc);
+	dc.fcloc = dc.cloc[0] = LoadPanel(dc.fid, MC_UI, CurrentLoc);
+	dc.scloc = dc.cloc[1] = LoadPanel(dc.spec, MC_UI, CurrentLoc);
 	
 	// Move everything to where it belongs
 	SetPanelPos(pc.PProgCPan, 5, 2); 	// Move the instruction container where it should go
@@ -93,6 +97,11 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	SetPanelPos(pc.AOutCPan, 10, 10);
 	SetPanelAttribute(pc.AOutCPan, ATTR_TITLEBAR_VISIBLE, 0);
 	DisplayPanel(pc.AOutCPan);
+	
+	// Frist run container panel
+	SetPanelPos(pc.FRCPan, 10, 10);
+	SetPanelAttribute(pc.FRCPan, ATTR_TITLEBAR_VISIBLE, 0);
+	DisplayPanel(pc.FRCPan);
 	
 	// Now all the constant stuff
 	initialize_uicontrols();
@@ -198,8 +207,13 @@ void setup_broken_ttls() {
 	int i, j, dimmed;
 	for(i = 0; i < 24; i++) {
 		dimmed = ((1<<i) & uipc.broken_ttls)?1:0;
-		for(j = 0; j < uipc.max_ni; j++) 
+		for(j = 0; j < uipc.max_ni; j++) {
 			SetCtrlAttribute(pc.inst[j], pc.TTLs[i], ATTR_DIMMED, dimmed);
+		}
+		
+		for(j = 0; j < uipc.fr_max_ni; j++) {
+			SetCtrlAttribute(pc.finst[j], pc.fr_TTLs[i], ATTR_DIMMED, dimmed);
+		}
 	}
 }
 
@@ -299,11 +313,13 @@ void initialize_program() {
 	pc.inst = malloc(sizeof(int));
 	pc.cinst = malloc(sizeof(int));
 	pc.ainst = malloc(sizeof(int));
+	pc.finst = malloc(sizeof(int));
 	
-	pc.inst[0] = LoadPanel(pc.PProgCPan, pc.uifname, PulseInstP);
-	pc.cinst[0] = LoadPanel(pc.PPConfigCPan, pc.uifname, MDInstr);
-	pc.ainst[0] = LoadPanel(pc.AOutCPan, pc.uifname, AOInstPan);
-
+	pc.inst[0] = LoadPanel(pc.PProgCPan, MC_UI, PulseInstP);
+	pc.cinst[0] = LoadPanel(pc.PPConfigCPan, MC_UI, MDInstr);
+	pc.ainst[0] = LoadPanel(pc.AOutCPan, MC_UI, AOInstPan);
+	pc.finst[0] = LoadPanel(pc.FRCPan, MC_UI, BasicInstr);
+	
 	SetPanelPos(pc.inst[0], 25, 7);	// Move the first instruction to where it belongs
 	DisplayPanel(pc.inst[0]);			// Display the first instruction
 	SetCtrlAttribute(pc.inst[0], pc.xbutton, ATTR_DISABLE_PANEL_THEME, 1);
@@ -315,6 +331,10 @@ void initialize_program() {
 	SetPanelPos(pc.ainst[0], 60, 5);
 	DisplayPanel(pc.ainst[0]);
 	set_aout_dimmed_safe(0, 1, 0);
+	
+	SetPanelPos(pc.finst[0], 25, 7);
+	SetPanelAttribute(pc.finst[0], ATTR_DIMMED, 1);
+	DisplayPanel(pc.finst[0]);
 	
 	// Set up the initial callback data for np, sr and at callbacks.
 	InstallCtrlCallback(pc.sr[1], pc.sr[0], ChangeNP_AT_SR, (void *)0);
@@ -659,6 +679,40 @@ void initialize_uicontrols() {
 	pc.nsteps = MDInstr_NumSteps;
 	pc.dim = MDInstr_Dimension;
 	pc.vary = MDInstr_VaryInstr;
+	
+	// First run panels
+	pc.fr_inum = BasicInstr_InstNum;
+	pc.fr_instr = BasicInstr_Instructions;
+	pc.fr_inst_d = BasicInstr_Instr_Data;
+	pc.fr_delay = BasicInstr_InstDelay;
+	pc.fr_delay_u = BasicInstr_TimeUnits;
+	pc.fr_xbutton = BasicInstr_xButton;
+	
+	pc.fr_TTLs[0] = BasicInstr_TTL0;	 	// Each TTL is its own control
+	pc.fr_TTLs[1] = BasicInstr_TTL1;	 	
+	pc.fr_TTLs[2] = BasicInstr_TTL2;	 	
+	pc.fr_TTLs[3] = BasicInstr_TTL3; 		
+	pc.fr_TTLs[4] = BasicInstr_TTL4; 		
+	pc.fr_TTLs[5] = BasicInstr_TTL5;	 	
+	pc.fr_TTLs[6] = BasicInstr_TTL6; 		
+	pc.fr_TTLs[7] = BasicInstr_TTL7; 		
+	pc.fr_TTLs[8] = BasicInstr_TTL8;	 	
+	pc.fr_TTLs[9] = BasicInstr_TTL9; 		
+	pc.fr_TTLs[10] = BasicInstr_TTL10;	
+	pc.fr_TTLs[11] = BasicInstr_TTL11;	
+	pc.fr_TTLs[12] = BasicInstr_TTL12;	
+	pc.fr_TTLs[13] = BasicInstr_TTL13;	
+	pc.fr_TTLs[14] = BasicInstr_TTL14;	
+	pc.fr_TTLs[15] = BasicInstr_TTL15;	
+	pc.fr_TTLs[16] = BasicInstr_TTL16;	
+	pc.fr_TTLs[17] = BasicInstr_TTL17;	
+	pc.fr_TTLs[18] = BasicInstr_TTL18;	
+	pc.fr_TTLs[19] = BasicInstr_TTL19;	
+	pc.fr_TTLs[20] = BasicInstr_TTL20; 	
+	pc.fr_TTLs[21] = BasicInstr_TTL21; 	
+	pc.fr_TTLs[22] = BasicInstr_TTL22; 	
+	pc.fr_TTLs[23] = BasicInstr_TTL23;
+	
 
 	// Now the analog output controls.
 	pc.anum[1] = pc.AOutCPan;

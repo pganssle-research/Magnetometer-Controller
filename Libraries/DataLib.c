@@ -322,7 +322,22 @@ int run_experiment(PPROGRAM *p) {
 				}
 				
 				if(ce.cind == 0) {
-					if(ev = initialize_mcd_safe(ce.path, ce.bfname, ce.num, p, ce.nchan, ce.tstart, ce.hash)) { goto error; }	
+					dheader d = null_dh();
+					
+					d.filename = ce.path;
+					d.expname = ce.bfname;
+					d.num = ce.num;
+					d.desc = ce.desc;
+					
+					d.hash = ce.hash;
+					
+					d.tstarted = ce.tstart;
+					d.tdone = ce.tstart;
+					d.nchans = ce.nchan;
+					
+					d.cind = ce.cind;
+
+					if(ev = initialize_mcd_safe(ce.path, ce.p, d)) { goto error; }	
 				}
 				
 				if(ev = save_data_mcd(ce.path, p, data, ce.cind, ce.nchan, ce.tdone)) { goto error; }
@@ -821,20 +836,22 @@ char *make_cstep_str(PPROGRAM *p, int cind, int avg, int *ev) {
 	return out;
 }
 
-int initialize_mcd_safe(char *fname, char *basename, unsigned int num, PPROGRAM *p, unsigned int nc, time_t start, int64 hash) {
+int initialize_mcd_safe(char *fname, PPROGRAM *p, dheader d) {
 	CmtGetLock(lock_uidc);
-	int rv = initialize_mcd(fname, basename, num, p, nc, start, hash);
+	int rv = initialize_mcd(fname, p, d);
 	CmtReleaseLock(lock_uidc);
 	
 	return rv;
 }
 
-int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, unsigned int nc, time_t tstart, int64 hash) {
+
+int initialize_mcd(char *fname, PPROGRAM *p, dheader d) {
 	// Creates the proper headers for the data file.
 	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
 	if(p == NULL) { return MCD_ERR_NOPROG; }
 	
 	int i, rv = 0;
+	int nc = d.nchans;
 	FILE *f = NULL;
 	char *ext = NULL, *fbuff = NULL, *ds = NULL, *buff = NULL;
 	fsave *fs = NULL, header = null_fs();
@@ -880,15 +897,23 @@ int initialize_mcd(char *fname, char *basename, unsigned int num, PPROGRAM *p, u
 	
 	// Experiment name
 	fs[++cf] = make_fs(MCD_EXPNAME);
-	if(rv = put_fs(&(fs[cf]), basename, FS_CHAR, strlen(basename)+1)) { goto error; }
+	if(rv = put_fs(&(fs[cf]), d.expname, FS_CHAR, strlen(d.expname)+1)) { goto error; }
 	
 	// Experiment number
 	fs[++cf] = make_fs(MCD_EXPNUM);
-	if(rv = put_fs(&(fs[cf]), &num, FS_UINT, 1)) { goto error; }
+	if(rv = put_fs(&(fs[cf]), &(d.num), FS_UINT, 1)) { goto error; }
+	
+	// Description
+	fs[++cf] = make_fs(MCD_DATADESC);
+	if(d.desc != NULL) {
+		if(rv = put_fs(&(fs[cf]), d.desc, FS_CHAR, strlen(d.desc)+1)) { goto error; }
+	} else {
+		if(rv = put_fs(&(fs[cf]), "", FS_CHAR, 1)) { goto error; }	
+	}
 	
 	// Hash
 	fs[++cf] = make_fs(MCD_HASH);
-	if(rv = put_fs(&(fs[cf]), &ce.hash, FS_UINT64, 1)) { goto error; }
+	if(rv = put_fs(&(fs[cf]), &(d.hash), FS_UINT64, 1)) { goto error; }
 	
 	// Number of channels
 	fs[++cf] = make_fs(MCD_NCHANS);
@@ -2451,14 +2476,14 @@ dheader load_dataheader_file(FILE *f, int *ev) {
 	// Read out all these FSAVES into the relevant variables.
 	int tse = 0, tde = 0;
 	int mspos = 11;
-	char *dh_names[MCD_DATANUM] = {MCD_FILENAME, MCD_EXPNAME, MCD_EXPNUM, MCD_HASH,
+	char *dh_names[MCD_DATANUM] = {MCD_FILENAME, MCD_EXPNAME, MCD_EXPNUM, MCD_DATADESC, MCD_HASH,
 								   MCD_NCHANS, MCD_DATESTAMP, MCD_TIMESTART, MCD_TIMEDONE,
 								   MCD_TSTART, MCD_TDONE, MCD_CIND, MCD_MAXSTEPS};
 	
-	char **dh_string_vals[MCD_DATANUM] = {&(d.filename), &(d.expname), NULL, NULL, NULL, &(d.dstamp),
+	char **dh_string_vals[MCD_DATANUM] = {&(d.filename), &(d.expname), NULL, &(d.desc), NULL, &(d.dstamp),
 										  NULL, NULL, NULL, NULL, NULL, NULL};
 	
-	void *dh_vals[MCD_DATANUM] = {NULL, NULL, &(d.num), &(d.hash), &(d.nchans),
+	void *dh_vals[MCD_DATANUM] = {NULL, NULL, &(d.num), NULL, &(d.hash), &(d.nchans),
 								   NULL, NULL, NULL, &tse, &tde,  &(d.cind), NULL};
 
 	nsize = dhs_size;
@@ -2575,6 +2600,7 @@ dheader null_dh() {
 	
 	dheader d = {.filename = NULL,
 				 .expname = NULL,
+				 .desc = NULL,
 			  	 .num = -1,
 				 .hash = 0,
 				 .dstamp = NULL,

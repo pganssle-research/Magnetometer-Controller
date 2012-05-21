@@ -83,10 +83,13 @@ struct {
 	int PPConfigCPan; 	// ND Instruction Container
 	int AOutPan;		// Analog output panel
 	int AOutCPan;		// Analog output container panel (not in tab)
+	int FRPan;			// First run panel
+	int FRCPan;			// First run container panel
 
 	int *inst; 			// Instruction Subpanel
 	int *cinst; 		// ND Instruction Subpanel
 	int *ainst;			// Analog output instruction.
+	int *finst;			// First run instructions
 	
 	// Controls on the inst panels
 	int ins_num;		// Instruction Number
@@ -165,6 +168,15 @@ struct {
 	
 	int timeest[2];		// Estimated time control
 	
+	// Controls on the first run inst panels
+	int fr_inum;		// Instruction number
+	int fr_TTLs[24];	// TTLs;
+	int fr_xbutton;		// Delete button
+	int fr_instr;		// Instruction
+	int fr_inst_d;		// Instruction data
+	int fr_delay;		// Instruction delay
+	int fr_delay_u;		// Instruction delay units
+	
 	// Analog output window controls
 	int anum[2];		// Number of analog output channels.
 	int andon[2];		// Same as ndon, but in another container
@@ -185,6 +197,7 @@ struct {
 	char *uifname;
 	int pulse_inst;
 	int md_inst;
+	int fr_inst;
 	int a_inst;
 } pc;
 
@@ -319,6 +332,10 @@ struct {
 	double static_time;			// Static portion of the time estimate.
 	double dynamic_time;		// The portion of the time est. from varied instrs.
 	double total_time;			// Total time this should take.
+	
+	// First run
+	int fr_ni;					// Number of first-run instructions visible.
+	int fr_max_ni;				// Maximum number of first-run instructions that have been visible.
 	
 	// Multidimensional info
 	int nd;						// Number of indirect dimensions
