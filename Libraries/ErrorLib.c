@@ -31,6 +31,8 @@ char *get_mc_error_title(unsigned int err_index) {
 			return MCEX_ERR_TITLE;
 		case MCSS_ERR:
 			return MCSS_ERR_TITLE;
+		case MCUI_ERR:
+			return MCUI_ERR_TITLE;
 	}
 	
 	return "Unknown Error";
@@ -211,6 +213,12 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCSS_ERR_NOATTNAME_STR;
 				}
 				break;
+			case MCUI_ERR:
+				switch(err_val) {
+					case MCUI_ERR_INVALID_INST:
+						return MCUI_ERR_INVALID_INST_STR;
+						
+				}
 		}
 	}
 	
@@ -228,6 +236,8 @@ unsigned int is_mc_error(int ev) {
 		return MCEX_ERR;
 	} else if (ev >= MCSS_ERR_MIN && ev <= MCSS_ERR_MAX) {
 		return MCSS_ERR;	
+	} else if (ev >= MCUI_ERR_MIN && ev <= MCUI_ERR_MAX) {
+		return MCUI_ERR;	
 	}
 	
 	return 0;

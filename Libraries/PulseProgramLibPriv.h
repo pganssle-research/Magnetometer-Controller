@@ -102,6 +102,11 @@
 
 #define MCPP_SKIPORD 4
 
+// Default stuff.
+#define MCPP_DEFAULT_DELAY 100000000 // 100ms
+#define MCPP_DEFAULT_UNITS 3 		// ms
+
+
 /************************* Function Declarations *************************/   
 // File I/O
 extern fsave generate_header(PPROGRAM *p, int *ev);
@@ -119,13 +124,21 @@ extern int ui_cleanup_safe(int verbose);
 // Set Instruction Parameters
 extern int set_instr(int num, PINSTR *instr);
 extern void set_instr_panel(int panel, PINSTR *instr);
+
+extern int set_fr_instr(int num, PINSTR instr);
+extern void set_fr_instr_panel(int panel, PINSTR instr);
+
 extern void change_units(int panel);
+
 extern void move_ttl(int num, int to, int from);
 extern void move_ttl_panel(int panel, int to, int from);
 
 extern void set_flags(int num, int flags);
 extern void set_flags_panel(int panel, int flags);
-extern void set_flags_range(int panel, int flags, int start, int end);
+extern void set_flags_range(int panel, int TTLs[], int flags, int start, int end);
+
+extern void set_fr_flags(int num, int flags);
+extern void set_fr_flags_panel(int panel, int flags);
 
 // Get ND and Phase Cycling Instruction parameters
 extern void get_updated_instr(PINSTR *instr, int num, int *cstep, int *cind, int *dind, int mode);

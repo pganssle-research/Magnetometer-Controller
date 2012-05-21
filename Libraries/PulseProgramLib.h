@@ -66,15 +66,24 @@ extern int get_flags_range(int panel, int start, int end);
 // Set Instruction Parameters
 extern void set_scan(int num, int state);
 extern void set_scan_panel(int panel, int state);
+
 extern void change_instr_delay(int panel);
 extern void change_instr_data(int panel);
+
 extern void change_instruction(int num);
 extern void change_instruction_panel(int panel);
+
+extern void change_fr_instr(int num);
+extern void change_fr_instr_pan(int panel);
+
 extern void change_trigger_ttl(void);
 extern void change_trigger_ttl_safe(void);
+
 extern void set_ttl_trigger(int panel, int ttl, int on);
+
 extern int ttls_in_use(void);
 extern int ttls_in_use_safe(void);
+
 extern void swap_ttl(int to, int from);
 extern void swap_ttl_safe(int to, int from);
 
@@ -149,6 +158,11 @@ extern int move_fr_inst_safe(int to, int from);
 extern void clear_instruction(int num);
 extern void clear_instruction_safe(int num);
 
+extern void clear_fr_instr(int num);
+
+extern void clear_fr_instr(int num);
+extern void clear_fr_instr_safe(int num);
+
 extern void change_number_of_instructions(void);
 extern void change_number_of_instructions_safe(void);
 
@@ -157,6 +171,9 @@ extern void change_fr_num_instrs_safe(int num);
 
 extern void delete_instruction(int num);
 extern void delete_instruction_safe(int num);
+
+extern void delete_fr_instr(int num);
+extern void delete_fr_instr_safe(int num);
 
 // Analog Output Manipulation
 extern void change_num_aouts(void);
@@ -221,6 +238,7 @@ extern int get_update_error(int err_code, char *err_message);
 extern void create_pprogram(PPROGRAM *p);
 extern void free_pprog(PPROGRAM *p);
 
+extern PINSTR null_pinstr(void);
 extern int pinstr_cmp(PINSTR *pi1, PINSTR *pi2);
 extern PINSTR *copy_pinstr(PINSTR *instr_in, PINSTR *instr_out);
 

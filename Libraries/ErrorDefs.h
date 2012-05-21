@@ -12,6 +12,7 @@
 #define MCPP_ERR 3
 #define MCEX_ERR 4
 #define MCSS_ERR 5
+#define MCUI_ERR 6
 
 // FSave Errors
 #define MCF_ERR_TITLE "File Saving Error"
@@ -37,6 +38,11 @@
 #define MCSS_ERR_TITLE "Session Saving Error"
 #define MCSS_ERR_MAX -11751
 #define MCSS_ERR_MIN -12000
+
+// User interface
+#define MCUI_ERR_TITLE "UI Error"
+#define MCUI_ERR_MAX -12001
+#define MCUI_ERR_MIN -12250
 
 /***********************************************************
 *  														   *
@@ -228,7 +234,7 @@
 
 /***********************************************************
 *  														   *
-*           Sessopm Savomg Error Values					   *
+*           Session Saving Error Values					   *
 * 														   *
 ***********************************************************/
 // Return values
@@ -238,6 +244,17 @@
 // Strings
 #define MCSS_ERR_NOOUT_STR "No output pointer was specified."
 #define MCSS_ERR_NOATTNAME_STR "No attribute name passed to function."
+
+/***********************************************************
+*  														   *
+*           Session Saving Error Values					   *
+* 														   *
+***********************************************************/
+// Return values
+#define MCUI_ERR_INVALID_INST -12001
+
+// Strings
+#define MCUI_ERR_INVALID_INST_STR "The instruction passed to the function is invalid."
 
 #endif
 

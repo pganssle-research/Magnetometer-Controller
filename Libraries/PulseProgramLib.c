@@ -2783,14 +2783,58 @@ int get_flags_range(int panel, int start, int end) {
 	return flags;
 }
 
-/***************** Set Instruction Parameters ******************/ 
+/***************** Set Instruction Parameters ******************/
+PINSTR null_pinstr() {
+	PINSTR ins = {
+		.flags = 0,
+		.instr = 0,
+		.instr_data = 0,
+		.trigger_scan = 0,
+		.instr_time = MCPP_DEFAULT_DELAY,
+		.time_units = MCPP_DEFAULT_UNITS
+	};
+	
+	return ins;
+}
+
+int set_fr_instr(int num, PINSTR instr) {
+	// Pass this the program controls, instr number and it sets the controls appropriately.
+	int ni;
+	GetCtrlVal(pc.FRPan, pc.fninst, &ni);
+	if(num > ni) {
+		return MCUI_ERR_INVALID_INST;	
+	}
+	
+	int panel = pc.finst[num];
+	set_fr_instr_panel(panel, instr);
+	
+	return 0;
+}
+
+void set_fr_instr_panel(int panel, PINSTR instr) {
+	int i;
+	
+	set_fr_flags_panel(panel, instr.flags);
+	
+	SetCtrlIndex(panel, pc.fr_inst, instr.instr);
+	SetCtrlVal(panel, pc.fr_delay, instr.instr_time);
+	
+	if(takes_instr_data(instr.instr)) {						 
+		SetCtrlAttribute(panel, pc.fr_inst_d, ATTR_DIMMED, 0);
+		SetCtrlVal(panel, pc.fr_inst_d, instr.instr_data);
+	} else {
+		SetCtrlAttribute(panel, pc.fr_inst_d, ATTR_DIMMED, 0);
+		SetCtrlVal(panel, pc.fr_inst_d, 0);
+	}
+}
+
 int set_instr(int num, PINSTR *instr) {
 	// Pass this the program controls, instruction number and the instr and it sets the controls appropriately
 	
 	int ni;
 	GetCtrlVal(pc.ninst[1], pc.ninst[0], &ni);			// For error checking
 	if(num >= ni)											// Can't set an instruction if it's not there
-		return -1;											// Error -> Instruction invalid
+		return MCUI_ERR_INVALID_INST;						// Error -> Instruction invalid
 	
 	int panel = pc.inst[num];					
 	set_instr_panel(panel, instr);
@@ -2801,17 +2845,12 @@ int set_instr(int num, PINSTR *instr) {
 void set_instr_panel(int panel, PINSTR *instr) {
 	int i;
 	
-	PINSTR ins = {											// The default instruction. Must not be 
-		.flags = 0,											// declared in an if loop and arrays can
-		.instr = 0,											// only be set this way while declaring.
-		.instr_data = 0,
-		.trigger_scan = 0,
-		.instr_time = 100000000.0,
-		.time_units = 2
-	};
+	PINSTR ins;
 	
-	if(instr == NULL)									// If you pass a NULL pointer it sets it 
+	if(instr == NULL) {
+		ins = null_pinstr();
 		instr = &ins;
+	}
 	
 	// Set the flags
 	set_flags_panel(panel, instr->flags);
@@ -2962,6 +3001,26 @@ void change_instruction_panel(int panel) {
 	SetCtrlAttribute(panel, pc.instr_d, ATTR_DIMMED, !takes_instr_data(ind));
 }
 
+void change_fr_instr(int num) {
+	int panel = pc.finst[num];
+	
+}
+
+void change_fr_instr_pan(int panel) {
+	int ind;
+	GetCtrlVal(panel, pc.fr_inst, &ind);
+	
+	// The up the minimum
+	int min = instr_data_min(ind);
+	SetCtrlAttribute(panel, pc.fr_inst_d, ATTR_MIN_VALUE, min);
+	
+	if(!takes_instr_data(ind)) {
+		SetCtrlVal(panel, pc.fr_inst_d, 0);
+	}
+	
+	SetCtrlAttribute(panel, pc.fr_inst_d, ATTR_DIMMED, !takes_instr_data(ind));
+}
+
 void swap_ttl(int to, int from) {
 	// Swaps two TTLs in the program.
 	
@@ -3057,7 +3116,7 @@ void move_ttl_panel(int panel, int to, int from) {
 	int flags = get_flags_range(panel, to, from);
 	flags = move_bit_skip(flags, uipc.broken_ttls, to, from);
 	
-	set_flags_range(panel, flags, to, from);
+	set_flags_range(panel, pc.TTLs, flags, to, from);
 	return; 
 	
 	int toh = to>from; 	// High if to is the higher one.
@@ -3187,19 +3246,22 @@ void set_ttl_trigger(int panel, int ttl, int on) {
 	}
 }
 
-void set_flags(int num, int flags) {
-	// Convenience function.
+void set_fr_flags(int num, int flags) {
 	int panel = pc.inst[num];
-	set_flags_panel(panel, flags);
+	set_fr_flags_panel(panel, flags);
+}
+
+void set_fr_flags_panel(int panel, int flags) {
+	set_flags_range(panel, pc.fr_TTLs, flags, 0, 23);	
 }
 
 void set_flags_panel(int panel, int flags) {
 	// Sets the flags of panel to be the appropriate thing.
 	
-	set_flags_range(panel, flags, 0, 23);
+	set_flags_range(panel, pc.TTLs, flags, 0, 23);
 }
 
-void set_flags_range(int panel, int flags, int start, int end) {
+void set_flags_range(int panel, int TTLs[], int flags, int start, int end) {
 	// Sets all the flags in a given range.
 	if(start > end) {
 		int buff = end;
@@ -3208,7 +3270,7 @@ void set_flags_range(int panel, int flags, int start, int end) {
 	}
 	
 	for(int i = start; i <= end; i++)
-		SetCtrlVal(panel, pc.TTLs[i], (flags&(1<<i))?1:0);
+		SetCtrlVal(panel, TTLs[i], (flags&(1<<i))?1:0);
 		
 }
 
@@ -5512,6 +5574,10 @@ void clear_instruction_safe(int num) {
 	CmtReleaseLock(lock_uipc);
 }
 
+void clear_fr_instr(int num) {
+	 set_fr_instr(num, null_pinstr()); // Really quite simple now.
+}
+
 void change_number_of_instructions() {
 	// Gets "num" from pc.ninst and changes the number of instructions. If num < uipc.ni, t
 	// the instructions at the end are hidden. if uipc.max_ni > num > uipc > uipc.ni, the 
@@ -5678,6 +5744,25 @@ void delete_instruction(int num) {
 void delete_instruction_safe(int num) {
 	CmtGetLock(lock_uipc);
 	delete_instruction(num);
+	CmtReleaseLock(lock_uipc);
+}
+
+void delete_fr_instr(int num) {
+	clear_fr_instr(num);
+	
+	if(uipc.fr_ni == 1) {
+		return ;
+	}
+		
+	move_fr_inst(uipc.fr_max_ni-1, num);
+	
+	SetCtrlVal(pc.FRPan, pc.fninst, uipc.fr_ni-1);
+	change_fr_num_instrs(uipc.fr_ni-1);
+}
+
+void delete_fr_instr_safe(int num) {
+	CmtGetLock(lock_uipc);
+	delete_fr_instr(num);
 	CmtReleaseLock(lock_uipc);
 }
 

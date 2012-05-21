@@ -168,6 +168,11 @@ struct {
 	
 	int timeest[2];		// Estimated time control
 	
+	// Controls on the first run tab page.
+	int fninst;			// Number of first run instructions
+	int fnrep;			// Number of first run repetitions.
+	int fron;			// Whether first run is on or off.
+	
 	// Controls on the first run inst panels
 	int fr_inum;		// Instruction number
 	int fr_TTLs[24];	// TTLs;
