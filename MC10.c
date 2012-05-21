@@ -646,33 +646,38 @@ int CVICALLBACK MoveInstButton (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			int diff;
+			if(control == pc.uparrow) {
+				diff = -1;	
+			} else {
+				diff = 1;	
+			}
+			
+			int to, from, top1, top2;
+			
+			GetCtrlVal(panel, pc.ins_num, &from);
+			to = from+diff;
+			
+			int ok = 1;
+			CmtGetLock(lock_uipc);
+			if(to < 0 || to > uipc.ni) {
+				ok = 0;
+			}
+			CmtReleaseLock(lock_uipc);
+			
+			if(!ok) { break; }
+			
 			// Where is the cursor now
 			POINT pos;
 			GetCursorPos(&pos);
 			
-			// What instruction called this
-			int num;
-			GetCtrlVal(panel, pc.ins_num, &num);
+			move_instruction_safe(to, from);
 			
-			// How far apart are the instructions - they're evenly spaced, so pick the first two.
-			CmtGetLock(lock_uipc);
-			if (uipc.ni > 1) {
-				int top1, top2;	 // We need to know how much we moved to know how much to move the cursor
-				GetCtrlAttribute(panel, control, ATTR_TOP, &top1);
-				
-				// Now we just decide if it was called by the up button or the down button and move the instruction.
-				if(control == pc.uparrow && num >= 1)
-					move_instruction(num-1, num);
-				else if(control == pc.downarrow && num < (uipc.ni-1)) 
-					move_instruction(num+1, num);
-				else
-					break;
-				
-				// Finally we find out how much it moved and move the cursor.
-				GetCtrlAttribute(panel, control, ATTR_TOP, &top2);
-				SetCursorPos(pos.x, pos.y+(top2-top1));
-			}
-			CmtReleaseLock(lock_uipc);
+			GetPanelAttribute(pc.inst[to], ATTR_TOP, &top1);
+			GetPanelAttribute(pc.inst[from], ATTR_TOP, &top2);
+			
+			SetCursorPos(pos.x, pos.y+top1-top2);
+			
 			break;
 	}
 	return 0;
