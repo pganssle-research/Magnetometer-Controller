@@ -53,6 +53,11 @@ typedef struct PPROGRAM // This is a structure for containing information about 
 	int frnReps;			// Number of first-run repetitions
 	int fr;					// Whether or not to use the first run.
 	
+	PINSTR *lrins;			// List of the last run instructions
+	int lrnInstrs;			// Number of last-run instructions
+	int lrnReps;			// Number of last-run repetitions.
+	int lr;					// Whether or not to use the last run.
+	
 	// Variation (indirect dimensions and phase cycling)
 	int nDims;		 		// How many dimensions (1+#indirect dimensions)
 	int nCycles; 			// Number of cycles

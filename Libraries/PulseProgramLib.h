@@ -88,7 +88,7 @@ extern void change_fr_instr_delay(int panel);
 extern void change_instruction(int num);
 extern void change_instruction_panel(int panel);
 
-extern void change_fr_instr(int num);
+extern void change_fr_instr(int num, int lr);
 extern void change_fr_instr_pan(int panel);
 
 extern void change_trigger_ttl(void);

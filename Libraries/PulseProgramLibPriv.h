@@ -26,7 +26,7 @@
 // Main Groups
 #define MCPP_PROGHEADER "[PulseProgram]"
 
-#define MCPP_GROUPSNUM 6
+#define MCPP_GROUPSNUM 7
 
 // Header names
 #define MCPP_PROPHEADER "[Properties]"
@@ -45,6 +45,9 @@
 #define MCPP_FRNINSTRS "frnInstrs"
 #define MCPP_FRNREPS "frnReps"
 #define MCPP_FRON "fron"
+#define MCPP_LRNINSTRS "lrnInstrs"
+#define MCPP_LRNREPS "lrnReps"
+#define MCPP_LRON "lron"
 #define MCPP_NDIMS "nDims"
 #define MCPP_NCYCS "nCycles"
 #define MCPP_NVARIED "nVaried"
@@ -54,7 +57,7 @@
 #define MCPP_NAOUT "nAout"
 #define MCPP_NAOVAR "n_ao_var"
 
-#define MCPP_PROPSNUM 23
+#define MCPP_PROPSNUM 26
 #define MCPP_PROPORD 0
 
 // Instructions
@@ -109,6 +112,9 @@
 #define MCPP_FRINSTHEADER "[FRInstructions]"
 #define MCPP_FRINSTORD 5
 
+// Last run instructions
+#define MCPP_LRINSTHEADER "[LRInstructions]"
+#define MCPP_LRINSTORD 6
 
 // Default stuff.
 #define MCPP_DEFAULT_DELAY 100000000 // 100ms
@@ -133,7 +139,7 @@ extern int ui_cleanup_safe(int verbose);
 extern int set_instr(int num, PINSTR *instr);
 extern void set_instr_panel(int panel, PINSTR *instr);
 
-extern int set_fr_instr(int num, PINSTR instr);
+extern int set_fr_instr(int num, PINSTR instr, int lr);
 extern void set_fr_instr_panel(int panel, PINSTR instr);
 
 extern void change_units(int panel);

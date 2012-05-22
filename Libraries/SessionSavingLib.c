@@ -119,6 +119,7 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	}
 	
 	SetCtrlVal(pc.LRCPan, FRCPanel_Message, "Last Run");
+	SetCtrlAttribute(pc.LRCPan, FRCPanel_UseFirstRun, ATTR_LABEL_TEXT, "Use Last Run");
 	
 	DisplayPanel(pc.LRCPan);
 	
@@ -274,6 +275,9 @@ void initialize_program() {
 	uipc.fr_ni = 1;
 	uipc.fr_max_ni = 1;
 	
+	uipc.lr_ni = 1;
+	uipc.lr_max_ni = 1;
+	
 	uipc.ni = 1;
 	uipc.max_ni = 1;
 	uipc.broken_ttls = 0;
@@ -348,6 +352,9 @@ void initialize_program() {
 	pc.ainst[0] = LoadPanel(pc.AOutCPan, MC_UI, AOInstPan);
 	pc.finst[0] = LoadPanel(pc.FRCPan, MC_UI, BasicInstr);
 	pc.linst[0] = LoadPanel(pc.LRCPan, MC_UI, BasicInstr);
+	
+	change_fr_instr_pan(pc.finst[0]);
+	change_fr_instr_pan(pc.linst[0]);
 	
 	SetPanelPos(pc.inst[0], 25, 7);	// Move the first instruction to where it belongs
 	DisplayPanel(pc.inst[0]);			// Display the first instruction

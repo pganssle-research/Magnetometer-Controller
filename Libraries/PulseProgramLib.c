@@ -183,6 +183,7 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	groups[MCPP_NDORD] = MCPP_NDHEADER;
 	groups[MCPP_SKIPORD] = MCPP_SKIPHEADER;
 	groups[MCPP_FRINSTORD] = MCPP_FRINSTHEADER;
+	groups[MCPP_LRINSTORD] = MCPP_LRINSTHEADER;
 	
 	// Read out the properties.
 	nsize = fs_size;
@@ -246,14 +247,16 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	
 	char *props[MCPP_PROPSNUM] = {MCPP_VERSION, MCPP_NP, MCPP_SR, MCPP_NT, MCPP_TRIGTTL, MCPP_TMODE, 
 								 MCPP_SCAN, MCPP_USE_PB, MCPP_VARIED, MCPP_NINST, MCPP_TOTALTIME, MCPP_NUINSTRS, 
-								 MCPP_FRNINSTRS, MCPP_FRNREPS, MCPP_FRON, MCPP_NDIMS, MCPP_NCYCS, MCPP_NVARIED, 
-								 MCPP_MAXNSTEPS, MCPP_REALNSTEPS, MCPP_SKIP, MCPP_NAOUT, MCPP_NAOVAR};
+								 MCPP_FRNINSTRS, MCPP_FRNREPS, MCPP_FRON, MCPP_LRNINSTRS, MCPP_LRNREPS, MCPP_LRON,
+								 MCPP_NDIMS, MCPP_NCYCS, MCPP_NVARIED, MCPP_MAXNSTEPS, MCPP_REALNSTEPS, MCPP_SKIP, 
+								 MCPP_NAOUT, MCPP_NAOVAR};
 	
 	void *pfields[MCPP_PROPSNUM] = {NULL, &(p->np), &(p->sr), &(p->nt), &(p->trigger_ttl), &(p->tmode),
 									&(p->scan), &(p->use_pb), &(p->varied), &(p->n_inst), &(p->total_time),
-									&(p->nUniqueInstrs), &(p->frnInstrs), &(p->frnReps), &(p->fr), &(p->nDims), 
-									&(p->nCycles), &(p->nVaried), &(p->max_n_steps), &(p->real_n_steps), 
-									&(p->skip), &(p->nAout), &(p->n_ao_var)};
+									&(p->nUniqueInstrs), &(p->frnInstrs), &(p->frnReps), &(p->fr), 
+									&(p->lrnInstrs), &(p->lrnReps), &(p->lr), &(p->nDims), &(p->nCycles), 
+									&(p->nVaried), &(p->max_n_steps), &(p->real_n_steps), &(p->skip), 
+									&(p->nAout), &(p->n_ao_var)};
 	
 	plocs = strings_in_array(names, props, bfs_size, MCPP_PROPSNUM);
 	
@@ -263,9 +266,9 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	}
 	
 	// For legacy programs
-	p->fr = 0;
-	p->frnInstrs = 0;
-	p->frnReps = 1;
+	p->fr = p->lr = 0;
+	p->frnInstrs = p->lrnInstrs =0;
+	p->frnReps = p->lrnReps = 1;
 	
 	// These are all scalars, we'll read the values directly into the PPROGRAM;
 	// TODO: Add error checking for required items.
@@ -318,20 +321,36 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	free(ilist);
 	ilist = NULL;
 	
-	// Get the first read instructions array
-	
+	// Get the first run instructions array
 	if(p->frnInstrs) {
 		pl = glocs[MCPP_FRINSTORD];
 	
-		ilist = read_pinstr_from_char(fs[pl].val.c, p->frnInstrs, &rv);
-		if(rv != 0) { goto error; }
+		if(pl >= 0) {
+			ilist = read_pinstr_from_char(fs[pl].val.c, p->frnInstrs, &rv);
+			if(rv != 0) { goto error; }
 	
-		memcpy(p->frins, ilist, sizeof(PINSTR)*p->frnInstrs);
+			memcpy(p->frins, ilist, sizeof(PINSTR)*p->frnInstrs);
 		
-		free(ilist);
-		ilist = NULL;
+			free(ilist);
+			ilist = NULL;
+		}
 	}
 	
+	// Get the last run instructions array
+	if(p->lrnInstrs) {
+		pl = glocs[MCPP_LRINSTORD];
+		
+		if(pl >= 0) {
+			ilist = read_pinstr_from_char(fs[pl].val.c, p->lrnInstrs, &rv);
+			if(rv != 0) { goto error; }
+	
+			memcpy(p->lrins, ilist, sizeof(PINSTR)*p->lrnInstrs);
+		
+			free(ilist);
+			ilist = NULL;		
+		}
+	}
+
 	// Read out the things related to ND (if necessary)
 	// Must be done before the AOut and Skip stuff
 	pl = glocs[MCPP_NDORD];
@@ -908,6 +927,16 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 	
 	instrs = free_fsave(&instrs);
 	
+	// Now the last-run instructions
+	instrs = generate_instr_array(p->lrins, p->lrnInstrs, MCPP_LRINSTHEADER);
+	if(instrs.type == FS_NULL) {
+		rv = MCPP_ERR_NOFRINSTRS;
+		goto error;
+	}
+	
+	if(rv = fwrite_fs(f, &instrs)) { goto error; }
+	instrs = free_fsave(&instrs);
+	
 	// Get the final position
 	pos_done = ftell(f);
 
@@ -1004,10 +1033,22 @@ fsave generate_header(PPROGRAM *p, int *ev) {
 	fs[++cf] = make_fs(MCPP_FRNREPS);
 	if(rv = put_fs(&fs[cf], &(p->frnReps), FS_INT, 1)) { goto error; }
 	
-	// First run on or of
+	// First run on or off
 	fs[++cf] = make_fs(MCPP_FRON);
 	if(rv = put_fs(&fs[cf], &(p->fr), FS_INT, 1)) { goto error; }
+
+	// Last run number of instructions
+	fs[++cf] = make_fs(MCPP_LRNINSTRS);
+	if(rv = put_fs(&fs[cf], &(p->lrnInstrs), FS_INT, 1)) { goto error; }
 	
+	// Last run number of repetitions
+	fs[++cf] = make_fs(MCPP_LRNREPS);
+	if(rv = put_fs(&fs[cf], &(p->lrnReps), FS_INT, 1)) { goto error; }
+	
+	// Last run on or off
+	fs[++cf] = make_fs(MCPP_LRON);
+	if(rv = put_fs(&fs[cf], &(p->lr), FS_INT, 1)) { goto error; }
+
 	// Total time (Double)
 	fs[++cf] = make_fs(MCPP_TOTALTIME);
 	if(rv = put_fs(&fs[cf], &(p->total_time), FS_DOUBLE, 1)) { goto error; }
@@ -1714,9 +1755,13 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	p->total_time = uipc.total_time;
 	
 	
-	GetCtrlVal(pc.FRPan, pc.fron, &p->fr);
-	GetCtrlVal(pc.FRPan, pc.fninst, &p->frnInstrs);
-	GetCtrlVal(pc.FRPan, pc.fnrep, &p->frnReps);
+	GetCtrlVal(pc.FRCPan, pc.fron, &p->fr);
+	GetCtrlVal(pc.FRCPan, pc.fninst, &p->frnInstrs);
+	GetCtrlVal(pc.FRCPan, pc.fnrep, &p->frnReps);
+	
+	GetCtrlVal(pc.LRCPan, pc.fron, &p->lr);
+	GetCtrlVal(pc.LRCPan, pc.fninst, &p->lrnInstrs);
+	GetCtrlVal(pc.LRCPan, pc.fnrep, &p->lrnReps);
 	
 	// Now allocate the arrays.
 	create_pprogram(p);
@@ -1763,10 +1808,12 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 		get_instr(p->instrs[i], i);
 	
 	// Check first-run
-	if(p->frnInstrs > 0) {
-		for(i = 0; i < p->frnInstrs; i++) {
-			p->frins[i] = get_fr_instr(i);				
-		}
+	for(i = 0; i < p->frnInstrs; i++) {
+		p->frins[i] = get_fr_instr_panel(pc.finst[i]);				
+	}
+	
+	for(i = 0; i < p->lrnInstrs; i++) {
+		p->lrins[i] = get_fr_instr_panel(pc.linst[i]);	
 	}
 	
 	if(p->nVaried) {
@@ -2275,22 +2322,39 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 		}
 	}
 
-	
+	// Set the first run stuff
 	if(p->frnInstrs && p->frins != NULL) {
 		change_fr_num_instrs(p->frnInstrs, 0);
-		SetCtrlVal(pc.FRPan, pc.fninst, p->frnInstrs);
+		SetCtrlVal(pc.FRCPan, pc.fninst, p->frnInstrs);
 		
 		for(i = 0; i < p->frnInstrs; i++) {
-			set_fr_instr(i, p->frins[i]);	
+			set_fr_instr_panel(pc.finst[i], p->frins[i]);	
 		}
 	}
 	
 	if(p->frnReps) {
-		SetCtrlVal(pc.FRPan, pc.fnrep, p->frnReps);	
+		SetCtrlVal(pc.FRCPan, pc.fnrep, p->frnReps);	
+	}
+
+	SetCtrlVal(pc.FRCPan, pc.fron, p->fr);
+
+	// Set the last run stuff
+	if(p->lrnInstrs && p->lrins != NULL) {
+		change_fr_num_instrs(p->lrnInstrs, 1);
+		SetCtrlVal(pc.LRCPan, pc.fninst, p->lrnInstrs);
+		
+		for(i = 0; i < p->lrnInstrs; i++) {
+			set_fr_instr_panel(pc.linst[i], p->lrins[i]);	
+		}
 	}
 	
-	SetCtrlVal(pc.FRPan, pc.fron, p->fr);
-
+	if(p->lrnReps) {
+		SetCtrlVal(pc.LRCPan, pc.fnrep, p->lrnReps);
+	}
+	
+	SetCtrlVal(pc.LRCPan, pc.fron, p->lr);
+	
+	
 	if(cstep != NULL)
 		free(cstep);
 }
@@ -2918,16 +2982,22 @@ PINSTR null_pinstr() {
 	return ins;
 }
 
-int set_fr_instr(int num, PINSTR instr) {
+int set_fr_instr(int num, PINSTR instr, int lr) {
 	// Pass this the program controls, instr number and it sets the controls appropriately.
-	int ni;
-	GetCtrlVal(pc.FRPan, pc.fninst, &ni);
+	int ni, panel;
+	
+	if(lr) {
+		GetCtrlVal(pc.LRCPan, pc.fninst, &ni);
+		panel = pc.linst[num];
+	} else {
+		GetCtrlVal(pc.FRCPan, pc.fninst, &ni);
+		panel = pc.finst[num];
+	}
 	
 	if(num > ni) {
 		return MCUI_ERR_INVALID_INST;	
 	}
-	
-	int panel = pc.finst[num];
+
 	set_fr_instr_panel(panel, instr);
 	
 	return 0;
@@ -3135,9 +3205,8 @@ void change_instruction_panel(int panel) {
 	SetCtrlAttribute(panel, pc.instr_d, ATTR_DIMMED, !takes_instr_data(ind));
 }
 
-void change_fr_instr(int num) {
-	int panel = pc.finst[num];
-	
+void change_fr_instr(int num, int lr) {
+	change_fr_instr_pan(lr?pc.linst[num]:pc.finst[num]);
 }
 
 void change_fr_instr_pan(int panel) {
@@ -5624,8 +5693,8 @@ int move_fr_inst(int to, int from, int lr) {
 	
 	for(i = s; i < e; i++) {
 		j = n_array[i];
-		SetPanelAttribute(inst[i], ATTR_TOP, MC_FR_INST_OFF+(pan_height+MC_FR_INST_SEP)*j);
-		SetCtrlVal(inst[i], pc.fr_inum, j);
+		SetPanelAttribute(inst_buff[j], ATTR_TOP, MC_FR_INST_OFF+(pan_height+MC_FR_INST_SEP)*i);
+		SetCtrlVal(inst_buff[j], pc.fr_inum, i);
 		
 		inst[i] = inst_buff[j];
 	}
@@ -5847,7 +5916,7 @@ void change_fr_num_instrs(int num, int lr) {
 		return;
 	}
 	
-	if(num < max_ni) {
+	if(num < ni) {
 		for(i = num; i < max_ni; i++) {
 			HidePanel(inst[i]);
 		}
@@ -5941,7 +6010,7 @@ void delete_fr_instr(int num, int lr) {
 		
 	move_fr_inst(max_ni-1, num, lr);
 	
-	SetCtrlVal(pc.FRPan, panel, ni-1);
+	SetCtrlVal(panel, pc.fninst, ni-1);
 	change_fr_num_instrs(ni-1, lr);
 }
 
@@ -6900,6 +6969,14 @@ void create_pprogram(PPROGRAM *p) { // Initially allocates the PPROGRAM space
 	
 	if(p->frnInstrs > 0) {
 		p->frins = calloc(p->frnInstrs, sizeof(PINSTR));	
+	} else {
+		p->frins = NULL;	
+	}
+	
+	if(p->lrnInstrs > 0) {
+		p->lrins = calloc(p->lrnInstrs, sizeof(PINSTR));
+	} else {
+		p->lrins = NULL;	
 	}
 	
 	if(p->nFuncs)

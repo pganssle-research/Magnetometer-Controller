@@ -2861,31 +2861,8 @@ int CVICALLBACK InstNumFRChange (int panel, int control, int event,
 	return 0;
 }
 
-int CVICALLBACK InstNumLRChange (int panel, int control, int event,
-		void *callbackData, int eventData1, int eventData2)
-{
-	switch (event)
-	{
-		case EVENT_COMMIT:
-
-			break;
-	}
-	return 0;
-}
 
 int CVICALLBACK ChangeFRNReps (int panel, int control, int event,
-		void *callbackData, int eventData1, int eventData2)
-{
-	switch (event)
-	{
-		case EVENT_COMMIT:
-
-			break;
-	}
-	return 0;
-}
-
-int CVICALLBACK ChangeLRNumReps (int panel, int control, int event,
 		void *callbackData, int eventData1, int eventData2)
 {
 	switch (event)
