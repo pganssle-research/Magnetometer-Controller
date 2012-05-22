@@ -157,6 +157,10 @@
 #define  EParams_ChannelDesc              24
 
 #define  FRCPanel                         8
+#define  FRCPanel_NReps                   2       /* callback function: ChangeFRNReps */
+#define  FRCPanel_NumInst                 3       /* callback function: InstNumFRChange */
+#define  FRCPanel_UseFirstRun             4
+#define  FRCPanel_Message                 5
 
 #define  HiddenVals                       9
 #define  HiddenVals_PolySubtractOnOffRing 2
@@ -308,15 +312,7 @@
 
      /* tab page panel controls */
 #define  FirstRun_SaveProgram             2       /* callback function: SaveProgram */
-#define  FirstRun_UseFirstRun_2           3
-#define  FirstRun_UseFirstRun             4
-#define  FirstRun_LRNReps                 5       /* callback function: ChangeLRNumReps */
-#define  FirstRun_LRNInst                 6       /* callback function: InstNumLRChange */
-#define  FirstRun_LoadProgram             7       /* callback function: LoadProgram */
-#define  FirstRun_NReps                   8       /* callback function: ChangeFRNReps */
-#define  FirstRun_NumInst                 9       /* callback function: InstNumFRChange */
-#define  FirstRun_FirstRunMsg             10
-#define  FirstRun_LastRunMsg              11
+#define  FirstRun_LoadProgram             3       /* callback function: LoadProgram */
 
      /* tab page panel controls */
 #define  PPConfig_SaveProgram             2       /* callback function: SaveProgram */
@@ -500,7 +496,6 @@ int  CVICALLBACK ChangeInitOrFinal(int panel, int control, int event, void *call
 int  CVICALLBACK ChangeInstDelay(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeInstrVary(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeLoadInfoMode(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
-int  CVICALLBACK ChangeLRNumReps(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK ChangeNDPointMenu(int menubar, int menuItem, void *callbackData, int panel);
 int  CVICALLBACK ChangeNDTimeUnits(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK ChangeNP_AT_SR(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
@@ -547,7 +542,6 @@ int  CVICALLBACK FuncEditSave(int panel, int control, int event, void *callbackD
 int  CVICALLBACK FuncEditSaveAndClose(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstNumChange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstNumFRChange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
-int  CVICALLBACK InstNumLRChange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstrCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstrChangeCycleNum(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstrDataCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);

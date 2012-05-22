@@ -2277,7 +2277,7 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 
 	
 	if(p->frnInstrs && p->frins != NULL) {
-		change_fr_num_instrs(p->frnInstrs);
+		change_fr_num_instrs(p->frnInstrs, 0);
 		SetCtrlVal(pc.FRPan, pc.fninst, p->frnInstrs);
 		
 		for(i = 0; i < p->frnInstrs; i++) {
@@ -2412,11 +2412,14 @@ void clear_program() {
 	SetCtrlVal(pc.anum[1], pc.anum[0], 0);
 	change_num_aouts();
 	
-	SetCtrlVal(pc.FRPan, pc.fninst, 1);
-	change_fr_num_instrs(1);
-	
-	SetCtrlVal(pc.FRPan, pc.fnrep, 1);
-	SetCtrlVal(pc.FRPan, pc.fron, 0);
+	int pans[2] = {pc.FRCPan, pc.LRCPan};
+	for(int i = 0; i < 2; i++) {
+		SetCtrlVal(pans[i], pc.fninst, 1);
+		SetCtrlVal(pans[i], pc.fnrep, 1);
+		SetCtrlVal(pans[i], pc.fron, 0);
+
+		change_fr_num_instrs(1, i);
+	}
 	
 	// Update the ND information
 	SetCtrlVal(pc.numcycles[1], pc.numcycles[0], 0);
@@ -5801,7 +5804,7 @@ void change_number_of_instructions_safe() {
 	CmtReleaseLock(lock_uipc);
 }
 
-void change_fr_num_instrs(int num) {
+void change_fr_num_instrs(int num, int lr) {
 	// Change the number of instructions in the "first run" instructions.
 	int i;
 	
@@ -5809,55 +5812,79 @@ void change_fr_num_instrs(int num) {
 		num = 1;	
 	}
 	
-	if(num == uipc.fr_ni) {
+	int ni, max_ni, parent;
+	int *pni, *pmni, *inst;
+	if(lr) {					
+		pni = &(uipc.lr_ni);
+		pmni = &(uipc.lr_max_ni);
+		inst = pc.linst;
+		
+		parent = pc.LRCPan;
+	} else {
+		pni = &(uipc.fr_ni);
+		pmni = &(uipc.fr_max_ni);
+		inst = pc.finst;
+		
+		parent = pc.FRCPan;
+	}
+	
+	ni = *pni;
+	max_ni = *pmni;
+	
+	if(num == ni) {
 		return;
 	}
 	
-	if(num < uipc.fr_ni) {
-		for(i = num; i < uipc.fr_max_ni; i++) {
-			HidePanel(pc.finst[i]);
+	if(num < max_ni) {
+		for(i = num; i < max_ni; i++) {
+			HidePanel(inst[i]);
 		}
 		
-		uipc.fr_ni = num;
+		*pni = num;
 		return;
 	}
 
-	if(num > uipc.fr_max_ni) {
+	if(num > max_ni) {
 		int left, height;
-		GetPanelAttribute(pc.finst[0], ATTR_HEIGHT, &height);
-		GetPanelAttribute(pc.finst[0], ATTR_LEFT, &left);
+		GetPanelAttribute(inst[0], ATTR_HEIGHT, &height);
+		GetPanelAttribute(inst[0], ATTR_LEFT, &left);
 		
-		pc.finst = realloc(pc.finst, sizeof(int)*num);
-		double del;
-		
-		for(i = uipc.fr_max_ni; i < num; i++) {
-			pc.finst[i] = LoadPanel(pc.FRCPan, MC_UI, pc.fr_inst);
-			
-			SetPanelPos(pc.finst[i], MC_FR_INST_OFF+(height+MC_FR_INST_SEP)*i, left);
-			SetCtrlAttribute(pc.finst[i], ATTR_DISABLE_PANEL_THEME, 1);
-			
-			GetCtrlVal(pc.inst[i], pc.fr_delay, &del);
-			SetCtrlAttribute(pc.finst[i], pc.fr_delay, ATTR_PRECISION, get_precision(del, MCUI_DEL_PREC));
-			
-			SetCtrlVal(pc.finst[i], pc.fr_inum, i);
-			
-			DisplayPanel(pc.finst[i]);
+		if(lr) {
+			inst = pc.linst = realloc(pc.linst, sizeof(int)*num);
+		} else {
+			inst = pc.finst = realloc(pc.finst, sizeof(int)*num);
 		}
 		
-		uipc.fr_max_ni = num;
+		double del;
+		
+		for(i = max_ni; i < num; i++) {
+			inst[i] = LoadPanel(parent, MC_UI, pc.fr_inst);
+			
+			SetPanelPos(inst[i], MC_FR_INST_OFF+(height+MC_FR_INST_SEP)*i, left);
+			SetCtrlAttribute(inst[i], ATTR_DISABLE_PANEL_THEME, 1);
+			
+			GetCtrlVal(inst[i], pc.fr_delay, &del);
+			SetCtrlAttribute(inst[i], pc.fr_delay, ATTR_PRECISION, get_precision(del, MCUI_DEL_PREC));
+			
+			SetCtrlVal(inst[i], pc.fr_inum, i);
+			
+			DisplayPanel(inst[i]);
+		}
+		
+		*pmni = num;
 		setup_broken_ttls();
 	}
 	
-	for(i = uipc.fr_ni; i < num; i++) {
-		DisplayPanel(pc.finst[i]);	
+	for(i = ni; i < num; i++) {
+		DisplayPanel(inst[i]);	
 	}
 	
-	uipc.fr_ni = num;
+	*pni = num;
 }
 
-void change_fr_num_instrs_safe(int num) {
+void change_fr_num_instrs_safe(int num, int lr) {
 	CmtGetLock(lock_uipc);
-	change_fr_num_instrs(num);
+	change_fr_num_instrs(num, lr);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -5891,7 +5918,7 @@ void delete_fr_instr(int num) {
 	move_fr_inst(uipc.fr_max_ni-1, num);
 	
 	SetCtrlVal(pc.FRPan, pc.fninst, uipc.fr_ni-1);
-	change_fr_num_instrs(uipc.fr_ni-1);
+	change_fr_num_instrs(uipc.fr_ni-1, 0);
 }
 
 void delete_fr_instr_safe(int num) {

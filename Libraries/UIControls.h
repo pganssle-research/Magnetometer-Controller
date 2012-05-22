@@ -85,11 +85,13 @@ struct {
 	int AOutCPan;		// Analog output container panel (not in tab)
 	int FRPan;			// First run panel
 	int FRCPan;			// First run container panel
-
+	int LRCPan;			// Last run container panel.
+	
 	int *inst; 			// Instruction Subpanel
 	int *cinst; 		// ND Instruction Subpanel
 	int *ainst;			// Analog output instruction.
 	int *finst;			// First run instructions
+	int *linst;			// Last run instructions
 	
 	// Controls on the inst panels
 	int ins_num;		// Instruction Number
@@ -345,6 +347,10 @@ struct {
 	// First run
 	int fr_ni;					// Number of first-run instructions visible.
 	int fr_max_ni;				// Maximum number of first-run instructions that have been visible.
+	
+	// Last run
+	int lr_ni;
+	int lr_max_ni;
 	
 	// Multidimensional info
 	int nd;						// Number of indirect dimensions

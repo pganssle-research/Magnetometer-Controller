@@ -73,8 +73,8 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	pc.PPConfigCPan = LoadPanel(pc.PPConfigPan, MC_UI, PPConfigP); // ND instr container
 	pc.AOutCPan = LoadPanel(pc.AOutPan, MC_UI, AOConP);
 	pc.FRCPan = LoadPanel(pc.FRPan, MC_UI, FRCPanel);
-	
-	
+	pc.LRCPan = LoadPanel(pc.FRPan, MC_UI, FRCPanel);
+
 	// Create two panels for containing the current location in acquisition space.
 	dc.fcloc = dc.cloc[0] = LoadPanel(dc.fid, MC_UI, CurrentLoc);
 	dc.scloc = dc.cloc[1] = LoadPanel(dc.spec, MC_UI, CurrentLoc);
@@ -102,6 +102,26 @@ int load_ui(char *uifname) { // Function for creating the ppcontrols structure
 	SetPanelPos(pc.FRCPan, 10, 10);
 	SetPanelAttribute(pc.FRCPan, ATTR_TITLEBAR_VISIBLE, 0);
 	DisplayPanel(pc.FRCPan);
+	
+	int top, height, theight;
+	GetPanelAttribute(pc.FRCPan, ATTR_TOP, &top)
+		;
+	GetPanelAttribute(pc.FRCPan, ATTR_HEIGHT, &height);
+	GetPanelAttribute(pc.FRPan, ATTR_HEIGHT, &theight);
+	
+	
+	SetPanelAttribute(pc.LRCPan, ATTR_TITLEBAR_VISIBLE, 0);
+	SetPanelPos(pc.LRCPan, top+height+10, 10);
+	
+	height = theight-height;
+	if(height > 0) {
+		SetPanelAttribute(pc.LRCPan, ATTR_HEIGHT, height-30);
+	}
+	
+	SetCtrlVal(pc.LRCPan, FRCPanel_Message, "Last Run");
+	
+	DisplayPanel(pc.LRCPan);
+	
 	
 	// Now all the constant stuff
 	initialize_uicontrols();
@@ -214,6 +234,10 @@ void setup_broken_ttls() {
 		for(j = 0; j < uipc.fr_max_ni; j++) {
 			SetCtrlAttribute(pc.finst[j], pc.fr_TTLs[i], ATTR_DIMMED, dimmed);
 		}
+		
+		for(j = 0; j < uipc.lr_max_ni; j++) {
+			SetCtrlAttribute(pc.linst[j], pc.fr_TTLs[i], ATTR_DIMMED, dimmed);		
+		}
 	}
 }
 
@@ -317,11 +341,13 @@ void initialize_program() {
 	pc.cinst = malloc(sizeof(int));
 	pc.ainst = malloc(sizeof(int));
 	pc.finst = malloc(sizeof(int));
+	pc.linst = malloc(sizeof(int));
 	
 	pc.inst[0] = LoadPanel(pc.PProgCPan, MC_UI, PulseInstP);
 	pc.cinst[0] = LoadPanel(pc.PPConfigCPan, MC_UI, MDInstr);
 	pc.ainst[0] = LoadPanel(pc.AOutCPan, MC_UI, AOInstPan);
 	pc.finst[0] = LoadPanel(pc.FRCPan, MC_UI, BasicInstr);
+	pc.linst[0] = LoadPanel(pc.LRCPan, MC_UI, BasicInstr);
 	
 	SetPanelPos(pc.inst[0], 25, 7);	// Move the first instruction to where it belongs
 	DisplayPanel(pc.inst[0]);			// Display the first instruction
@@ -337,6 +363,9 @@ void initialize_program() {
 	
 	SetPanelPos(pc.finst[0], MC_FR_INST_OFF, 7);
 	DisplayPanel(pc.finst[0]);
+	
+	SetPanelPos(pc.linst[0], MC_FR_INST_OFF, 7);
+	DisplayPanel(pc.linst[0]);
 	
 	// Set up the initial callback data for np, sr and at callbacks.
 	InstallCtrlCallback(pc.sr[1], pc.sr[0], ChangeNP_AT_SR, (void *)0);
@@ -683,9 +712,9 @@ void initialize_uicontrols() {
 	pc.vary = MDInstr_VaryInstr;
 	
 	// First run panels
-	pc.fninst = FirstRun_NumInst;
-	pc.fnrep = FirstRun_NReps;
-	pc.fron = FirstRun_UseFirstRun;
+	pc.fninst = FRCPanel_NumInst;
+	pc.fnrep = FRCPanel_NReps;
+	pc.fron = FRCPanel_UseFirstRun;
 	
 	pc.fr_inum = BasicInstr_InstNum;
 	pc.fr_instr = BasicInstr_Instructions;
