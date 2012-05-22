@@ -208,6 +208,12 @@ int run_experiment(PPROGRAM *p) {
 	GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode);
 	if(cont_mode && p->varied) {  SetCtrlVal(pc.rc[1], pc.rc[0], 0); }
 	
+	// We're going to start with loading the "first run" -> Add in the "reps" later.
+	if(p->fr) {
+		if(program_pulses_safe(p->frins, p->frnInstrs, 1) < 0) { goto error; };
+		if(pb_start_safe(1) < 0) { goto error; }            	
+	}
+	
 	// Main loop to keep track of where we're at in the experiment, etc.
 	while(!GetQuitIdle() && !done) {
 		if(cont_mode) { GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode); }
@@ -380,6 +386,13 @@ int run_experiment(PPROGRAM *p) {
 			}
 		}
 	
+	}
+	
+	// Now that the main loop is done, we can finish with the last run if necessary.
+	// TODO: Use the repetitions parameter.
+	if(p->lr) {
+		if(program_pulses_safe(p->lrins, p->lrnInstrs, 1) < 0) { goto error; };
+		if(pb_start_safe(1) < 0) { goto error; }            	
 	}
 	
 	error:
