@@ -167,16 +167,14 @@ extern void delete_expanded_instruction_safe(int num, int step);
 extern int move_instruction(int to, int from);
 extern int move_instruction_safe(int to, int from);
 
-extern int move_fr_inst(int to, int from);
-extern int move_fr_inst_safe(int to, int from);
+extern int move_fr_inst(int to, int from, int lr);
+extern int move_fr_inst_safe(int to, int from, int lr);
 
 extern void clear_instruction(int num);
 extern void clear_instruction_safe(int num);
-
-extern void clear_fr_instr(int num);
-
-extern void clear_fr_instr(int num);
-extern void clear_fr_instr_safe(int num);
+									
+extern void clear_fr_instr(int num, int lr);
+extern void clear_fr_instr_safe(int num, int lr);
 
 extern void change_number_of_instructions(void);
 extern void change_number_of_instructions_safe(void);
@@ -187,8 +185,8 @@ extern void change_fr_num_instrs_safe(int num, int lr);
 extern void delete_instruction(int num);
 extern void delete_instruction_safe(int num);
 
-extern void delete_fr_instr(int num);
-extern void delete_fr_instr_safe(int num);
+extern void delete_fr_instr(int num, int lr);
+extern void delete_fr_instr_safe(int num, int lr);
 
 // Analog Output Manipulation
 extern void change_num_aouts(void);

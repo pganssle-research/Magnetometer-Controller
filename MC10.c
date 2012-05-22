@@ -2667,15 +2667,31 @@ int CVICALLBACK MoveFRInst (int panel, int control, int event,
 	{
 		case EVENT_COMMIT:
 
-			int to, from;
+			int lr, parent,ni, *inst;
+			
+			GetPanelAttribute(panel, ATTR_PANEL_PARENT, &parent);
 			
 			CmtGetLock(lock_uipc);
-			from = int_in_array(pc.finst, panel, uipc.fr_ni);
-			CmtReleaseLock(lock_uipc);
+			if(parent == pc.LRCPan) {
+				lr = 1;
+				inst = pc.linst;
+				ni = uipc.lr_ni;
+			} else if(parent == pc.FRCPan) {
+				lr = 0;	
+				inst = pc.finst;
+				ni = uipc.fr_ni;
+			} else {
+				CmtReleaseLock(lock_uipc);
+				break;	
+			}
+			
+			int to, from;
+			from = int_in_array(inst, panel, ni);
 			
 			GetCtrlVal(panel, pc.fr_inum, &to);
 			
-			move_fr_inst_safe(to, from);
+			move_fr_inst(to, from, lr);
+			CmtReleaseLock(lock_uipc);
 			
 			break;
 	}
@@ -2704,19 +2720,38 @@ int CVICALLBACK MoveFRInstButton (int panel, int control, int event,
 			
 			to = from+diff;
 			
-			if(to >= uipc.fr_ni || to < 0) {
+			int lr, ni, *inst, parent;
+			
+			GetPanelAttribute(panel, ATTR_PANEL_PARENT, &parent);
+			
+			CmtGetLock(lock_uipc);
+			if(parent == pc.LRCPan) {
+				ni = uipc.lr_ni;
+				inst = pc.linst;
+				lr = 1;
+			} else if(parent == pc.FRCPan) {
+				ni = uipc.fr_ni;
+				inst = pc.finst;
+				lr = 0;
+			} else {
+				CmtReleaseLock(lock_uipc);
 				break;
 			}
 			
-			move_fr_inst_safe(to, from);
+			if(to >= ni || to < 0) {
+				break;
+			}
+			
+			move_fr_inst(to, from, lr);
+			CmtReleaseLock(lock_uipc);
 			
 			POINT pos;
 			GetCursorPos(&pos);
 			
 			int top1, top2;
 			
-			GetPanelAttribute(pc.finst[to], ATTR_TOP, &top1);
-			GetPanelAttribute(pc.finst[from], ATTR_TOP, &top2);
+			GetPanelAttribute(inst[to], ATTR_TOP, &top1);
+			GetPanelAttribute(inst[from], ATTR_TOP, &top2);
 			
 			SetCursorPos(pos.x, pos.y+top1-top2);
 			
@@ -2781,11 +2816,30 @@ int CVICALLBACK DeleteFRInstructionCallback (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			int lr, ni, *inst, parent;
+			
+			GetPanelAttribute(panel, ATTR_PANEL_PARENT, &parent);
+			
 			CmtGetLock(lock_uipc);
-			int num = int_in_array(pc.finst, panel, uipc.fr_ni);
+			if(parent == pc.LRCPan) {
+				ni = uipc.lr_ni;
+				inst = pc.linst;
+				lr = 1;
+			} else if(parent == pc.FRCPan) {
+				ni = uipc.fr_ni;
+				inst = pc.finst;
+				lr = 0;
+			} else {
+				CmtReleaseLock(lock_uipc);
+				break;
+			}
+
+			int num = int_in_array(inst, panel, ni);
+			
+			delete_fr_instr_safe(num, lr);
+			
 			CmtReleaseLock(lock_uipc);
 			
-			delete_fr_instr_safe(num);
 			break;
 	}
 	return 0;

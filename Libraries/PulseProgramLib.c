@@ -2403,7 +2403,8 @@ void clear_program() {
 	// Clear all the instructions
 	for(int i = 0; i < uipc.max_ni; i++) { clear_instruction(i); }
 	for(int i = 0; i < uipc.max_anum; i++) { clear_aout(i); }
-	for(int i = 0; i < uipc.fr_max_ni; i++) { clear_fr_instr(i); }
+	for(int i = 0; i < uipc.fr_max_ni; i++) { clear_fr_instr(i, 0); }
+	for(int i = 0; i < uipc.lr_max_ni; i++) { clear_fr_instr(i, 1); }
 	
 	// Update the number of instructions and analog outputs
 	SetCtrlVal(pc.ninst[1], pc.ninst[0], 1);
@@ -5581,12 +5582,23 @@ int move_instruction_safe(int to, int from) {
 }
 
 
-int move_fr_inst(int to, int from) {
+int move_fr_inst(int to, int from, int lr) {
 	// Moves first-run instructions.
 	//
 	// 0 on no change
 	// 1 on success.
-	if(to > uipc.fr_ni || from > uipc.fr_ni || from < 0 || to < 0 || from == to) {
+	int ni;
+	int *inst;
+	
+	if(lr) {
+		ni = uipc.lr_ni;
+		inst = pc.linst;
+	} else {
+		ni = uipc.fr_ni;
+		inst = pc.finst;
+	}
+	
+	if(to > uipc.ni || from > uipc.ni || from < 0 || to < 0 || from == to) {
 		return 0;
 	}
 	
@@ -5594,7 +5606,7 @@ int move_fr_inst(int to, int from) {
 	if(n_array == NULL) { return 0; }
 	
 	int pan_height;
-	GetPanelAttribute(pc.finst[0], ATTR_HEIGHT, &pan_height);
+	GetPanelAttribute(inst[0], ATTR_HEIGHT, &pan_height);
 	
 	int i, j;
 	
@@ -5608,14 +5620,14 @@ int move_fr_inst(int to, int from) {
 	}
 				  
 	int *inst_buff = malloc(sizeof(int)*e);
-	memcpy(inst_buff, pc.finst, sizeof(int)*e);
+	memcpy(inst_buff, inst, sizeof(int)*e);
 	
 	for(i = s; i < e; i++) {
 		j = n_array[i];
-		SetPanelAttribute(pc.finst[i], ATTR_TOP, MC_FR_INST_OFF+(pan_height+MC_FR_INST_SEP)*j);
-		SetCtrlVal(pc.finst[i], pc.fr_inum, j);
+		SetPanelAttribute(inst[i], ATTR_TOP, MC_FR_INST_OFF+(pan_height+MC_FR_INST_SEP)*j);
+		SetCtrlVal(inst[i], pc.fr_inum, j);
 		
-		pc.finst[i] = inst_buff[j];
+		inst[i] = inst_buff[j];
 	}
 	
 	free(inst_buff);
@@ -5624,9 +5636,9 @@ int move_fr_inst(int to, int from) {
 	return 1;
 }
 
-int move_fr_inst_safe(int to, int from) {
+int move_fr_inst_safe(int to, int from, int lr) {
 	CmtGetLock(lock_uipc);
-	int rv = move_fr_inst(to, from);
+	int rv = move_fr_inst(to, from, lr);
 	CmtReleaseLock(lock_uipc);
 	
 	return rv;
@@ -5707,8 +5719,8 @@ void clear_instruction_safe(int num) {
 	CmtReleaseLock(lock_uipc);
 }
 
-void clear_fr_instr(int num) {
-	 set_fr_instr(num, null_pinstr()); // Really quite simple now.
+void clear_fr_instr(int num, int lr) {
+	 set_fr_instr_panel((lr)?pc.linst[num]:pc.finst[num], null_pinstr()); // Really quite simple now.
 }
 
 void change_number_of_instructions() {
@@ -5908,22 +5920,34 @@ void delete_instruction_safe(int num) {
 	CmtReleaseLock(lock_uipc);
 }
 
-void delete_fr_instr(int num) {
-	clear_fr_instr(num);
+void delete_fr_instr(int num, int lr) {
+	clear_fr_instr(num, lr);
 	
-	if(uipc.fr_ni == 1) {
-		return ;
+	int ni, max_ni, panel;
+	
+	if(lr) {
+		ni = uipc.lr_ni;
+		max_ni = uipc.lr_max_ni;
+		panel = pc.LRCPan;
+	} else {
+		ni = uipc.fr_ni;
+		max_ni = uipc.fr_max_ni;
+		panel = pc.FRCPan;
+	}
+	
+	if(ni == 1) {
+		return;
 	}
 		
-	move_fr_inst(uipc.fr_max_ni-1, num);
+	move_fr_inst(max_ni-1, num, lr);
 	
-	SetCtrlVal(pc.FRPan, pc.fninst, uipc.fr_ni-1);
-	change_fr_num_instrs(uipc.fr_ni-1, 0);
+	SetCtrlVal(pc.FRPan, panel, ni-1);
+	change_fr_num_instrs(ni-1, lr);
 }
 
-void delete_fr_instr_safe(int num) {
+void delete_fr_instr_safe(int num, int lr) {
 	CmtGetLock(lock_uipc);
-	delete_fr_instr(num);
+	delete_fr_instr(num, lr);
 	CmtReleaseLock(lock_uipc);
 }
 
