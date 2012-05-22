@@ -182,6 +182,7 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	groups[MCPP_AOORD] = MCPP_AOHEADER;
 	groups[MCPP_NDORD] = MCPP_NDHEADER;
 	groups[MCPP_SKIPORD] = MCPP_SKIPHEADER;
+	groups[MCPP_FRINSTORD] = MCPP_FRINSTHEADER;
 	
 	// Read out the properties.
 	nsize = fs_size;
@@ -245,13 +246,14 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	
 	char *props[MCPP_PROPSNUM] = {MCPP_VERSION, MCPP_NP, MCPP_SR, MCPP_NT, MCPP_TRIGTTL, MCPP_TMODE, 
 								 MCPP_SCAN, MCPP_USE_PB, MCPP_VARIED, MCPP_NINST, MCPP_TOTALTIME, MCPP_NUINSTRS, 
-								 MCPP_NDIMS, MCPP_NCYCS, MCPP_NVARIED, MCPP_MAXNSTEPS, MCPP_REALNSTEPS, 
-								 MCPP_SKIP, MCPP_NAOUT, MCPP_NAOVAR};
+								 MCPP_FRNINSTRS, MCPP_FRNREPS, MCPP_FRON, MCPP_NDIMS, MCPP_NCYCS, MCPP_NVARIED, 
+								 MCPP_MAXNSTEPS, MCPP_REALNSTEPS, MCPP_SKIP, MCPP_NAOUT, MCPP_NAOVAR};
+	
 	void *pfields[MCPP_PROPSNUM] = {NULL, &(p->np), &(p->sr), &(p->nt), &(p->trigger_ttl), &(p->tmode),
 									&(p->scan), &(p->use_pb), &(p->varied), &(p->n_inst), &(p->total_time),
-									&(p->nUniqueInstrs), &(p->nDims), &(p->nCycles), &(p->nVaried),
-									&(p->max_n_steps), &(p->real_n_steps), &(p->skip), &(p->nAout), 
-									&(p->n_ao_var)};
+									&(p->nUniqueInstrs), &(p->frnInstrs), &(p->frnReps), &(p->fr), &(p->nDims), 
+									&(p->nCycles), &(p->nVaried), &(p->max_n_steps), &(p->real_n_steps), 
+									&(p->skip), &(p->nAout), &(p->n_ao_var)};
 	
 	plocs = strings_in_array(names, props, bfs_size, MCPP_PROPSNUM);
 	
@@ -259,6 +261,11 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 		rv = MCPP_ERR_PROG_PROPS_LABELS;
 		goto error;
 	}
+	
+	// For legacy programs
+	p->fr = 0;
+	p->frnInstrs = 0;
+	p->frnReps = 1;
 	
 	// These are all scalars, we'll read the values directly into the PPROGRAM;
 	// TODO: Add error checking for required items.
@@ -310,6 +317,20 @@ PPROGRAM *load_pprogram(FILE *f, int *ev) {
 	
 	free(ilist);
 	ilist = NULL;
+	
+	// Get the first read instructions array
+	
+	if(p->frnInstrs) {
+		pl = glocs[MCPP_FRINSTORD];
+	
+		ilist = read_pinstr_from_char(fs[pl].val.c, p->frnInstrs, &rv);
+		if(rv != 0) { goto error; }
+	
+		memcpy(p->frins, ilist, sizeof(PINSTR)*p->frnInstrs);
+		
+		free(ilist);
+		ilist = NULL;
+	}
 	
 	// Read out the things related to ND (if necessary)
 	// Must be done before the AOut and Skip stuff
@@ -774,6 +795,8 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 	fsave header = null_fs(), instrs = null_fs();
 	fsave ao = null_fs(), nd = null_fs(), skip = null_fs();
 	
+	PINSTR *ilist = NULL;
+	
 	if(f == NULL) { 
 		rv = MCPP_ERR_NOFILE;
 		goto error;
@@ -819,7 +842,13 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 	// Now that we have the header written, we want to start writing 
 	// some of the arrays. We'll start with the instruction array, as that's
 	// the most important thing.
-	instrs = generate_instr_array(p);
+
+	ilist = malloc(sizeof(PINSTR)*p->nUniqueInstrs);
+	for(int i = 0; i < p->nUniqueInstrs; i++) {
+		ilist[i] = *(p->instrs[i]);	
+	}
+	
+	instrs = generate_instr_array(ilist, p->nUniqueInstrs, MCPP_INSTHEADER);
 	if(instrs.type == FS_NULL) {
 		rv = MCPP_ERR_NOINSTRS;
 		goto error;
@@ -867,6 +896,17 @@ int save_pprogram(PPROGRAM *p, FILE *f) {
 		
 		skip = free_fsave(&skip);
 	}
+	
+	// Now the first-run instructions
+	instrs = generate_instr_array(p->frins, p->frnInstrs, MCPP_FRINSTHEADER);
+	if(instrs.type == FS_NULL) {
+		rv = MCPP_ERR_NOFRINSTRS;
+		goto error;
+	}
+	
+	if(rv = fwrite_fs(f, &instrs)) { goto error; }
+	
+	instrs = free_fsave(&instrs);
 	
 	// Get the final position
 	pos_done = ftell(f);
@@ -956,6 +996,18 @@ fsave generate_header(PPROGRAM *p, int *ev) {
 	fs[++cf] = make_fs(MCPP_NUINSTRS);
 	if(rv = put_fs(&fs[cf], &(p->nUniqueInstrs), FS_INT, 1)) { goto error; }
 
+	// First run number of instructions
+	fs[++cf] = make_fs(MCPP_FRNINSTRS);
+	if(rv = put_fs(&fs[cf], &(p->frnInstrs), FS_INT, 1)) { goto error; }
+	
+	// First run number of repetitions
+	fs[++cf] = make_fs(MCPP_FRNREPS);
+	if(rv = put_fs(&fs[cf], &(p->frnReps), FS_INT, 1)) { goto error; }
+	
+	// First run on or of
+	fs[++cf] = make_fs(MCPP_FRON);
+	if(rv = put_fs(&fs[cf], &(p->fr), FS_INT, 1)) { goto error; }
+	
 	// Total time (Double)
 	fs[++cf] = make_fs(MCPP_TOTALTIME);
 	if(rv = put_fs(&fs[cf], &(p->total_time), FS_DOUBLE, 1)) { goto error; }
@@ -1004,19 +1056,15 @@ fsave generate_header(PPROGRAM *p, int *ev) {
 	return out;
 }
 
-fsave generate_instr_array(PPROGRAM *p) {
+fsave generate_instr_array(PINSTR *inst, int n_instr, char *header) {
 	// Generates a sequential array of instructions.
-	if(p == NULL || p->instrs == NULL) { return null_fs(); }
+	if(inst == NULL) { return null_fs(); }
 	char *c = NULL;
-	
-	
-	int n_instr = p->nUniqueInstrs;
-	
+
 	// Define the struct.
 	unsigned int types[MCPP_INSTNUMFIELDS] = MCPP_INST_TYPES;
 	char *names[MCPP_INSTNUMFIELDS] = MCPP_INST_NAMES;
 	size_t size = 0, si = sizeof(unsigned int), si8 = sizeof(unsigned char), sd = sizeof(double);
-	
 	
 	// Go through and create the char array.
 	int i;
@@ -1033,28 +1081,28 @@ fsave generate_instr_array(PPROGRAM *p) {
 	// flags, instr, instr_data, trigger_scan, instr_time, time_units
 	unsigned char ucbuff;
 	for(i = 0; i < n_instr; i++) {
-		memcpy(pos, &(p->instrs[i]->flags), si);
+		memcpy(pos, &(inst[i].flags), si);
 		pos += si;
 		
-		memcpy(pos, &(p->instrs[i]->instr), si);
+		memcpy(pos, &(inst[i].instr), si);
 		pos += si;
 		
-		memcpy(pos, &(p->instrs[i]->instr_data), si);
+		memcpy(pos, &(inst[i].instr_data), si);
 		pos += si;
 		
-		ucbuff = (unsigned char)(p->instrs[i]->trigger_scan);
+		ucbuff = (unsigned char)(inst[i].trigger_scan);
 		memcpy(pos, &ucbuff, si8);
 		pos += si8;
 
-		memcpy(pos, &(p->instrs[i]->instr_time), sd);
+		memcpy(pos, &(inst[i].instr_time), sd);
 		pos += sd;
 		
-		ucbuff = (unsigned char)(p->instrs[i]->time_units);
+		ucbuff = (unsigned char)(inst[i].time_units);
 		memcpy(pos, &ucbuff, si8);
 		pos += si8;
 	}
 	
-	fsave fs = make_fs(MCPP_INSTHEADER);
+	fsave fs = make_fs(header);
 	put_fs_custom(&fs, c, MCPP_INSTNUMFIELDS, types, names, n_instr);
 
 	error:
@@ -1665,6 +1713,11 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	GetCtrlVal(pc.trig_ttl[1], pc.trig_ttl[0], &p->trigger_ttl);
 	p->total_time = uipc.total_time;
 	
+	
+	GetCtrlVal(pc.FRPan, pc.fron, &p->fr);
+	GetCtrlVal(pc.FRPan, pc.fninst, &p->frnInstrs);
+	GetCtrlVal(pc.FRPan, pc.fnrep, &p->frnReps);
+	
 	// Now allocate the arrays.
 	create_pprogram(p);
 	
@@ -1708,6 +1761,13 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	// Grab the instructions from the UI.
 	for(i=0; i<nInst; i++)
 		get_instr(p->instrs[i], i);
+	
+	// Check first-run
+	if(p->frnInstrs > 0) {
+		for(i = 0; i < p->frnInstrs; i++) {
+			p->frins[i] = get_fr_instr(i);				
+		}
+	}
 	
 	if(p->nVaried) {
 		// First what we've already gotten when we were getting nUniqueInstrs.
@@ -2215,6 +2275,21 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 		}
 	}
 
+	
+	if(p->frnInstrs && p->frins != NULL) {
+		change_fr_num_instrs(p->frnInstrs);
+		SetCtrlVal(pc.FRPan, pc.fninst, p->frnInstrs);
+		
+		for(i = 0; i < p->frnInstrs; i++) {
+			set_fr_instr(i, p->frins[i]);	
+		}
+	}
+	
+	if(p->frnReps) {
+		SetCtrlVal(pc.FRPan, pc.fnrep, p->frnReps);	
+	}
+	
+	SetCtrlVal(pc.FRPan, pc.fron, p->fr);
 
 	if(cstep != NULL)
 		free(cstep);
@@ -2287,7 +2362,7 @@ void save_prog_popup() {
 	int err_val = SavePulseProgram(p, path, 1);
 
 	if(err_val != 0) 
-		display_ddc_error(err_val);
+		display_error(err_val);
 	
 	if(p != NULL) { free_pprog(p); }
 	free(path);
@@ -2339,6 +2414,9 @@ void clear_program() {
 	
 	SetCtrlVal(pc.FRPan, pc.fninst, 1);
 	change_fr_num_instrs(1);
+	
+	SetCtrlVal(pc.FRPan, pc.fnrep, 1);
+	SetCtrlVal(pc.FRPan, pc.fron, 0);
 	
 	// Update the ND information
 	SetCtrlVal(pc.numcycles[1], pc.numcycles[0], 0);
@@ -2759,6 +2837,41 @@ void get_instr_panel(PINSTR *instr, int panel) {
 		instr->instr_time *= pow(1000, instr->time_units);
 }
 
+PINSTR get_fr_instr(int num) {
+	int ni;
+	GetCtrlVal(pc.FRPan, pc.fninst, &ni);
+	if(num >= ni || num < 0) {
+		return null_pinstr();	
+	}
+	
+	return get_fr_instr_panel(pc.finst[num]);
+}
+
+PINSTR get_fr_instr_panel(int panel) {
+	PINSTR ins = null_pinstr();
+	
+	ins.flags = get_fr_flags_panel(panel);
+	ins.trigger_scan = 0;
+	
+	GetCtrlVal(panel, pc.fr_instr, &(ins.instr));
+	GetCtrlVal(panel, pc.fr_inst_d, &(ins.instr_data));
+	GetCtrlVal(panel, pc.fr_delay, &(ins.instr_time));
+	GetCtrlVal(panel, pc.fr_delay_u, &(ins.time_units));
+	
+	if(ins.time_units) {
+		ins.instr_time *= pow(1000, ins.time_units);	
+	}
+	
+	return ins;
+}
+
+int get_fr_flags(int num) {
+	return get_fr_flags_panel(pc.finst[num]);
+}
+
+int get_fr_flags_panel(int panel) {
+	return get_flags_range(panel, pc.fr_TTLs, 0, 23);	
+}
 
 int get_flags(int num) {
 	// Convenience function for getting the flags from a given instruction number.
@@ -2768,10 +2881,10 @@ int get_flags(int num) {
 
 int get_flags_panel(int panel) {
 	// Function for getting the flags for a given panel.   
-	return get_flags_range(panel, 0, 23);	
+	return get_flags_range(panel, pc.TTLs, 0, 23);	
 }
 
-int get_flags_range(int panel, int start, int end) {
+int get_flags_range(int panel, int TTLs[], int start, int end) {
 	int flags = 0, ttlon;
 	if(start > end) {
 		int buff = end;
@@ -2780,7 +2893,7 @@ int get_flags_range(int panel, int start, int end) {
 	}
 	
 	for(int i = start; i <= end; i++) {
-		GetCtrlVal(panel, pc.TTLs[i], &ttlon);
+		GetCtrlVal(panel, TTLs[i], &ttlon);
 		flags = flags|(ttlon<<i);
 	}
 	
@@ -3130,7 +3243,7 @@ void move_ttl_panel(int panel, int to, int from) {
 		return;
 	
 	// Slightly slower, but more general.
-	int flags = get_flags_range(panel, to, from);
+	int flags = get_flags_range(panel,pc.TTLs,  to, from);
 	flags = move_bit_skip(flags, uipc.broken_ttls, to, from);
 	
 	set_flags_range(panel, pc.TTLs, flags, to, from);
@@ -6732,6 +6845,10 @@ void create_pprogram(PPROGRAM *p) { // Initially allocates the PPROGRAM space
 		
 		p->ao_dim = malloc((p->nAout)*sizeof(int));		
 		memset(p->ao_dim, -1, sizeof(int)*p->nAout);
+	}
+	
+	if(p->frnInstrs > 0) {
+		p->frins = calloc(p->frnInstrs, sizeof(PINSTR));	
 	}
 	
 	if(p->nFuncs)

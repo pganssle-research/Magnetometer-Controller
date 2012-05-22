@@ -191,6 +191,8 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCPP_ERR_FS_BADCONTENTS_STR;
 					case MCPP_ERR_NOSTRING:
 						return MCPP_ERR_NOSTRING_STR;
+					case MCPP_ERR_NOFRINSTRS:
+						return MCPP_ERR_NOFRINSTRS_STR;
 				}
 				break;
 			case MCEX_ERR:

@@ -26,7 +26,7 @@
 // Main Groups
 #define MCPP_PROGHEADER "[PulseProgram]"
 
-#define MCPP_GROUPSNUM 5
+#define MCPP_GROUPSNUM 6
 
 // Header names
 #define MCPP_PROPHEADER "[Properties]"
@@ -42,6 +42,9 @@
 #define MCPP_NINST "n_inst"
 #define MCPP_TOTALTIME "total_time"
 #define MCPP_NUINSTRS "nUniqueInstrs"
+#define MCPP_FRNINSTRS "frnInstrs"
+#define MCPP_FRNREPS "frnReps"
+#define MCPP_FRON "fron"
 #define MCPP_NDIMS "nDims"
 #define MCPP_NCYCS "nCycles"
 #define MCPP_NVARIED "nVaried"
@@ -51,7 +54,7 @@
 #define MCPP_NAOUT "nAout"
 #define MCPP_NAOVAR "n_ao_var"
 
-#define MCPP_PROPSNUM 20
+#define MCPP_PROPSNUM 23
 #define MCPP_PROPORD 0
 
 // Instructions
@@ -102,6 +105,11 @@
 
 #define MCPP_SKIPORD 4
 
+// First run instructions
+#define MCPP_FRINSTHEADER "[FRInstructions]"
+#define MCPP_FRINSTORD 5
+
+
 // Default stuff.
 #define MCPP_DEFAULT_DELAY 100000000 // 100ms
 #define MCPP_DEFAULT_UNITS 2 		// ms
@@ -110,7 +118,7 @@
 /************************* Function Declarations *************************/   
 // File I/O
 extern fsave generate_header(PPROGRAM *p, int *ev);
-extern fsave generate_instr_array(PPROGRAM *p);
+extern fsave generate_instr_array(PINSTR *inst, int n_instr, char *header);
 extern fsave generate_ao(PPROGRAM *p, int *ev);
 extern fsave generate_nd(PPROGRAM *p, int *ev);
 extern fsave generate_skip_fs(PPROGRAM *p, int *ev);

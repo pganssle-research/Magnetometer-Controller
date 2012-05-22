@@ -64,9 +64,17 @@ extern void change_nt(void);
 extern void get_instr(PINSTR *instr, int num);
 extern void get_instr_panel(PINSTR *instr, int panel);
 
+extern PINSTR get_fr_instr(int num);
+extern PINSTR get_fr_instr_panel(int panel);
+
 extern int get_flags(int num);
 extern int get_flags_panel(int panel);
-extern int get_flags_range(int panel, int start, int end);
+
+extern int get_fr_flags(int num);
+extern int get_fr_flags_panel(int panel);
+
+extern int get_flags_range(int panel, int TTLs[], int start, int end);
+
 
 // Set Instruction Parameters
 extern void set_scan(int num, int state);

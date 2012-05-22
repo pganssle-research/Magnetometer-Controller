@@ -47,10 +47,11 @@ typedef struct PPROGRAM // This is a structure for containing information about 
 	PINSTR **instrs; 		// Array of instructions
 	int nUniqueInstrs; 		// Number of unique instructions (size of *instrs)
 	
+
 	PINSTR *frins;			// List of first run instructions.
 	int frnInstrs;			// Number of first-run instructions
 	int frnReps;			// Number of first-run repetitions
-	unsigned char fr;		// Whether or not to use the first run.
+	int fr;					// Whether or not to use the first run.
 	
 	// Variation (indirect dimensions and phase cycling)
 	int nDims;		 		// How many dimensions (1+#indirect dimensions)
