@@ -101,23 +101,23 @@
 #define  BrokenTTLs_ClearAll              27      /* callback function: BrokenTTLsClearAll */
 
 #define  CurrentLoc                       5
-#define  CurrentLoc_TransientNum          2       /* callback function: ChangeViewingTransient */
-#define  CurrentLoc_ID8                   3
-#define  CurrentLoc_ID7                   4
-#define  CurrentLoc_ID6                   5
-#define  CurrentLoc_ID5                   6
-#define  CurrentLoc_ID4                   7
-#define  CurrentLoc_ID3                   8
-#define  CurrentLoc_ID2                   9
-#define  CurrentLoc_ID1                   10
-#define  CurrentLoc_IDVal8                11      /* callback function: DatChangeIDPos */
-#define  CurrentLoc_IDVal7                12      /* callback function: DatChangeIDPos */
-#define  CurrentLoc_IDVal6                13      /* callback function: DatChangeIDPos */
-#define  CurrentLoc_IDVal5                14      /* callback function: DatChangeIDPos */
-#define  CurrentLoc_IDVal4                15      /* callback function: DatChangeIDPos */
-#define  CurrentLoc_IDVal3                16      /* callback function: DatChangeIDPos */
-#define  CurrentLoc_IDVal2                17      /* callback function: DatChangeIDPos */
-#define  CurrentLoc_IDVal1                18      /* callback function: DatChangeIDPos */
+#define  CurrentLoc_ID8                   2
+#define  CurrentLoc_ID7                   3
+#define  CurrentLoc_ID6                   4
+#define  CurrentLoc_ID5                   5
+#define  CurrentLoc_ID4                   6
+#define  CurrentLoc_ID3                   7
+#define  CurrentLoc_ID2                   8
+#define  CurrentLoc_ID1                   9
+#define  CurrentLoc_IDVal8                10      /* callback function: DatChangeIDPos */
+#define  CurrentLoc_IDVal7                11      /* callback function: DatChangeIDPos */
+#define  CurrentLoc_IDVal6                12      /* callback function: DatChangeIDPos */
+#define  CurrentLoc_IDVal5                13      /* callback function: DatChangeIDPos */
+#define  CurrentLoc_IDVal4                14      /* callback function: DatChangeIDPos */
+#define  CurrentLoc_IDVal3                15      /* callback function: DatChangeIDPos */
+#define  CurrentLoc_IDVal2                16      /* callback function: DatChangeIDPos */
+#define  CurrentLoc_IDVal1                17      /* callback function: DatChangeIDPos */
+#define  CurrentLoc_TransientNum          18      /* callback function: ChangeViewingTransient */
 
 #define  EditFunc                         6
 #define  EditFunc_QUITBUTTON              2       /* callback function: FuncEditQuit */

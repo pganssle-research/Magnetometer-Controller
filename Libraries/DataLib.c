@@ -3456,7 +3456,7 @@ void update_transients() {
 				// Check to make sure that the "Average" entry is there.
 				int len, buff;
 				
-				GetCtrlVal(pan, dc.ctrans, &buff);
+				GetValueFromIndex(pan, dc.ctrans, 0, &buff);
 				
 				if(buff != 0) { 					// Average has value 0.
 					DeleteListItem(pan, dc.ctrans, 0, -1); // Delete them all and start over.
