@@ -162,6 +162,11 @@ int run_experiment(PPROGRAM *p) {
 	
 	ce.steps_size = 0;
 	
+	if(scan) {
+		ce.data = free_ds(&(ce.data));
+		ce.adata = free_ds(&(ce.adata));
+	}
+	
 	if(p->varied) {
 		ce.steps_size = get_steps_array_size(ce.p->tmode, ce.p->nCycles, ce.p->nDims);
 		
@@ -3105,7 +3110,7 @@ int plot_data(double *data, int np, double sr, int nc) {
 			fft_data[j] = curr_data[j]*2/np;
 			curr_data[j] = curr_data[j]*uidc.fgain[i] + uidc.foff[i];
 		}
-	
+
 		uidc.fplotids[i] = PlotY(dc.fid, dc.fgraph, curr_data, np, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, uidc.fchans[i]?uidc.fcol[i]:VAL_TRANSPARENT);
 		
 		// Prepare the data.
@@ -5560,6 +5565,7 @@ int update_DAQ_aouts() {
 	if(!ce.otset || ce.oTask == NULL) { return -1; }
 	
 	PPROGRAM *p = ce.p;
+	int *dim_step = NULL;
 	
 	// If it's the first time, you need to create ce.ao_vals
 	if(ce.ao_vals == NULL) {
@@ -5574,11 +5580,14 @@ int update_DAQ_aouts() {
 	// Update the ao_vals array
 	if(p->n_ao_var) {
 		int chan, step;
+		dim_step = malloc(p->nDims*sizeof(int));
+		get_dim_step(ce.p, ce.cind, dim_step);
+		
 		for(int i = 0; i < ce.nochans; i++) {
 			int chan = ce.ochanson[i];
 			
 			if(p->ao_varied[chan]) {
-				step = ce.cstep[p->nCycles+p->ao_dim[chan]];
+				step = dim_step[p->ao_dim[chan]];
 				
 				ce.ao_vals[i] = (float64)p->ao_vals[chan][step];
 			}
@@ -5590,6 +5599,7 @@ int update_DAQ_aouts() {
 	if(rv = DAQmxWriteAnalogF64(ce.oTask, 1, 1, -1, DAQmx_Val_GroupByChannel, ce.ao_vals, &ns, NULL)) { goto error; } 
 	
 	error:
+	if(dim_step != NULL) { free(dim_step); }
 	
 	return rv;
 }
