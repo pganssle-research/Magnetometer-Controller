@@ -182,8 +182,8 @@ int main (int argc, char *argv[])
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_DAQ);
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_tdm);
 	
-	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_ce);
-	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_af);
+	CmtNewLock(NULL, 0, &lock_ce);
+	CmtNewLock(NULL, 0, &lock_af);
 
 	CmtNewLock(NULL, 0, &lock_uidc);
 	CmtNewLock(NULL, 0, &lock_uipc);

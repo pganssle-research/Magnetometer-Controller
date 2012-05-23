@@ -209,9 +209,35 @@ int run_experiment(PPROGRAM *p) {
 	if(cont_mode && p->varied) {  SetCtrlVal(pc.rc[1], pc.rc[0], 0); }
 	
 	// We're going to start with loading the "first run" -> Add in the "reps" later.
+	int rep = 0;
 	if(p->fr) {
-		if(program_pulses_safe(p->frins, p->frnInstrs, 1) < 0) { goto error; };
-		if(pb_start_safe(1) < 0) { goto error; }            	
+		for(int i = 0; i < p->frnReps; i++) {
+			if(program_pulses_safe(p->frins, p->frnInstrs, 1) < 0) { goto error; };
+			if(pb_start_safe(1) < 0) { goto error; }
+			
+			update_status_safe(0);
+			
+			// TODO: Move this into a function for better code reuse.
+			CmtGetLock(lock_ce);
+			ce_locked = 1;
+			if(ce.update_thread == -1)
+				CmtScheduleThreadPoolFunction(DEFAULT_THREAD_POOL_HANDLE, UpdateStatus, NULL, &ce.update_thread);
+			else {
+				int threadstat;
+				CmtGetThreadPoolFunctionAttribute(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, ATTR_TP_FUNCTION_EXECUTION_STATUS, &threadstat);
+				if(threadstat > 1) 
+					CmtWaitForThreadPoolFunctionCompletion(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, 0);
+			}
+			CmtReleaseLock(lock_ce);
+			ce_locked = 0;
+	
+			// Chill out and wait for the next step.
+			while( !GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
+				Delay(0.01);
+			}
+			
+			if(GetQuitIdle()) { break; }
+		}
 	}
 	
 	// Main loop to keep track of where we're at in the experiment, etc.
@@ -304,7 +330,9 @@ int run_experiment(PPROGRAM *p) {
 				data = get_data(ce.aTask, ce.p->np, ce.nchan, ce.p->nt, ce.p->sr, &ev, 1);
 			
 				CmtGetLock(lock_DAQ);
+				CmtGetLock(lock_ce);
 				daq_locked = 1;
+				ce_locked = 1;
 			
 				// Stop the tasks qhen you are done with them. They can be started again
 				// later. Clear them when you are really done.
@@ -342,11 +370,42 @@ int run_experiment(PPROGRAM *p) {
 					d.nchans = ce.nchan;
 					
 					d.cind = ce.cind;
-
+														   
 					if(ev = initialize_mcd_safe(ce.path, ce.p, d)) { goto error; }	
 				}
 				
 				if(ev = save_data_mcd(ce.path, p, data, ce.cind, ce.nchan, ce.tdone)) { goto error; }
+				
+				if(!ce.data.valid) {
+				 	ce.data = free_ds(&ce.data);
+					
+					ce.data.nt = ce.p->nt;
+					ce.data.np = ce.p->np;
+					ce.data.nc = ce.nchan;
+					ce.data.nd = ce.p->nDims;
+					
+					ce.data.maxds = 1;
+					ce.data.dim_step = (p->nDims)?calloc(p->nDims, sizeof(int)):NULL;
+					
+					for(int i = 0; i < p->nDims; i++) {
+						ce.data.maxds *= p->maxsteps[i+p->nCycles];
+					}
+					
+					calloc_ds(&(ce.data));
+				}
+				
+				int dind = 0;
+				if(p->nDims) {
+					get_dim_step(p, ce.cind, ce.data.dim_step);
+					dind = get_lindex(ce.data.dim_step, p->maxsteps+p->nCycles, p->nDims);
+				}
+				
+				if(ce.data.data[ct][dind] == NULL) { ce.data.data[ct][dind] = calloc(ce.data.np * ce.data.nc, sizeof(double)); }
+				
+				memcpy(ce.data.data[ct][dind], data, sizeof(double)*(ce.data.np*ce.data.nc));
+				for(int i = 0; i < ce.data.nc; i++) {
+					ce.data.data4[ct][dind][i] = &(ce.data.data[ct][dind][i*ce.data.np]);	
+				}
 				
 				// Update the navigation controls.
 				if(ce.p->nDims) { 
@@ -354,6 +413,9 @@ int run_experiment(PPROGRAM *p) {
 				} else {	
 					update_transients(); 
 				}
+				
+				CmtReleaseLock(lock_ce);
+				ce_locked = 0;
 				
 				CmtGetLock(lock_uidc);
 				
@@ -3440,12 +3502,14 @@ void set_data_from_nav(int panel) {
 	// Gets the position from the nav.
 	GetCtrlVal(panel, dc.ctrans, &t);
 	
+	SetCtrlVal(dc.cloc[((panel == dc.cloc[0])?1:0)], dc.ctrans, t);
+	
 	if(ce.p->nDims) {
 		lind = get_selected_ind(panel, (t != 0), NULL); // If t == 0, we're getting an average. 
 		set_nav_from_lind(lind, dc.cloc[(panel == dc.cloc[0])?1:0], (t == 0));	// Setup the corresponding other tab.
 		
 		lind = get_selected_ind(panel, 0, NULL); // We no longer want the transient in the lindex.
-	} else
+	} else 
 		lind = 0;
 	
 	if(!ce.data.valid && ce.path != NULL) {			
