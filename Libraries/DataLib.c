@@ -1658,9 +1658,26 @@ int load_experiment(char *filename, int prog) {
 	
 	int phpos = 3;
 	
-	void *dih_vals[MCD_DISPNUM] = {&(uidc.polyon), &(uidc.polyord), NULL, 
-								&(uidc.schan), uidc.sgain, uidc.soff, uidc.fgain, uidc.foff,
-								uidc.schans, uidc.fchans};
+	// Flags for what should and should not be loaded.
+	// TODO: Allow this to be set as a preference.
+	int load_pon = 0;
+	int load_pord = 0;
+	
+	int load_sgain = 0;
+	int load_soff = 0;
+	int load_schan = 0;
+	
+	int load_fgain = 0;
+	int load_foff = 0;
+	
+	int load_schans = 0;
+	int load_fchans = 0;
+	
+	
+	void *dih_vals[MCD_DISPNUM] = {load_pon?(&(uidc.polyon)):NULL, (load_pord)?(&(uidc.polyord)):NULL, NULL, 
+								load_schan?(&(uidc.schan)):NULL, load_sgain?uidc.sgain:NULL, load_soff?uidc.soff:NULL, 
+								load_fgain?uidc.fgain:NULL, load_foff?uidc.foff:NULL, load_schans?uidc.schans:NULL, 
+								load_fchans?uidc.fchans:NULL};
 	
 	glocs = strings_in_array(names, dih_names, dihs_size, MCD_DISPNUM);
 	if(glocs == NULL) { goto disp_err; }
@@ -1703,6 +1720,12 @@ int load_experiment(char *filename, int prog) {
 				break;
 		}
 	}
+	
+	SetCtrlVal(dc.fid, dc.fpolysub, uidc.polyon);
+	SetCtrlVal(dc.spec, dc.spolysub, uidc.polyon);
+	
+	SetCtrlVal(dc.fid, dc.fpsorder, uidc.polyord);
+	SetCtrlVal(dc.spec, dc.spsorder, uidc.polyord);
 	
 	// The phase is its own thing, linearly indexed.
 	if(glocs[phpos] >= 0) {
@@ -3044,9 +3067,10 @@ int plot_data(double *data, int np, double sr, int nc) {
 	npfft = 1<<npfft; // Bitshifting 1 gives you pow(2, npfft);
 	int i, j;
 	
-	double *curr_data = NULL, *fft_re = NULL, *fft_im = NULL, *fft_mag = NULL, *phase = NULL, *freq = NULL;
+	double *curr_data = NULL, *fft_data, *fft_re = NULL, *fft_im = NULL, *fft_mag = NULL, *phase = NULL, *freq = NULL;
 	NIComplexNumber *curr_fft = NULL;
 	
+	fft_data = malloc(sizeof(double)*np);
 	curr_data = malloc(sizeof(double)*np); // Buffer for each channel's data.
 	fft_re = malloc(sizeof(double)*npfft/2); 	// Real channel
 	fft_im = malloc(sizeof(double)*npfft/2); 	// Imaginary channel
@@ -3069,24 +3093,24 @@ int plot_data(double *data, int np, double sr, int nc) {
 		// Get the data for this channel
 		// Pre-scale the data to have 0 change in the power spectrum - i.e. multiply by (2/np)
 
-		for(j = 0; j < np; j++) {
-			curr_data[j] = data[j+i*np]*2/np;
-		}
-		
-		FFTEx(curr_data, np, npfft, NULL, FALSE, curr_fft);  // Do the fourier transform before any gain stuff
-		
-		if(uidc.fgain[i] != 1.0 || uidc.foff[i] != 0.0) {
-			for(j = 0; j < np; j++)
-				curr_data[j] = data[j+i*np]*uidc.fgain[i] + uidc.foff[i];
-		}
+		memcpy(curr_data, data+(i*np), sizeof(double)*np); 
 		
 		if(uidc.polyon) {
 			polynomial_subtraction(curr_data, np, uidc.polyord, 0);	// 0 Skip for now
 		}
 		
+		// Scale the curr_data for gains, then pre-scale the FFT data
+		// to have no change in the power spectrum (multiply by (2/np)
+		for(j = 0; j < np; j++) {
+			fft_data[j] = curr_data[j]*2/np;
+			curr_data[j] = curr_data[j]*uidc.fgain[i] + uidc.foff[i];
+		}
+	
 		uidc.fplotids[i] = PlotY(dc.fid, dc.fgraph, curr_data, np, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, uidc.fchans[i]?uidc.fcol[i]:VAL_TRANSPARENT);
 		
 		// Prepare the data.
+		FFTEx(fft_data, np, npfft, NULL, FALSE, curr_fft);  // Do the fourier transform
+		
 		PolyEv1D(freq, npfft/2, (double *)uidc.sphase[i], 3, phase);
 		for(j = 0; j < npfft/2; j++) {
 			// Apply the initial phase correction
@@ -3127,6 +3151,7 @@ int plot_data(double *data, int np, double sr, int nc) {
 	
 	// Free our vectors
 	error:
+	if(fft_data != NULL) { free(fft_data); }
 	if(curr_data != NULL) { free(curr_data); }
 	if(curr_fft != NULL) { free(curr_fft); }
 	if(fft_re != NULL) { free(fft_re); }
@@ -3503,6 +3528,8 @@ void set_data_from_nav(int panel) {
 	GetCtrlVal(panel, dc.ctrans, &t);
 	
 	SetCtrlVal(dc.cloc[((panel == dc.cloc[0])?1:0)], dc.ctrans, t);
+	
+	if(ce.p == NULL) { return; }
 	
 	if(ce.p->nDims) {
 		lind = get_selected_ind(panel, (t != 0), NULL); // If t == 0, we're getting an average. 
