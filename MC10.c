@@ -1960,8 +1960,37 @@ int CVICALLBACK ChangePolyFitOrder (int panel, int control, int event,
 {
 	switch (event)
 	{
-		case EVENT_COMMIT:
-
+		int RMSBorder;
+		case EVENT_LEFT_CLICK:
+		
+			/*GetCtrlVal(panel, FID_RMSBorders, &RMSBorder);
+			if(RMSBorder)
+				RMS_click(panel, control, eventData2, eventData1);
+			break;
+			
+		case EVENT_LEFT_CLICK_UP:
+			GetCtrlVal(panel, FID_RMSBorders, &RMSBorder);
+			if(RMSBorder)
+				RMS_click_up(panel, control, eventData2, eventData1);
+			break;
+		
+		case EVENT_MOUSE_MOVE:
+				GetCtrlVal(panel, FID_RMSBorders, &RMSBorder);
+				if(RMSBorder)
+					RMS_mouse_move(panel, control, eventData2, eventData1);
+				break;
+			*/
+			break;
+		case EVENT_RIGHT_CLICK:
+			int modifier;
+			GetGlobalMouseState(NULL, NULL, NULL, NULL, NULL, &modifier);
+			if(modifier&(VAL_SHIFT_MODIFIER|VAL_MENUKEY_MODIFIER))
+				break;
+			
+			RunPopupMenu(mc.rcmenu, mc.rcgraph, panel, eventData1, eventData2, 0, 0, 0, 0);
+			break;
+		case EVENT_KEYPRESS:
+			run_hotkey(panel, control, eventData1, eventData2);
 			break;
 	}
 	return 0;
@@ -2215,16 +2244,48 @@ int CVICALLBACK ChangeSpectrumChanColor (int panel, int control, int event,
  void CVICALLBACK AutoscalingOnOff (int menuBar, int menuItem, void *callbackData,
 		int panel)
 {
+	int xy = -1, control = (panel == dc.spec)?dc.sgraph:dc.fgraph;
+
+	if(menuItem == mc.rcgraph_as)
+		xy = MC_XYAXIS;
+	else if(menuItem == mc.rcgraph_fh)
+		xy = MC_XAXIS;
+	else if(menuItem == mc.rcgraph_fv)
+		xy = MC_YAXIS;
+	
+	if(xy >= 0)
+		fit_graph(panel, control, xy);
 }
 
 void CVICALLBACK ZoomGraph (int menuBar, int menuItem, void *callbackData,
 		int panel)
 {
+	
+	int in = (menuItem == mc.rcgraph_zo);
+	int control = (menuItem == dc.spec)?dc.spec:dc.fid;
+	
+	zoom_graph(panel, control, in, MC_XYAXIS);	
 }
 
 void CVICALLBACK PanGraph (int menuBar, int menuItem, void *callbackData,
 		int panel)
 {
+	int dir;
+	int control = (panel == dc.spec)?dc.sgraph:dc.fgraph;
+	
+	if(menuItem == mc.rcgraph_pl)
+		dir = MC_LEFT;
+	else if(menuItem == mc.rcgraph_pr)
+		dir = MC_RIGHT;
+	else if(menuItem == mc.rcgraph_pu)
+		dir = MC_UP;
+	else if(menuItem == mc.rcgraph_pd)
+		dir = MC_DOWN;
+	else
+		dir = -1;
+
+	if (dir >= 0)
+		pan_graph(panel, control, dir);
 }
 
 

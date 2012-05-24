@@ -331,7 +331,19 @@ struct {
 	int ssaveconfig_file;	// Setup > Save Current Config to File
 	int sloadconfig;		// Setup > Load Config from File
 	int sbttls;				// Setup > Setup Broken TTLS
-
+	
+	// Right click menus.
+	int rcgraph;			// RCMenus > Graph
+	int rcgraph_as;			// RCMenus > Graph > Autoscale
+	int rcgraph_zi;			// RCMenus > Graph > Zoom In
+	int rcgraph_zo;			// RCMenus > Graph > Zoom Out
+	int rcgraph_pr;			// RCMenus > Graph > Pan Right
+	int rcgraph_pl;			// RCMenus > Graph > Pan Left
+	int rcgraph_pu;			// RCMenus > Graph > Pan Up
+	int rcgraph_pd;			// RCMenus > Graph > Pan Down
+	int rcgraph_fh;			// RCMenus > Graph > Fit Horizontally
+	int rcgraph_fv;			// RCMenus > Graph > Fit Vertically
+	
 } mc;
 
 // uipc -> contains data about the pulse program side of the current configuration of the UI

@@ -509,6 +509,18 @@ void initialize_uicontrols() {
 	mc.sloadconfig = MainMenu_SetupMenu_LoadConfigFromFile;
 	mc.sbttls = MainMenu_SetupMenu_BrokenTTLsMenu;
 	
+	// Right click menus.
+	mc.rcgraph = RCMenus_GraphMenu;
+	mc.rcgraph_as = RCMenus_GraphMenu_AutoScaling;
+	mc.rcgraph_zi = RCMenus_GraphMenu_ZoomGraphIn;
+	mc.rcgraph_zo = RCMenus_GraphMenu_ZoomGraphOut;
+	mc.rcgraph_pl = RCMenus_GraphMenu_PanLeft;
+	mc.rcgraph_pr = RCMenus_GraphMenu_PanRight;
+	mc.rcgraph_pu = RCMenus_GraphMenu_PanUp;
+	mc.rcgraph_pd = RCMenus_GraphMenu_PanDown;
+	mc.rcgraph_fh = RCMenus_GraphMenu_FitHorizontally;
+	mc.rcgraph_fv = RCMenus_GraphMenu_FitGraphVertically;
+	
 	// Populate the data tab controls
 	dc.fgraph = FID_Graph;		//FID controls first
 	dc.fauto = FID_Autoscale;

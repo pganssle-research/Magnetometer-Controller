@@ -3059,12 +3059,18 @@ int plot_data(double *data, int np, double sr, int nc) {
 	if(as) {
 		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_BOTTOM_XAXIS, VAL_AUTOSCALE, 0, 0);
 		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_LEFT_YAXIS, VAL_AUTOSCALE, 0, 0);
+	} else {
+		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_BOTTOM_XAXIS, VAL_MANUAL, 0, 0);
+		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_LEFT_YAXIS, VAL_MANUAL, 0, 0);
 	}
 	
 	GetCtrlVal(dc.spec, dc.sauto, &as); // Spectrum autoscale
 	if(as) {
 		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_BOTTOM_XAXIS, VAL_AUTOSCALE, 0, 0);
 		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_LEFT_YAXIS, VAL_AUTOSCALE, 0, 0);
+	} else {
+		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_BOTTOM_XAXIS, VAL_MANUAL, 0, 0);
+		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_LEFT_YAXIS, VAL_MANUAL, 0, 0);
 	}
 
 	// We want to zero-pad the FFT out to a power of 2.
@@ -3174,6 +3180,159 @@ int plot_data_safe(double *data, int np, double sr, int nc) {
 	CmtReleaseLock(lock_uidc);
 	
 	return rv;
+}
+
+int run_hotkey(int panel, int control, int eventData1, int eventData2)
+{
+	//Sets up a series of hotkeys for the graph controls.
+	switch (eventData1)
+	{
+		case (VAL_MENUKEY_MODIFIER | VAL_UP_ARROW_VKEY):
+		case (VAL_SHIFT_AND_MENUKEY | '+'):
+			zoom_graph(panel, control, 1, MC_XYAXIS);
+		break;
+		
+		case (VAL_MENUKEY_MODIFIER | VAL_DOWN_ARROW_VKEY):
+		case (VAL_MENUKEY_MODIFIER | '='):
+			zoom_graph(panel, control, 0, MC_XYAXIS);
+			break;
+		
+		case (VAL_SHIFT_MODIFIER | VAL_RIGHT_ARROW_VKEY):
+			pan_graph(panel, control, MC_RIGHT);
+			break;
+			
+		case (VAL_SHIFT_MODIFIER | VAL_LEFT_ARROW_VKEY):
+			pan_graph(panel, control, MC_LEFT);
+			break;
+		
+		case (VAL_SHIFT_MODIFIER | VAL_UP_ARROW_VKEY):
+			pan_graph(panel, control, MC_UP);
+			break;
+			
+		case (VAL_SHIFT_MODIFIER | VAL_DOWN_ARROW_VKEY):
+			pan_graph(panel, control, MC_DOWN);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY | 'H'):
+			fit_graph(panel, control, MC_XAXIS);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY | 'V'):
+			fit_graph(panel, control, MC_YAXIS);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY | VAL_UP_ARROW_VKEY):
+			zoom_graph(panel, control, 1, MC_YAXIS);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY |  VAL_DOWN_ARROW_VKEY):
+			zoom_graph(panel, control, 0, MC_YAXIS);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY | VAL_RIGHT_ARROW_VKEY):
+			zoom_graph(panel, control, 1, MC_XAXIS);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY | VAL_LEFT_ARROW_VKEY):
+			zoom_graph(panel, control, 0, MC_XAXIS);
+			break;
+	
+	}
+	return 0;	
+}
+
+int zoom_graph (int panel, int control, int in, int xy)
+{
+	//Give this a panel and a control and tell it to zoom in or out (in = 0 -> zoom out, in = 1 -> zoom in)
+	//xy = MC_XAXIS gives you zoom on the x, xy = MC_YAXIS gives you zoom on y only, xy = MC_XYAXIS gives zoom on both x and y.
+	int xmode, ymode;
+	double xmin, xmax, ymin, ymax, min, max;
+	
+	GetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, &xmode, &xmin, &xmax);
+	GetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, &ymode, &ymin, &ymax);
+	
+	if(xy == MC_XAXIS || xy == MC_XYAXIS)
+	{
+		max = xmax - xmin;
+		min = (xmax + xmin)/2;
+		max += (0.1-0.2*in)*max;
+		max /= 2;
+		xmax = min+max;
+		xmin = min-max;
+	}
+	
+	if(xy == MC_YAXIS || xy == MC_XYAXIS)
+	{
+		max = ymax - ymin;
+		min = (ymax + ymin)/2;
+		max += (0.1-0.2*in)*max;
+		max /= 2;
+		ymax = min+max;
+		ymin = min-max;
+	}
+	
+	SetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, VAL_MANUAL, xmin, xmax);
+	SetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, VAL_MANUAL, ymin, ymax);
+	
+	RefreshGraph(panel, control);
+
+	return 0;
+}
+
+int pan_graph (int panel, int control, int dir)
+{
+	int xmode;
+	double xmin, xmax, disp, diff, axis;
+	
+	if(dir == MC_LEFT || dir == MC_RIGHT)
+		axis = VAL_BOTTOM_XAXIS;
+	else if(dir == MC_UP || dir == MC_DOWN)
+		axis = VAL_LEFT_YAXIS;
+	else
+		return -1;
+	
+	GetAxisScalingMode(panel, control, axis, &xmode, &xmin, &xmax);
+	
+	if(dir == MC_LEFT || dir == MC_DOWN)
+		disp = -0.05;
+	else
+		disp = 0.05;
+
+	diff = xmax - xmin;
+	
+	xmin += disp*diff;
+	xmax += disp*diff;
+
+	SetAxisScalingMode(panel, control, axis, VAL_MANUAL, xmin, xmax);
+	
+	RefreshGraph(panel, control);
+
+	return 0;
+}
+
+int fit_graph (int panel, int control, int xy)
+{
+	int xmode, ymode, val;
+	double xmin, xmax, ymin, ymax;
+	
+	GetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, &xmode, NULL, NULL);
+	GetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, &ymode, NULL, NULL);
+
+	if(xy == MC_XAXIS || xy == MC_XYAXIS)
+		SetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, VAL_AUTOSCALE, NULL, NULL);
+	
+	if(xy == MC_YAXIS || xy == MC_XYAXIS)
+		SetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, VAL_AUTOSCALE, NULL, NULL);
+	
+	RefreshGraph(panel, control);
+	
+	GetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, &val, &xmin, &xmax);
+	GetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, &val, &ymin, &ymax);
+	
+	SetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, xmode, xmin, xmax);
+	SetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, ymode, ymin, ymax);
+	
+	return 0;
 }
 
 int change_phase(int chan, double phase, int order) {

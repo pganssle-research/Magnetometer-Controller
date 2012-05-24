@@ -58,10 +58,18 @@ extern void load_data_popup(void);
 
 extern int plot_data(double *data, int np, double sr, int nc);
 extern int plot_data_safe(double *data, int np, double sr, int nc);
+
+extern int run_hotkey(int panel, int control, int eventData1, int eventData2);
+extern int zoom_graph(int panel, int control, int in, int xy);
+extern int pan_graph(int panel, int control, int dir);
+extern int fit_graph(int panel, int control, int xy);
+
 extern void clear_plots(void);
 extern void clear_plots_safe(void);
+
 extern int change_phase(int chan, double phase, int order);
 extern int change_phase_safe(int chan, double phase, int order);
+
 extern int polynomial_subtraction(double *data, int np, int order, int skip);
 
 extern void update_experiment_nav(void);
