@@ -1955,7 +1955,7 @@ int CVICALLBACK ChangePolyFitOrder (int panel, int control, int event,
 }
 
 /***************** FID Specific ******************/ 
- int CVICALLBACK FIDGraphClick (int panel, int control, int event,
+ int CVICALLBACK GraphClick (int panel, int control, int event,
 		void *callbackData, int eventData1, int eventData2)
 {
 	switch (event)
@@ -2080,19 +2080,6 @@ int CVICALLBACK ChangeFIDChanColor (int panel, int control, int event,
 }
 
 /***************** FFT Specific ******************/
-
-int CVICALLBACK SpectrumCallback (int panel, int control, int event,
-		void *callbackData, int eventData1, int eventData2)
-{
-	switch (event)
-	{
-		case EVENT_COMMIT:
-
-			break;
-	}
-	return 0;
-}
-
 int CVICALLBACK ChangeSpectrumChannel (int panel, int control, int event,
 		void *callbackData, int eventData1, int eventData2)
 {

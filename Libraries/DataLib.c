@@ -2578,7 +2578,7 @@ dheader load_dataheader_file(FILE *f, int *ev) {
 	
 	// Read out all these FSAVES into the relevant variables.
 	int tse = 0, tde = 0;
-	int mspos = 11;
+	int mspos = 12;
 	char *dh_names[MCD_DATANUM] = {MCD_FILENAME, MCD_EXPNAME, MCD_EXPNUM, MCD_DATADESC, MCD_HASH,
 								   MCD_NCHANS, MCD_DATESTAMP, MCD_TIMESTART, MCD_TIMEDONE,
 								   MCD_TSTART, MCD_TDONE, MCD_CIND, MCD_MAXSTEPS};
@@ -3059,20 +3059,14 @@ int plot_data(double *data, int np, double sr, int nc) {
 	if(as) {
 		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_BOTTOM_XAXIS, VAL_AUTOSCALE, 0, 0);
 		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_LEFT_YAXIS, VAL_AUTOSCALE, 0, 0);
-	} else {
-		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_BOTTOM_XAXIS, VAL_MANUAL, 0, 0);
-		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_LEFT_YAXIS, VAL_MANUAL, 0, 0);
-	}
+	} 
 	
 	GetCtrlVal(dc.spec, dc.sauto, &as); // Spectrum autoscale
 	if(as) {
 		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_BOTTOM_XAXIS, VAL_AUTOSCALE, 0, 0);
 		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_LEFT_YAXIS, VAL_AUTOSCALE, 0, 0);
-	} else {
-		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_BOTTOM_XAXIS, VAL_MANUAL, 0, 0);
-		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_LEFT_YAXIS, VAL_MANUAL, 0, 0);
 	}
-
+	
 	// We want to zero-pad the FFT out to a power of 2.
 	int npfft = ceil(log10(np)/log10(2)); // ceil(log2(np))
 	npfft = 1<<npfft; // Bitshifting 1 gives you pow(2, npfft);
@@ -3668,7 +3662,7 @@ void set_nav_from_lind(int lind, int panel, int avg) {
 	// Set the values, then we're done.
 	for(i = 0; i < p->nDims; i++) { SetCtrlVal(panel, dc.idrings[i], cstep[i+1]); }
 	
-	update_transients();
+	update_experiment_nav();
 	
 	SetCtrlIndex(panel, dc.ctrans, avg?0:cstep[0]+1);
 	

@@ -288,7 +288,7 @@
 #define  AOutTab_NumDimensions            3       /* callback function: NumDimensionCallback */
 
      /* tab page panel controls */
-#define  FID_Graph                        2       /* callback function: FIDGraphClick */
+#define  FID_Graph                        2       /* callback function: GraphClick */
 #define  FID_CursorY                      3
 #define  FID_CursorX                      4
 #define  FID_Chan8                        5       /* callback function: ToggleFIDChan */
@@ -366,7 +366,7 @@
 #define  PulseProg_UsePulseBlaster        27      /* callback function: ChangeUsePB */
 
      /* tab page panel controls */
-#define  Spectrum_Graph                   2       /* callback function: SpectrumCallback */
+#define  Spectrum_Graph                   2       /* callback function: GraphClick */
 #define  Spectrum_CursorY                 3
 #define  Spectrum_CursorX                 4
 #define  Spectrum_Channel                 5       /* callback function: ChangeSpectrumChannel */
@@ -536,10 +536,10 @@ int  CVICALLBACK FEChangeInstrDataInstr(int panel, int control, int event, void 
 int  CVICALLBACK FEEnableDelay(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK FEEnableInstrData(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK FENewFunc(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
-int  CVICALLBACK FIDGraphClick(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK FuncEditQuit(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK FuncEditSave(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK FuncEditSaveAndClose(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
+int  CVICALLBACK GraphClick(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstNumChange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstNumFRChange(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK InstrCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
@@ -576,7 +576,6 @@ int  CVICALLBACK SaveExperimentalParams(int panel, int control, int event, void 
 int  CVICALLBACK SaveProgram(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 void CVICALLBACK SaveProgramMenu(int menubar, int menuItem, void *callbackData, int panel);
 int  CVICALLBACK SetupSkipCondition(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
-int  CVICALLBACK SpectrumCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK StartProgram(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK StopProgram(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);
 int  CVICALLBACK TestCallback(int panel, int control, int event, void *callbackData, int eventData1, int eventData2);

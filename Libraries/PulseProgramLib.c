@@ -2196,6 +2196,9 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 				if(constant_array_double(nd_delays, steps))
 					del = 0;
 			
+				// Turn on the thing.
+				update_nd_state(num, (p->v_ins_mode[i] & PP_V_ID_EXPR)?2:1);
+				
 				// Set the initial and final controls.
 				if(del) {
 					// Initial delay
@@ -2205,16 +2208,36 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 					// Final delay
 					SetCtrlIndex(pc.cinst[num], pc.delu_fin, nd_units[steps-1]);
 					SetCtrlVal(pc.cinst[num], pc.del_fin, nd_delays[steps-1]/pow(1000, nd_units[steps-1]));
+				} else {
+					PINSTR ibuff = *(p->instrs[num]);
+					double tbuff = ibuff.instr_time/pow(1000, ibuff.time_units);
+					
+					SetCtrlVal(pc.cinst[num], pc.del_init, tbuff);
+					SetCtrlVal(pc.cinst[num], pc.del_inc, 0.0);
+					SetCtrlVal(pc.cinst[num], pc.del_fin, tbuff);
+					
+					SetCtrlVal(pc.cinst[num], pc.delu_init, ibuff.time_units);
+					SetCtrlVal(pc.cinst[num], pc.delu_inc, 0);
+					SetCtrlVal(pc.cinst[num], pc.delu_fin, ibuff.time_units);
 				}
 			
 				if(dat) {
 					SetCtrlVal(pc.cinst[num], pc.dat_init, nd_data[0]);
 					SetCtrlVal(pc.cinst[num], pc.dat_fin, nd_data[steps-1]);
+				} else {
+					int dbuff;
+					GetCtrlVal(pc.inst[num], pc.instr_d, &dbuff);
+					
+					SetCtrlVal(pc.cinst[num], pc.dat_init, dbuff);
+					SetCtrlVal(pc.cinst[num], pc.dat_inc, 0);
+					SetCtrlVal(pc.cinst[num], pc.dat_fin, dbuff);
 				}
+				
+				// Update the dimension (increments and such)
+				SetCtrlIndex(pc.cinst[num], pc.dim, dim);
+				change_dimension(num);
 		
 				if(p->v_ins_mode[i] & PP_V_ID_EXPR) {
-					update_nd_state(num, 2);
-				
 					// Load the expressions
 					len = strlen(p->data_exprs[i]);
 					if(len > 0)
@@ -2226,13 +2249,9 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 				
 					update_nd_from_exprs(num);
 				} else {
-					update_nd_state(num, 1);
+					update_nd_increment(num, MC_INC);	
 				}
-			
-				// Update the dimension (increments and such)
-				SetCtrlIndex(pc.cinst[num], pc.dim, dim);
-				change_dimension(num);
-			
+
 				// Now if this was arbitrary, copy over the nd_data and nd_delay tables.
 				if(p->v_ins_mode[i] & PP_V_ID_ARB) {
 					for(j = 0; j < uipc.ndins; j++) {
@@ -3718,7 +3737,7 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 		if(ind < 0) {				// only need to update if we're not already there.
 			uipc.ndins++;			// Increment the number of instructions varied 
 			
-			// Memory allocation is important.
+			// Memory allocation is important. (Replace these with realloc_if_needed)
 			if(uipc.dim_ins == NULL)
 				uipc.dim_ins = malloc(sizeof(int)*uipc.ndins);
 			else
@@ -5931,9 +5950,11 @@ void change_fr_num_instrs(int num, int lr) {
 		GetPanelAttribute(inst[0], ATTR_LEFT, &left);
 		
 		if(lr) {
-			inst = pc.linst = realloc(pc.linst, sizeof(int)*num);
+			pc.linst = realloc(pc.linst, sizeof(int)*(num+5));
+			inst = pc.linst;
 		} else {
-			inst = pc.finst = realloc(pc.finst, sizeof(int)*num);
+			pc.finst = realloc(pc.finst, sizeof(int)*num);
+			inst = pc.finst;
 		}
 		
 		double del;
