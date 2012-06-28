@@ -193,6 +193,8 @@ char *get_err_string(int err_val, unsigned int err_type) {
 						return MCPP_ERR_NOSTRING_STR;
 					case MCPP_ERR_NOFRINSTRS:
 						return MCPP_ERR_NOFRINSTRS_STR;
+					case MCPP_ERR_BADLOOP:
+						return MCPP_ERR_BADLOOP_STR;
 				}
 				break;
 			case MCEX_ERR:

@@ -142,6 +142,7 @@ Descrip	: Since changing over to this new system, you've broken all the
 #include <UIControls.h>
 #include <FileSave.h>
 #include <MCUserDefinedFunctions.h> 
+#include <ErrorLib.h>
 #include <utility.h>
 
 #include <General.h>  
@@ -2582,7 +2583,10 @@ int CVICALLBACK SaveExperimentalParams (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+			
+			free_ep(&uiep);
+			uiep = save_ep();
+			
 			break;
 	}
 	return 0;
@@ -2594,7 +2598,10 @@ int CVICALLBACK SaveAndCloseExperimentalParams (int panel, int control, int even
 	switch (event)
 	{
 		case EVENT_COMMIT:
-
+			free_ep(&uiep);
+			uiep = save_ep();
+			
+			HidePanel(panel);
 			break;
 	}
 	return 0;
@@ -2606,7 +2613,7 @@ int CVICALLBACK CancelExperimentalParameters (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-			HidePanel(ec.ep);
+			HidePanel(panel);
 			break;
 	}
 	return 0;
@@ -2661,6 +2668,7 @@ void CVICALLBACK LaunchEParams (int menuBar, int menuItem, void *callbackData,
 		ec.ep = LoadPanel(0, MC_UI, EParams);
 	}
 	
+	load_ep(uiep);
 	DisplayPanel(ec.ep);
 }
 
@@ -2917,6 +2925,67 @@ int CVICALLBACK ChangeFRNReps (int panel, int control, int event,
 	{
 		case EVENT_COMMIT:
 
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK RefreshFileBox (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+				refresh_dir_box();
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK LoadAsCurrent (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK CalculateProgramTime (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			
+			PPROGRAM *p = get_current_program();
+			
+			int rv = 0;
+			double rtime = calc_prog_time(p, 0, &rv);
+			
+			if(rv < 0) {
+				display_error(rv);
+			} else {
+				int right, left, width;
+				GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_LEFT, &left);
+				GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_WIDTH, &width);
+				right = left+width;
+				
+				char *tstr = time_string(rtime, 0, 0);
+				
+				SetCtrlVal(mc.rtime[1], mc.rtime[0], tstr);
+				
+				GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_WIDTH, &width); 
+				SetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_LEFT, right-width);
+				if(tstr != NULL) { free(tstr); }
+				
+			}
+			
+			
+			
 			break;
 	}
 	return 0;

@@ -58,7 +58,7 @@
 
 // Display header
 #define MCD_DISPHEADER "[Display Header]"
-#define MCD_DISPNUM 10
+#define MCD_DISPNUM 16
 
 #define MCD_POLYFITON "poly_on"
 #define MCD_POLYFITORDER "poly_ord"
@@ -70,6 +70,12 @@
 #define MCD_FOFFS "fid_offsets"
 #define MCD_SCHANSON "spec_chans_on"
 #define MCD_FCHANSON "fid_chans_on"
+#define MCD_MAGCAL "mag_cal"
+#define MCD_MAGCALU "mag_cal_units"
+#define MCD_XUNITS "x_units"
+#define MCD_YUNITS "y_units"
+#define MCD_AMPGAIN "amp_gain"
+#define MCD_RESVAL "res_val"
 
 // TDM stuff
 #define MCTD_MAINDATA "DataGroup"			// The main data group name.
@@ -91,7 +97,7 @@
 /************** Running Experiment Functions *************/  
 extern int run_experiment(PPROGRAM *p);   
 
-extern double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error, int safe);
+extern double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, double max_time, int *error, int safe);
 extern int prepare_next_step(PPROGRAM *p);
 extern int prepare_next_step_safe(PPROGRAM *p);
 
@@ -103,7 +109,7 @@ extern int update_avg_data_mcd(char *fname, double **avg_data, PPROGRAM *p, doub
 extern int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time_t done);
 
 // Data Loading
-
+extern void load_file_info_dh(dheader dh);
 
 // General Utilities
 extern char *make_cstep_str(PPROGRAM *p, int cind, int avg, int *ev);   

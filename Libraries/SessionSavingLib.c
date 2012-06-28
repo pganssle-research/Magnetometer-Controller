@@ -456,6 +456,8 @@ void initialize_uicontrols() {
 	mc.mainstatus[0] = MainPanel_IsRunning;
 	mc.startbut[0] = MainPanel_Start;
 	mc.stopbut[0] = MainPanel_Stop;
+	mc.etime[0] = MainPanel_TElapsed;
+	mc.rtime[0] = MainPanel_TRemain;
 	
 	// Then populate the main panel panels
 	mc.mtabs[1] = mc.mp;
@@ -472,6 +474,8 @@ void initialize_uicontrols() {
 	mc.mainstatus[1] = mc.mp;
 	mc.startbut[1] = mc.mp;
 	mc.stopbut[1] = mc.mp;
+	mc.etime[1] = mc.mp;
+	mc.rtime[1] = mc.mp;
 	
 	// Populate the menu bars
 
@@ -805,8 +809,17 @@ void initialize_ec() {
 	ec.dev_led = EParams_HasDevice;
 	ec.dev_ring = EParams_Device;
 	
-	ec.unit_mag = EParams_UnitMag;
-	ec.unit_base = EParams_UnitName;
+	ec.xunit_mag = EParams_XUnitMag;
+	ec.xunit_base = EParams_XUnitName;
+	
+	ec.yunit_mag = EParams_YUnitMag;
+	ec.yunit_base = EParams_YUnitName;
+	
+	ec.funit_mag = EParams_FUnitMag;
+	ec.funit_base = EParams_FUnitName;
+	
+	ec.sunit_mag = EParams_SUnitMag;
+	ec.sunit_base = EParams_SUnitName;
 	
 	ec.again_led = EParams_HasAmp;
 	ec.again = EParams_AmpGain;
@@ -814,14 +827,14 @@ void initialize_ec() {
 	ec.res_led = EParams_HasResistor;
 	ec.res_val = EParams_Resistor;
 	
-	ec.cal_unit = EParams_CalUnits;
 	ec.cal_val = EParams_Calibration;
-	
-	ec.cal_off_unit = EParams_CalOffUnits;
-	ec.cal_off_val = EParams_CalOffset;
+	ec.cal_unit = EParams_CalUnits;
+	ec.cal_base = EParams_CalUnitMag;
 	
 	ec.cal_func_led = EParams_HasFunction;
 	ec.cal_func = EParams_CalibrationFunction;
+	
+	uiep = null_ep();
 }
 
 void initialize_ce() {
@@ -865,6 +878,11 @@ void initialize_ce() {
 	
 	ce.cind = -1;
 	
+	ce.t_el = 0.0;
+	ce.t_prog = 0.0;
+	ce.t_rem = 0.0;
+	ce.t_tot = 0.0;
+	
 	CmtReleaseLock(lock_ce);
 }
 
@@ -902,6 +920,157 @@ int *get_broken_ttl_ctrls() {
 }
 
 /********************************  File I/O  *********************************/
+EP save_ep() {
+	// Save the current experimental parameters to an EP struct.
+	EP ep = null_ep();
+	
+	// Get the display bases
+	GetCtrlVal(ec.ep, ec.xunit_mag, &ep.xumag);
+	GetCtrlVal(ec.ep, ec.yunit_mag, &ep.yumag);
+	GetCtrlVal(ec.ep, ec.funit_mag, &ep.fumag);
+	GetCtrlVal(ec.ep, ec.sunit_mag, &ep.sumag);
+	GetCtrlVal(ec.ep, ec.cal_base, &ep.calmag);
+	
+	int len = 0;
+	
+	// Get the units
+	// X
+	GetCtrlValStringLength(ec.ep, ec.xunit_base, &len);
+	if(len > 0) {
+		ep.xunits = malloc(len+1);
+		GetCtrlVal(ec.ep, ec.xunit_base, ep.xunits);
+	} else {
+		ep.xunits = malloc(strlen(MCEP_XUDFLT)+1);
+		strcpy(ep.xunits, MCEP_XUDFLT);
+	}
+	
+	// Y
+	GetCtrlValStringLength(ec.ep, ec.yunit_base, &len);
+	
+	if(len > 0) {
+		ep.yunits = malloc(len+1);
+		GetCtrlVal(ec.ep, ec.yunit_base, ep.yunits);
+	} else {
+		ep.yunits = malloc(strlen(MCEP_YUDFLT)+1);
+		strcpy(ep.yunits, MCEP_YUDFLT);
+	}
+	
+	// F
+	GetCtrlValStringLength(ec.ep, ec.funit_base, &len);
+	
+	if(len > 0) {
+		ep.funits = malloc(len+1);
+		GetCtrlVal(ec.ep, ec.funit_base, ep.funits);
+	} else {
+		ep.funits = malloc(strlen(MCEP_FUDFLT)+1);
+		strcpy(ep.funits, MCEP_FUDFLT);
+	}
+	
+	// S
+	GetCtrlValStringLength(ec.ep, ec.sunit_base, &len);
+	
+	if(len > 0) {
+		ep.sunits = malloc(len+1);
+		GetCtrlVal(ec.ep, ec.sunit_base, ep.sunits);
+	} else {
+		ep.sunits = malloc(strlen(MCEP_SUDFLT)+1);
+		strcpy(ep.sunits, MCEP_SUDFLT);
+	}
+	
+	// Calibration
+	GetCtrlValStringLength(ec.ep, ec.cal_unit, &len);
+	
+	if(len > 0) {
+		ep.calunits = malloc(len+1);
+		GetCtrlVal(ec.ep, ec.cal_unit, ep.calunits);
+	}
+	
+	// Calibration value
+	GetCtrlVal(ec.ep, ec.cal_val, &ep.cal_val);
+	
+	// Amplifier gain
+	GetCtrlVal(ec.ep, ec.again_led, &ep.agon);
+	if(ep.agon) {
+		GetCtrlVal(ec.ep, ec.again, &ep.again);
+	}
+	
+	// Resistor
+	GetCtrlVal(ec.ep, ec.res_led, &ep.ron);
+	if(ep.ron) {
+		GetCtrlVal(ec.ep, ec.res_val, &ep.res);	
+	}
+	
+	return ep;
+}
+
+void load_ep(EP ep) {
+	// Magnitudes first
+	SetCtrlVal(ec.ep, ec.xunit_mag, ep.xumag);
+	SetCtrlVal(ec.ep, ec.yunit_mag, ep.yumag);
+	SetCtrlVal(ec.ep, ec.funit_mag, ep.fumag);
+	SetCtrlVal(ec.ep, ec.sunit_mag, ep.sumag);
+	SetCtrlVal(ec.ep, ec.cal_base, ep.calmag);
+	
+	// Then the resistor and amplifier gains.
+	SetCtrlVal(ec.ep, ec.again_led, ep.agon);
+	ToggleEPParameter(ec.ep, ec.again_led, EVENT_COMMIT, NULL, NULL, NULL);
+	
+	SetCtrlVal(ec.ep, ec.res_led, ep.ron);
+	ToggleEPParameter(ec.ep, ec.res_led, EVENT_COMMIT, NULL, NULL, NULL);
+	
+	
+	// Then the resistor and amplifier values
+	SetCtrlVal(ec.ep, ec.again, ep.again);
+	SetCtrlVal(ec.ep, ec.res_val, ep.res);
+	
+	// Now the units of everything.
+	SetCtrlVal(ec.ep, ec.xunit_base, (ep.xunits == NULL)?MCEP_XUDFLT:ep.xunits);
+	SetCtrlVal(ec.ep, ec.yunit_base, (ep.yunits == NULL)?MCEP_YUDFLT:ep.yunits);
+	SetCtrlVal(ec.ep, ec.funit_base, (ep.funits == NULL)?MCEP_FUDFLT:ep.funits);
+	SetCtrlVal(ec.ep, ec.sunit_base, (ep.sunits == NULL)?MCEP_SUDFLT:ep.sunits);
+	SetCtrlVal(ec.ep, ec.cal_unit, (ep.calunits == NULL)?MCEP_CUDFLT:ep.calunits);
+	
+	// And the calibration value
+	SetCtrlVal(ec.ep, ec.cal_val, ep.cal_val);
+}
+	
+
+EP null_ep() {
+	EP ep = {	.xunits = NULL,
+				.yunits = NULL,
+			
+				.funits = NULL,
+				.sunits = NULL,
+			
+				.xumag = 0,
+				.yumag = 0,
+				.sumag = 0,
+				.fumag = 0,
+			
+				.calunits = NULL,
+				.calmag = 0,
+				.cal_val = 1.0,
+			
+				.again = 1.0,
+				.agon = 0,
+			
+				.res = 1.0,
+				.ron = 0
+			};
+	
+	return ep;
+}
+
+EP free_ep(EP *ep) {
+	if(ep->xunits != NULL) { free(ep->xunits); }
+	if(ep->yunits != NULL) { free(ep->yunits); }
+	if(ep->funits != NULL) { free(ep->funits); }
+	if(ep->sunits != NULL) { free(ep->sunits); }
+	if(ep->calunits != NULL) { free(ep->calunits); }
+	
+	return null_ep();
+}
+
 int save_session(char *filename, int safe) { // Primary session saving function
 	// Generates a pair of files, an xml file named filename.xml and a program named
 	// filename.tdms. If you pass NULL, session_fname is used.
@@ -973,7 +1142,8 @@ int save_session(char *filename, int safe) { // Primary session saving function
 	ppc_e = pbdev_e = dev_e = tc_e = cc_e = 0;
 	
 	// Data Display
-	CVIXMLElement dd_e, fid_e, spec_e, phase_e;
+	CVIXMLElement dd_e, fid_e, spec_e, ep_e, x_e, y_e, f_e, s_e, cal_e, phase_e, rv_e, ag_e;
+	x_e = y_e = f_e = s_e = cal_e = ep_e = rv_e = ag_e = 0;
 	dd_e = fid_e = spec_e = phase_e = 0;
 	
 	// Buffers
@@ -1354,6 +1524,7 @@ int save_session(char *filename, int safe) { // Primary session saving function
 	int as;
 	if(rv = CVIXMLNewElement(dd_e, -1, MCXML_FID, &fid_e)) { goto error; }
 	if(rv = CVIXMLNewElement(dd_e, -1, MCXML_SPEC, &spec_e)) { goto error; }
+	if(rv = CVIXMLNewElement(dd_e, -1, MCXML_EP, &ep_e)) { goto error; }
 	
 	//// Add the FID attributes
 	// Number of Channels On
@@ -1482,10 +1653,96 @@ int save_session(char *filename, int safe) { // Primary session saving function
 		}
 	}
 	
+	
+	// Add the experimental parameters
+	char *ubase[11] = MC_UNIT_BASE;
+	
+	// Amplifier Gain
+	if(rv = CVIXMLNewElement(ep_e, -1, MCXML_AGAIN, &ag_e)) { goto error; }
+	sprintf(buff, "%d", uiep.agon);
+	if(rv = CVIXMLAddAttribute(ag_e, MCXML_ON, buff)) { goto error; }
+	sprintf(buff, "%lf", uiep.again);
+	if(rv = CVIXMLSetElementValue(ag_e, buff)) { goto error; }
+	CVIXMLDiscardElement(ag_e);
+	ag_e = 0;
+	
+	// Resistor value
+	if(rv = CVIXMLNewElement(ep_e, -1, MCXML_RESVAL, &rv_e)) { goto error; }
+	sprintf(buff, "%d", uiep.ron);
+	if(rv = CVIXMLAddAttribute(rv_e, MCXML_ON, buff)) { goto error; }
+	sprintf(buff, "%lf", uiep.res);
+	if(rv = CVIXMLSetElementValue(rv_e, buff)) { goto error; }
+	CVIXMLDiscardElement(rv_e);
+	rv_e = 0;
+	
+	// X
+	sprintf(buff, "%d", uiep.xumag);
+	if(rv = CVIXMLNewElement(ep_e, -1, MCXML_X, &x_e)) { goto error; }
+	if(rv = CVIXMLAddAttribute(x_e, MCXML_UNITS, (uiep.xunits != NULL)?uiep.xunits:MCEP_XUDFLT)) { goto error;}
+	if(rv = CVIXMLAddAttribute(x_e, MCXML_UBASEN, 
+		(uiep.xumag < -6 || uiep.xumag > 4)?ubase[0]:ubase[uiep.xumag+6])) { goto error; }
+	if(rv = CVIXMLAddAttribute(x_e, MCXML_UBASE, buff)) { goto error; }
+	
+	CVIXMLDiscardElement(x_e);
+	x_e = 0;
+	
+	// Y
+	sprintf(buff, "%d", uiep.yumag);
+	if(rv = CVIXMLNewElement(ep_e, -1, MCXML_Y, &y_e)) { goto error; }
+	if(rv = CVIXMLAddAttribute(y_e, MCXML_UNITS, (uiep.yunits != NULL)?uiep.yunits:MCEP_YUDFLT)) { goto error;}
+	if(rv = CVIXMLAddAttribute(y_e, MCXML_UBASEN, 
+		(uiep.yumag < -6 || uiep.yumag > 4)?ubase[0]:ubase[uiep.yumag+6])) { goto error; }
+	if(rv = CVIXMLAddAttribute(y_e, MCXML_UBASE, buff)) { goto error; }
+	
+	CVIXMLDiscardElement(y_e);
+	y_e = 0;
+	
+	// F
+	sprintf(buff, "%d", uiep.fumag);
+	if(rv = CVIXMLNewElement(ep_e, -1, MCXML_F, &f_e)) { goto error; }
+	if(rv = CVIXMLAddAttribute(f_e, MCXML_UNITS, (uiep.funits != NULL)?uiep.funits:MCEP_FUDFLT)) { goto error;}
+	if(rv = CVIXMLAddAttribute(f_e, MCXML_UBASEN, 
+		(uiep.fumag < -6 || uiep.fumag > 4)?ubase[0]:ubase[uiep.fumag+6])) { goto error; }
+	if(rv = CVIXMLAddAttribute(f_e, MCXML_UBASE, buff)) { goto error; }
+	
+	CVIXMLDiscardElement(f_e);
+	f_e = 0;
+	
+	//S
+	sprintf(buff, "%d", uiep.sumag);
+	
+	if(rv = CVIXMLNewElement(ep_e, -1, MCXML_S, &s_e)) { goto error; }
+	
+	if(rv = CVIXMLAddAttribute(s_e, MCXML_UNITS, (uiep.sunits != NULL)?uiep.sunits:MCEP_SUDFLT)) { goto error;}
+	if(rv = CVIXMLAddAttribute(s_e, MCXML_UBASEN, 
+		(uiep.sumag < -6 || uiep.sumag > 4)?ubase[0]:ubase[uiep.sumag+6])) { goto error; }
+	if(rv = CVIXMLAddAttribute(s_e, MCXML_UBASE, buff)) { goto error; }
+	
+	CVIXMLDiscardElement(s_e);
+	s_e = 0;
+	
+	// Cal
+	sprintf(buff, "%d", uiep.calmag);
+	if(rv = CVIXMLNewElement(ep_e, -1, MCXML_CAL, &cal_e)) { goto error; }
+	
+	if(rv = CVIXMLAddAttribute(cal_e, MCXML_UNITS, (uiep.calunits != NULL)?uiep.calunits:MCEP_CUDFLT)) { goto error;}
+	if(rv = CVIXMLAddAttribute(cal_e, MCXML_UBASEN, 
+		(uiep.calmag < -6 || uiep.calmag > 4)?ubase[0]:ubase[uiep.calmag+6])) { goto error; }
+	if(rv = CVIXMLAddAttribute(cal_e, MCXML_UBASE, buff)) { goto error; }
+	
+	// Add the value, too.
+	sprintf(buff, "%lf", uiep.cal_val);
+	if(rv = CVIXMLSetElementValue(cal_e, buff)) { goto error; } 
+	
+	CVIXMLDiscardElement(cal_e);
+	cal_e = 0;
+	
+	
 	CVIXMLDiscardElement(fid_e);
 	CVIXMLDiscardElement(spec_e);
+	CVIXMLDiscardElement(ep_e);
 	CVIXMLDiscardElement(dd_e);
-	fid_e = spec_e = dd_e = 0;
+	fid_e = spec_e = dd_e = ep_e = 0;
 	
 	// Save the document			   
 	rv = CVIXMLSaveDocument(xml_doc, 1, fname);
@@ -1520,6 +1777,15 @@ int save_session(char *filename, int safe) { // Primary session saving function
 	if(fid_e != 0) { CVIXMLDiscardElement(fid_e); }
 	if(spec_e != 0) { CVIXMLDiscardElement(spec_e); }
 	if(phase_e != 0) { CVIXMLDiscardElement(phase_e); }
+	
+	if(ep_e != 0) { CVIXMLDiscardElement(ep_e); }
+	if(x_e != 0) { CVIXMLDiscardElement(x_e); }
+	if(y_e != 0) { CVIXMLDiscardElement(y_e); }
+	if(f_e != 0) { CVIXMLDiscardElement(f_e); }
+	if(s_e != 0) { CVIXMLDiscardElement(s_e); }
+	if(cal_e != 0) { CVIXMLDiscardElement(cal_e); }
+	if(rv_e != 0) { CVIXMLDiscardElement(rv_e); }
+	if(ag_e != 0) { CVIXMLDiscardElement(ag_e); }
 	
 	if(safe) {
 		CmtReleaseLock(lock_uipc);
@@ -1602,7 +1868,9 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	
 	// Data Display
 	CVIXMLElement dd_e, fid_e, spec_e, phase_e;
+	CVIXMLElement ep_e, x_e, y_e, f_e, s_e, cal_e, ag_e, rv_e;
 	dd_e = fid_e = spec_e = phase_e = 0;
+	ep_e = x_e = y_e = f_e =  s_e = ag_e = rv_e = 0;
 	
 	// Attributes
 	CVIXMLAttribute buff_a = 0, name_a = 0, ind_a = 0;
@@ -2129,6 +2397,8 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		// Child elements
 		if(rv = CVIXMLGetChildElementByTag(dd_e, MCXML_FID, &fid_e) < 0) { goto error; }
 		if(rv = CVIXMLGetChildElementByTag(dd_e, MCXML_SPEC, &spec_e) < 0) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(dd_e, MCXML_EP, &ep_e) < 0) { goto error; }
+		
 		
 		CVIXMLDiscardElement(dd_e);
 		dd_e = 0;
@@ -2290,6 +2560,156 @@ int load_session(char *filename, int safe) { // Primary session loading function
 		spec_e = 0;
 	}
 	
+	// The experimental parameters
+	if(ep_e != 0) {
+		// Child Elements
+		if(rv = CVIXMLGetChildElementByTag(ep_e, MCXML_X, &x_e) < 0) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(ep_e, MCXML_Y, &y_e) < 0) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(ep_e, MCXML_F, &f_e) < 0) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(ep_e, MCXML_S, &s_e) < 0) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(ep_e, MCXML_CAL, &cal_e) < 0) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(ep_e, MCXML_AGAIN, &ag_e) < 0) { goto error; }
+		if(rv = CVIXMLGetChildElementByTag(ep_e, MCXML_RESVAL, &rv_e) < 0) { goto error; }
+		
+		CVIXMLDiscardElement(ep_e);
+		ep_e = 0;
+
+		int ib = 0;
+		// Amplifier Gain
+		if(ag_e != 0) {
+			if(rv = get_attribute_int_val(ag_e, MCXML_ON, &ib, 0)) { goto error; }
+			uiep.agon = (ib)?1:0;
+			
+			buff = get_element_val(ag_e, buff, &blen, &rv);
+			if(rv < 0) { goto error; }
+			
+			sscanf(buff, "%lf", &uiep.again);
+			
+			CVIXMLDiscardElement(ag_e);
+			ag_e = 0;
+		}
+		
+		// Resistor values
+		if(rv_e != 0) {
+			if(rv = get_attribute_int_val(rv_e, MCXML_ON, &ib, 0)) { goto error; }
+			uiep.ron = (ib)?1:0;
+			
+			buff = get_element_val(rv_e, buff, &blen, &rv);
+			if(rv < 0) { goto error; }
+			
+			sscanf(buff, "%lf", &uiep.res);
+			
+			CVIXMLDiscardElement(rv_e);
+			rv_e = 0;
+		}
+		
+		// X
+		if(x_e != 0) {
+			if(rv = get_attribute_int_val(x_e, MCXML_UBASE, &ib, 0)) { goto error; }
+			uiep.xumag = (short)ib;
+			
+			buff = get_attribute_val(x_e, MCXML_UNITS, buff, &blen, &rv);
+			if(rv < 0) { goto error; }
+			
+			if(strlen(buff) > 0) {
+				if(uiep.xunits != 0) { free(uiep.xunits); }
+				uiep.xunits = malloc(strlen(buff)+1);
+				
+				strcpy(uiep.xunits, buff);
+			}
+			
+			CVIXMLDiscardElement(x_e);
+			x_e = 0;
+		}
+		
+		// Y
+		if(y_e != 0) {
+			if(rv = get_attribute_int_val(y_e, MCXML_UBASE, &ib, 0)) { goto error; }
+			uiep.yumag = (short)ib;
+			
+			buff = get_attribute_val(y_e, MCXML_UNITS, buff, &blen, &rv);
+			if(rv < 0) { goto error; }
+			
+			if(strlen(buff) > 0) {
+				if(uiep.yunits != 0) { free(uiep.yunits); }
+				uiep.yunits = malloc(strlen(buff)+1);
+				
+				strcpy(uiep.yunits, buff);
+			}
+			
+			CVIXMLDiscardElement(y_e);
+			y_e = 0;
+		}
+		
+		if(f_e != 0) {
+			if(rv = get_attribute_int_val(f_e, MCXML_UBASE, &ib, 0)) { goto error; }
+			uiep.fumag = (short)ib;
+			
+			buff = get_attribute_val(f_e, MCXML_UNITS, buff, &blen, &rv);
+			if(rv < 0) { goto error; }
+			
+			if(strlen(buff) > 0) {
+				if(uiep.funits != 0) { free(uiep.funits); }
+				uiep.funits = malloc(strlen(buff)+1);
+				
+				strcpy(uiep.funits, buff);
+			}
+			
+			CVIXMLDiscardElement(f_e);
+			f_e = 0;
+		}
+		
+		
+		if(s_e != 0) {
+			if(rv = get_attribute_int_val(s_e, MCXML_UBASE, &ib, 0)) { goto error; }
+			uiep.sumag = (short)ib;
+			
+			buff = get_attribute_val(s_e, MCXML_UNITS, buff, &blen, &rv);
+			if(rv < 0) { goto error; }
+			
+			if(strlen(buff) > 0) {
+				if(uiep.sunits != 0) { free(uiep.sunits); }
+				uiep.sunits = malloc(strlen(buff)+1);
+				
+				strcpy(uiep.sunits, buff);
+			}
+			
+			CVIXMLDiscardElement(s_e);
+			s_e = 0;
+		}
+		
+		
+		//Calibration  
+		if(cal_e != 0) {
+			if(rv = get_attribute_int_val(cal_e, MCXML_UBASE, &ib, 0)) { goto error; }
+			uiep.calmag = (short)ib;
+			
+			buff = get_attribute_val(cal_e, MCXML_UNITS, buff, &blen, &rv);
+			if(rv < 0) { goto error; }
+			
+			if(strlen(buff) > 0) {
+				if(uiep.calunits == NULL) { free(uiep.calunits); }
+			
+				uiep.calunits = malloc(strlen(buff)+1);		 
+				strcpy(uiep.calunits, buff);
+			}
+			
+			buff = get_element_val(cal_e, buff, &blen, &rv);
+			if(rv < 0) { goto error; }
+			 
+			double dbuff = 0.0;
+			if(sscanf(buff, "%lf", &dbuff) == 1) {
+				uiep.cal_val = dbuff;	
+			} else {
+				uiep.cal_val = 1.0;	
+			}
+			
+			CVIXMLDiscardElement(cal_e);
+			cal_e = 0;
+		}
+	
+	}
+	
 	// Finally, we load the program
 	sprintf(fname, "%s.%s", fbuff, PPROG_EXTENSION);
 	if(FileExists(fname, NULL)) {
@@ -2353,6 +2773,14 @@ int load_session(char *filename, int safe) { // Primary session loading function
 	if(dd_e != 0) { CVIXMLDiscardElement(dd_e); }
 	if(fid_e != 0) { CVIXMLDiscardElement(fid_e); }
 	if(spec_e != 0) { CVIXMLDiscardElement(spec_e); }
+	if(ep_e != 0) { CVIXMLDiscardElement(ep_e); }
+	if(x_e != 0) { CVIXMLDiscardElement(x_e); }
+	if(y_e != 0) { CVIXMLDiscardElement(y_e); }
+	if(f_e != 0) { CVIXMLDiscardElement(f_e); }
+	if(s_e != 0) { CVIXMLDiscardElement(s_e); }
+	if(cal_e != 0) { CVIXMLDiscardElement(cal_e); }
+	if(rv_e != 0) { CVIXMLDiscardElement(rv_e); }
+	if(ag_e != 0) { CVIXMLDiscardElement(ag_e); }
 	
 	// And the attributes
 	if(buff_a != 0) { CVIXMLDiscardAttribute(buff_a); }

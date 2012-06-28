@@ -1,7 +1,12 @@
 #define FILE_SAVE_H
 
-#include <stdio.h>
+#include <stdio.h> 
+
+#ifndef TIME_H
+#define TIME_H
 #include <time.h>
+#endif
+
 #include <FileSaveTypes.h>
 
 #define MCF_EOF -1

@@ -276,6 +276,10 @@ extern int get_maxsteps(int *maxsteps);
 extern int *get_steps_array(int tmode, int *maxsteps, int nc, int nd, int nt);
 extern int get_steps_array_size(int tmode, int nc, int nd);
 
+// Calculate times
+extern double calc_prog_time(PPROGRAM *p, int cind, int *ev);
+extern double calc_list_time(PINSTR *ilist, int istart, int n_items, int *ev);
+
 // Loop manipulation
 extern int find_end_loop(int instr);
 extern int find_end_loop_instrs(int instr, PINSTR *instrs, int n_instrs);

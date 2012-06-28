@@ -1,6 +1,7 @@
 #ifndef DATA_TYPES_H
 #define DATA_TYPES_H
 
+
 typedef struct dstor {
 	// Structure for storing data (in caches and such).	
 	int nt;					// Number of transients

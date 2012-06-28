@@ -1,10 +1,15 @@
 // Includes
 #ifndef UI_CONTROLS_H
-#define UICONTROLS_H
+#define UI_CONTROLS_H
+
+#ifndef TIME_H
+#define TIME_H
+#include <time.h>
+#endif
 
 #include <NIDAQmx.h>
 #include <PulseProgramTypes.h>
-#include <DataTypes.h>
+#include <DataTypes.h>     
 
 /******************* Constant Definitions *******************/
 #define MC_FID	0
@@ -55,8 +60,17 @@ struct {
 	int dev_led;		// Physical device LED toggle
 	int dev_ring;		// Device ring (string, ring)
 	
-	int unit_mag;		// Magnitude of the base units (short int, ring)
-	int unit_base;		// Choice of units. (short int, ring)
+	int xunit_mag;		// Magnitude of the base units (short int, ring)
+	int xunit_base;		// Choice of units. (short int, ring)
+	
+	int yunit_mag;		// Magnitude of the base units (short int, ring)
+	int yunit_base;		// Choice of units. (short int, ring)
+	
+	int funit_mag;		// Magnitude of the base units (short int, ring)
+	int funit_base;		// Choice of units. (short int, ring)
+
+	int sunit_mag;		// Magnitude of the base units (short int, ring)
+	int sunit_base;		// Choice of units. (short int, ring)
 	
 	int again_led;		// Amplifier gain toggle LED.
 	int again;			// Amplifier gain (numeric, double)
@@ -65,11 +79,9 @@ struct {
 	int res_val;		// Resistor value (in Ohms)
 	
 	int cal_unit;		// Calibration units (short int, ring)
+	int cal_base;		// Calibration unit base
 	int cal_val;		// Calibration value (numeric, double)
-	
-	int cal_off_unit;	// Units for calibration offset
-	int cal_off_val;	// Calibration offset value.
-	
+											
 	int cal_func_led;	// Calibration function toggle LED.
 	int cal_func;		// Calibration function (string)
 } ec;
@@ -295,6 +307,9 @@ struct {
 	int pbstop[2];			// Red Pulseblaster Status LED
 	int mainstatus[2];		// Main status LED
 	
+	int etime[2];			// Elapsed time - text control
+	int rtime[2];			// Estimated remaining time - text control.
+	
 	int startbut[2];		// Start button
 	int stopbut[2];			// Stop button
 	
@@ -473,6 +488,33 @@ struct {
 	char *dlpath;			// Default data directory.
 } uidc;
 
+// uiep -> Structure containing information about the experimental parameters
+typedef struct EP {
+	char *xunits;			// Units of x (usually seconds)
+	char *yunits;			// Units of y (default V)
+	
+	char *funits;			// Units of f - the x dimension in the FFT (usually Hz)
+	char *sunits;			// Units of s - the y dimension in the FFT (usually V)
+	
+	short int xumag;		// Unit bases -  			Possible values: a (-6) f (-5) p (-4)  
+	short int yumag;		// Use as such: unit = 10^(3*ubase)*unit	 n (-3) u (-2) m (-1)
+	short int sumag;		// e.g. kHz => funits = "Hz", fubase = 1;	 {}( 0) k ( 1) M ( 2)
+	short int fumag;		// Hz -> fubase = 0, mHz -> fubase = -1;	 G ( 3) T ( 4)
+	
+	char *calunits;			// Calibration value base units.
+	short int calmag;		// Unit base of the calibration value.
+	double cal_val;			// Calibration value (unit/V)
+	
+	double again;			// Amplifier gain (for posterity, really)
+	int agon;				// Whether or not the amplifier gain is on.
+
+	double res;				// Resistance of the circuit converting from I<->V
+	int ron;				// Whether or not the resistor gain is on.
+	
+} EP;
+
+extern EP uiep;			
+
 // ce -> Structure containing information about the currently running experiment.
 typedef struct CEXP {
 	TaskHandle aTask; 		// Signal acquisition task
@@ -506,7 +548,7 @@ typedef struct CEXP {
 	int ctset;				// Whether or not the counter task has been set
 	int atset;				// Whether or not the acquisition task has been set.
 
-	unsigned int cind;		// Current index
+	int cind;				// Current index
 	unsigned int steps_size;// Number of values in *steps
 	unsigned int *cstep;	// Same size as steps
 	unsigned int *steps;	// Maxsteps -> It will have one of three forms:
@@ -519,8 +561,13 @@ typedef struct CEXP {
 	int ninst;				// Number of instructions in this run
 	PINSTR *ilist;			// List of instructions for this run.
 
-	time_t tstart;	// Time started
-	time_t tdone; 	// Time that the most recent part was completed.
+	time_t tstart;			// Time started
+	time_t tdone; 			// Time that the most recent part was completed.
+	
+	double t_el;			// Elapsed time
+	double t_prog;			// Amount of time taken by just the pulse program
+	double t_rem;			// Remaining time on the pulse program
+	double t_tot;			// Total time the program should take
 	
 	// Analog output info
 	TaskHandle oTask;		// Analog output task

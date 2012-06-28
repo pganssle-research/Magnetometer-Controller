@@ -7169,9 +7169,11 @@ PINSTR *generate_instructions(PPROGRAM *p, int cind, int *n_inst) {
 		// Conditions for removal.
 		if((ilist[i].instr_time < 100.0) || ilist[i].instr_data < instr_data_min(ilist[i].instr)) {
 			if(ilist[i].instr == LOOP) {
-				num = find_end_loop_instrs(i, ilist, ni);
-				if(num <= i)
+				num = find_end_loop_instrs(i, ilist+i+1, ni-i-1);
+				if(num < 0)
 					goto error;
+				
+				num += i+1;
 				
 				removed = (num-i)+1;
 			} else {
@@ -7464,6 +7466,123 @@ int get_maxsteps_safe(int *maxsteps) {
 
 
 /********************** Loop Manipulation **********************/ 
+double calc_prog_time(PPROGRAM *p, int cind, int *ev) {
+	// Calculates how long the program will take to execute, starting from
+	// position "cind". Doesn't include first and last runs.
+	double t = 0.0;
+	int i;
+	int rv = 0;
+	
+	// In this situation it's straightforward to calculate.
+	if(!p->nVaried) {
+		int n = p->real_n_steps*p->nt;
+		n -= cind;
+		
+		t = n*calc_list_time(*(p->instrs), 0, p->n_inst, &rv);
+	} else {
+		// Rather than prematurely optimize, we'll just step through every point in the 
+		// program and add that shit up. If it turns out to be slow, there are many 
+		// ways to fix this, like not repeating calculations for every transient, figuring
+		// out the "static" portions of each list, etc.
+		
+		int n_inst = 0;
+		PINSTR *ilist = NULL;
+		
+		for(cind; cind < p->max_n_steps*p->nt; cind++) {
+			if(p->skip && p->skip_locs[cind]) {
+				continue;		
+			}
+			
+			ilist = generate_instructions(p, cind, &n_inst);
+			t += calc_list_time(ilist, 0, n_inst, &rv);
+			free(ilist);
+			
+			if(rv < 0) {
+				break;	
+			}
+		}
+	}	 
+	
+	if(ev != NULL) { *ev = rv; }
+	return t;
+}
+
+double calc_list_time(PINSTR *ilist, int istart, int n_items, int *ev) {
+	// Calculate how long it takes to execute a given span in an ilist.
+	// Supports LOOPS, but branches and subroutines are treated as "CONTINUE"
+	//
+	// istart is the instruction number of the first instruction in the ilist.
+	//
+	// Calls itself recursively.
+	
+	int rv = 0;
+	
+	if(ilist == NULL) {
+		rv = MCPP_ERR_NOPROG;
+		return 0.0;
+	}
+	
+	if(n_items == 0) { return 0; }
+	
+	int end = n_items-1;
+	
+	// Need to know if it is a loop (the whole thing)
+	int is_loop = 0;
+	int start_span = 0;
+	double t = 0.0;  // Time in seconds.
+	
+	if((ilist[0].instr == LOOP && ilist[end].instr == END_LOOP && 
+		ilist[end].instr_data == istart)) {
+		
+		if(ilist[0].instr_data == 0) { return 0.0; }
+		
+		start_span = 1;	
+		t = ilist[0].instr_time/1e9; // Convert to seconds.
+	}
+	
+	
+	int span_start = is_loop?1:0;
+	int l_end = 0;
+	PINSTR *il = NULL;
+	int is = 0;
+	
+	for(int i = span_start; i < n_items; i++) {
+		switch(ilist[i].instr) {
+			case LONG_DELAY:
+				t += ilist[i].instr_time*ilist[i].instr_data/1e9;
+				break;
+			case STOP:
+				rv = 1;
+				break;
+			case LOOP:
+				il = ilist+i;
+				is = i+istart;
+				
+				l_end = find_end_loop_instrs(is, il+1, n_items-i-1);
+				t += calc_list_time(il, is, l_end+1, &rv); 
+				break; 
+			default:
+				t += ilist[i].instr_time/1e9;
+		}
+		
+		if(rv != 0) { break; }
+	}						  
+	
+	
+	if(is_loop) {
+		if(rv == 1) {
+			// This is an error
+			rv = MCPP_ERR_BADLOOP;
+		} else {
+			t *= ilist[0].instr_data;	
+		}
+	}
+
+	if(ev != NULL) { *ev = rv; }
+	return t;
+	
+		
+}
 
 int find_end_loop (int instr) {
 	// Feed this an instruction which is a loop, it finds the corresponding END_LOOP instruction.
@@ -7496,18 +7615,17 @@ int find_end_loop (int instr) {
 }
 
 int find_end_loop_instrs(int instr, PINSTR *instrs, int n_instrs) {
-	// Same as find_end_loop, but it works from a list of PINSTRs
-	// rather than from the UI controls. Returns negative on failure.
+	// Find the end of the loop that started at "instr" in the list instrs.
+	// The best thing to do is pass  a lost of instrs starting with the first one
+	// after the loop.
 	
-	if(instr >= n_instrs)
-		return -1;
-	
-	for(int i = instr+1; i < n_instrs; i++) {
-		if(instrs[i].instr == END_LOOP && instrs[i].instr_data == instr)
-			return i;
+	for(int i = 0; i < n_instrs; i++) { 
+		if(instrs[i].instr == END_LOOP && instrs[i].instr_data == instr) {
+			return i;		
+		}
 	}
 	
-	return -2;
+	return -1;
 }
 
 int in_loop(int instr, int big) {

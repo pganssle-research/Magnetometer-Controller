@@ -41,15 +41,16 @@ extern dheader null_dh(void);
 extern int *parse_cstep(char *step, int *ev);
 
 // File Navigation
+extern void refresh_dir_box(void);
 extern void select_data_item(void);
 extern void select_directory(char *path);
 extern void select_file(char *path);
 
-extern void load_file_info(char *path, char *old_path);
-extern void load_file_info_safe(char *path, char *old_path);
+extern int load_file_info(char *path, char *old_path);
+extern int load_file_info_safe(char *path, char *old_path);
 
-extern void update_file_info(char *path);
-extern void update_file_info_safe(char *path);
+extern int update_file_info(char *path);
+extern int update_file_info_safe(char *path);
 
 /********************* UI Interfaces *********************/
 extern void add_data_path_to_recent(char *path);

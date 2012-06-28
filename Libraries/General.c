@@ -232,6 +232,104 @@ int *move_int_in_array(int *array, int to, int from, int size) {
 // 															//
 //////////////////////////////////////////////////////////////
 
+char *time_string(double t, int col, int lowest) {
+	// Give a double t in seconds, it generates a time string 
+	// either of the form: 1w 3d 5h 6m 3s (if !col)
+	// or of the form: 01:03:05:06:03 (if col)
+	// 
+	// Where only as much as necessary is shown, and nothing
+	// lower than "lowest" will be shown, where 0-> show all
+	// 1 -> show only up to minutes, etc.
+	//
+	// The return value must be freed, if not NULL.
+	
+	if(lowest > 4) { lowest = 4; }
+	if(lowest < 0) { lowest = 0; }
+	
+	t = abs(t);
+	
+	double rem = 0;
+	int w, d, h, m, s;
+	w = (int)floor(t/604800.0);
+	t -= w*604800.0;
+	
+	if(lowest == 4) {
+		rem = t/604800.0;	
+	}
+	
+	d = (int)floor(t/86400.0);
+	t -= d*86400.0;
+	
+	if(lowest == 3) {
+		rem = t/86400.0;
+	}
+	
+	
+	h = (int)floor(t/3600);
+	t -= h*3600;
+	
+	if(lowest == 2) {
+		rem = t/3600.0;	
+	}
+	
+	m = (int)floor(t/60);
+	t -= m*60;
+	if(lowest == 1) {
+		rem = t/60;	
+	}
+	
+	s = (int)floor(t);
+	
+	int largest, frstrlen = 0, strl = 0;
+	
+	if(w > 0) {
+		largest = 4;
+		strl = log10(w)+1;
+	} else if(d > 0) {
+		largest = 3;
+	} else if(h > 0) { 
+		largest = 2;
+	} else if(m > 0) {
+		largest = 1;	
+	} else {
+		largest = 0;
+	}
+	
+	int n = largest-lowest+1;
+	strl += (2+((col)?1:2))*n + (col?0:1) + ((lowest > 0)?4:1);
+	
+	// Generate the format string
+	char *out = malloc(strl);
+	char *fstr = malloc(10);
+	
+	strcpy(out, "");
+	
+	int val[5] = {s, m, h, d, w};
+	char *sep[5] = {"s", "m ", "h ", "d ", "w "};
+	if(col) {
+		sep[0] = "";
+		for(int i = 1; i < 4; i++) { sep[i] = ":"; }
+		
+		sep[lowest] = "";
+	}
+	
+	for(int i = largest; i >= lowest; i--) {
+		if(i == lowest && i > 0) {
+			rem = rem+val[i];
+			sprintf(fstr, "%02.2lf", rem);
+		} else {
+			sprintf(fstr, "%02d", val[i]);	
+		}
+		
+		strcat(out, fstr);
+		strcat(out, sep[i]);
+	}
+	
+	free(fstr);
+	
+	return out;
+}
+
 char *generate_nc_string(char **strings, int numstrings, int *len) {
 	// We're going to store arrays of strings as a single newline-delimited char array. 
 	// len returns the full length of the array with newlines and \0. 

@@ -29,6 +29,7 @@ extern int constant_array_double(double *array, int size);
 extern int constant_array_int(int *array, int size);
 
 /************** String Utilities *************/
+extern char *time_string(double t, int col, int lowest);
 extern char *generate_nc_string(char **strings, int numstrings, int *len);
 extern char **get_nc_strings(char *string, int *ns);
 

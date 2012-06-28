@@ -475,8 +475,8 @@ Precompile Prefix Header = False
 Prefix Header File = ""
 
 [Run Options]
-Stack Size = 250000
-Image Base Address = 4194304
+Stack Size = 500000
+Image Base Address = 5242880
 
 [Compiler Defines]
 Compiler Defines = "/DWIN32_LEAN_AND_MEAN"

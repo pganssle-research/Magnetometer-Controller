@@ -186,6 +186,7 @@
 #define MCPP_ERR_FS_BADCONTENTS -11281
 #define MCPP_ERR_NOSTRING -11282
 #define MCPP_ERR_NOFRINSTRS -11283
+#define MCPP_ERR_BADLOOP -11284
 
 // Strings
 #define MCPP_ERR_NOFILE_STR "No filename was provided."
@@ -214,6 +215,7 @@
 #define MCPP_ERR_FS_BADCONTENTS_STR "Bad contents passed to fsave structure."
 #define MCPP_ERR_NOSTRING_STR "Required string was not present."
 #define MCPP_ERR_NOFRINSTRS_STR "The first run instructions were missing!"
+#define MCPP_ERR_BADLOOP_STR "There is a bad loop in this pulse program."
 
 /***********************************************************
 *  														   *

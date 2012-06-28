@@ -51,8 +51,48 @@ int CVICALLBACK IdleAndGetData (void *functionData) {
 	// Start by getting the current program.
 	PPROGRAM *p = get_current_program_safe();
 	
+	
+	// Initialize ce
+	CmtGetLock(lock_ce);
+	ce.cind = 0;
+	ce.p = p;
+	
+	if(ce.cstep != NULL) {			// In case this has been allocated already.
+		free(ce.cstep);
+		ce.cstep = NULL;
+	}
+	
+	if(ce.steps != NULL) {
+		free(ce.steps);
+		ce.steps = NULL;
+	}
+	
+	ce.steps_size = 0;
+	
+	if(p->scan) {
+		ce.data = free_ds(&(ce.data));
+		ce.adata = free_ds(&(ce.adata));
+	}
+	
+	if(p->varied) {
+		ce.steps_size = get_steps_array_size(ce.p->tmode, ce.p->nCycles, ce.p->nDims);
+		
+		if(ce.steps_size > 0) {
+			ce.steps = get_steps_array(ce.p->tmode,  ce.p->maxsteps, ce.p->nCycles, ce.p->nDims, ce.p->nt);
+			ce.cstep = calloc(ce.steps_size, sizeof(int));
+		}
+	}
+	
+	ce.cind = -1;
+	int done = prepare_next_step(p);
+	CmtReleaseLock(lock_ce);
+	
 	// Run the experiment
-	int rv = run_experiment(p);
+	int rv = 0;
+	
+	if(!done) {
+		rv = run_experiment(p);
+	}
 	
 	CmtExitThreadPoolThread(rv);	
 	
@@ -122,7 +162,7 @@ int CVICALLBACK UpdateStatus (void *functiondata)
 
 int run_experiment(PPROGRAM *p) {
 	// The main thread for running an experiment. This should be called from the main 
-	// run-program type thread (IdleAndGetData).
+	// run-program type thread (IdleAndGetData).   ce should be initialized before running.
 	
 	int scan = p->scan;
 	int ev = 0, done = 0;
@@ -144,46 +184,12 @@ int run_experiment(PPROGRAM *p) {
 	SetCtrlAttribute(mc.mainstatus[1], mc.mainstatus[0], ATTR_LABEL_TEXT, "Running");
 	SetRunning(1);
 	
-	// Initialize ce
-	CmtGetLock(lock_ce);
-	ce_locked = 1;
-	ce.cind = 0;
-	ce.p = p;
-	
-	if(ce.cstep != NULL) {			// In case this has been allocated already.
-		free(ce.cstep);
-		ce.cstep = NULL;
-	}
-	
-	if(ce.steps != NULL) {
-		free(ce.steps);
-		ce.steps = NULL;
-	}
-	
-	ce.steps_size = 0;
-	
-	if(scan) {
-		ce.data = free_ds(&(ce.data));
-		ce.adata = free_ds(&(ce.adata));
-	}
-	
-	if(p->varied) {
-		ce.steps_size = get_steps_array_size(ce.p->tmode, ce.p->nCycles, ce.p->nDims);
-		
-		if(ce.steps_size > 0) {
-			ce.steps = get_steps_array(ce.p->tmode,  ce.p->maxsteps, ce.p->nCycles, ce.p->nDims, ce.p->nt);
-			ce.cstep = calloc(ce.steps_size, sizeof(int));
-		}
-	}
 	
 	if(scan) {
 		if(setup_DAQ_task_safe(1, 1, 0) != 0) {
 			ev = 1;
 			goto error;
 		}
-		
-		// Initialize the TDM file
-		//if(ev = initialize_tdm_safe(0, 1)) { goto error; }
 		
 		update_experiment_nav();
 	}
@@ -196,10 +202,6 @@ int run_experiment(PPROGRAM *p) {
 	}
 	
 	int aouts = ce.nochans?1:0;
-	ce.cind = -1; // Initialize to -1 so that prepare_next_step will work.
-	
-	CmtReleaseLock(lock_ce);
-	ce_locked = 0;
 	
 	// Make sure the pulseblaster is initiated.
 	if(!GetInitialized() && p->use_pb) {
@@ -245,23 +247,54 @@ int run_experiment(PPROGRAM *p) {
 		}
 	}
 	
+	// Set up the initial time-elapsed stuff, etc.
+	int et_right, t_width, t_left;
+	int rt_right;
+	
+	double t_s = Timer();
+	if(p->use_pb) {
+		ce.t_tot = calc_prog_time(p, ce.cind, NULL);
+	} else {
+		ce.t_tot = (p->np/p->sr)*(p->max_n_steps*p->nt);	
+	}
+	
+	ce.t_rem = ce.t_tot;
+	
+	char *e_time = time_string(0, 0, 0);
+	GetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_LEFT, &t_left);
+	GetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_WIDTH, &t_width);
+	et_right = t_left+t_width;
+	
+	SetCtrlVal(mc.etime[1], mc.etime[0], e_time);
+	GetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_WIDTH, &t_width);
+	SetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_LEFT, et_right-t_width);
+	
+	free(e_time);
+	e_time = NULL;
+	
+	char *r_time = time_string(ce.t_rem, 0, 0);
+	GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_LEFT, &t_left);
+	GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_WIDTH, &t_width);
+	rt_right = t_left+t_width;
+	
+	SetCtrlVal(mc.rtime[1], mc.rtime[0], r_time);
+	
+	GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_WIDTH, &t_width);
+	SetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_LEFT, rt_right-t_width);
+	
+	
+	free(r_time);
+	r_time = NULL;
+	
+	double pt = 0;
+	int rerun;
+	
 	// Main loop to keep track of where we're at in the experiment, etc.
 	while(!GetQuitIdle() && !done) {
+		rerun = 0;
+		
 		if(cont_mode) { GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode); }
 			
-		if((done = prepare_next_step_safe(p)) != 0)
-		{
-			/* if(cont_mode && done == 1) {
-				CmtGetLock(lock_ce);		// No possibility of break/goto, don't need to set ce_locked
-				ct--;
-				p->nt++;
-				done = prepare_next_step(p);
-				CmtReleaseLock(lock_ce);
-			}  */ // Fix this a bit later
-			
-			if(done < 0) { ev = done; }
-		}
-		
 		CmtGetLock(lock_ce);
 		ce_locked = 1;
 		
@@ -271,187 +304,226 @@ int run_experiment(PPROGRAM *p) {
 		CmtReleaseLock(lock_ce);
 		ce_locked = 0;
 		
+		// Calculate the program time
+		if(p->use_pb) {
+			pt = calc_list_time(ce.ilist, 0, ce.ninst, NULL);
+		} else {
+			pt = p->np/p->sr;
+		}
+		
 	
-		if(!done) {
-			// This is the part where data acquisition takes place.
+		// This is the part where data acquisition takes place.
 			
-			if(scan ||  aouts) {
-				// Get data from device
-				CmtGetLock(lock_DAQ);
-				daq_locked = 1;
-				
-				if(scan) {
-					if(ev = DAQmxStartTask(ce.cTask)) { goto error; }			// Tasks should be started BEFORE the program is run.
-					if(ev = DAQmxStartTask(ce.aTask)) { goto error; }
-				}
-				
-				if(aouts) {
-					// Since this task is just a change in the DC output levels,
-					// we can currently just start it, update the values, then stop
-					// it. When triggering and function outputs are added, we'll have 
-					// to move the DAQmxStopTask call to later.
-					
-					if(ev = DAQmxStartTask(ce.oTask)) { goto error; }
-					
-					if(ev = update_DAQ_aouts_safe(!daq_locked, !ce_locked)) { goto error; }
-					
-					if(ev = DAQmxStopTask(ce.oTask)) { goto error; }
-				}
-				
-				CmtReleaseLock(lock_DAQ);
-				daq_locked = 0;
-			}
-			//  Program and start the pulseblaster.
-			if(p->use_pb) {
-				if(program_pulses_safe(ce.ilist, ce.ninst, 1) < 0) { goto error; }
-				if(pb_start_safe(1) < 0) { goto error; }
-			}
-			
-			// Check the status once now.
-			update_status_safe(0);
-			
-			// Start checking for updates in another thread.
-			if(p->use_pb) {
-				CmtGetLock(lock_ce);
-				ce_locked = 1;
-				if(ce.update_thread == -1)
-					CmtScheduleThreadPoolFunction(DEFAULT_THREAD_POOL_HANDLE, UpdateStatus, NULL, &ce.update_thread);
-				else {
-					int threadstat;
-					CmtGetThreadPoolFunctionAttribute(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, ATTR_TP_FUNCTION_EXECUTION_STATUS, &threadstat);
-					if(threadstat > 1) 
-						CmtWaitForThreadPoolFunctionCompletion(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, 0);
-				}
-				CmtReleaseLock(lock_ce);
-				ce_locked = 0;
-			
-				// Chill out and wait for the next step.
-				while( !GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
-					Delay(0.01);
-				}
-			}
+		if(scan ||  aouts) {
+			// Get data from device
+			CmtGetLock(lock_DAQ);
+			daq_locked = 1;
 			
 			if(scan) {
-				data = get_data(ce.aTask, ce.p->np, ce.nchan, ce.p->nt, ce.p->sr, &ev, 1);
+				if(ev = DAQmxStartTask(ce.cTask)) { goto error; }			// Tasks should be started BEFORE the program is run.
+				if(ev = DAQmxStartTask(ce.aTask)) { goto error; }
+			}
 			
-				CmtGetLock(lock_DAQ);
-				CmtGetLock(lock_ce);
-				daq_locked = 1;
-				ce_locked = 1;
+			if(aouts) {
+				// Since this task is just a change in the DC output levels,
+				// we can currently just start it, update the values, then stop
+				// it. When triggering and function outputs are added, we'll have 
+				// to move the DAQmxStopTask call to later.
+				
+				if(ev = DAQmxStartTask(ce.oTask)) { goto error; }
+				
+				if(ev = update_DAQ_aouts_safe(!daq_locked, !ce_locked)) { goto error; }
+				
+				if(ev = DAQmxStopTask(ce.oTask)) { goto error; }
+			}
 			
-				// Stop the tasks qhen you are done with them. They can be started again
-				// later. Clear them when you are really done.
+			CmtReleaseLock(lock_DAQ);
+			daq_locked = 0;
+		}
+		//  Program and start the pulseblaster.
+		if(p->use_pb) {
+			if(program_pulses_safe(ce.ilist, ce.ninst, 1) < 0) { goto error; }
+			if(pb_start_safe(1) < 0) { goto error; }
+		}
+		
+		// Check the status once now.
+		update_status_safe(0);
+		
+		// Start checking for updates in another thread.
+		if(p->use_pb) {
+			CmtGetLock(lock_ce);
+			ce_locked = 1;
+			if(ce.update_thread == -1)
+				CmtScheduleThreadPoolFunction(DEFAULT_THREAD_POOL_HANDLE, UpdateStatus, NULL, &ce.update_thread);
+			else {
+				int threadstat;
+				CmtGetThreadPoolFunctionAttribute(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, ATTR_TP_FUNCTION_EXECUTION_STATUS, &threadstat);
+				if(threadstat > 1) 
+					CmtWaitForThreadPoolFunctionCompletion(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, 0);
+			}
+			CmtReleaseLock(lock_ce);
+			ce_locked = 0;
+		
+			// Chill out and wait for the next step.
+			while( !GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
+				Delay(0.01);
 				
-				if(ev = DAQmxStopTask(ce.cTask)) { if(ev != 200010) { goto error; } }
-				if(ev = DAQmxStopTask(ce.aTask)) { if(ev != 200010) { goto error; } }
-				
-				CmtReleaseLock(lock_DAQ);
-				daq_locked = 0;
-				
-				if(ev)  { goto error; }
+			}
+		}
+		
+		if(scan) {
+			data = get_data(ce.aTask, ce.p->np, ce.nchan, ce.p->nt, ce.p->sr, pt*1.5, &ev, 1);
+			
+			if(ev == 5) {
+				rerun = 1;	
+			}
+			
+			CmtGetLock(lock_DAQ);
+			CmtGetLock(lock_ce);
+			daq_locked = 1;
+			ce_locked = 1;
+		
+			// Stop the tasks qhen you are done with them. They can be started again
+			// later. Clear them when you are really done.
+			
+			if(ev = DAQmxStopTask(ce.cTask)) { if(ev != 200010) { goto error; } }
+			if(ev = DAQmxStopTask(ce.aTask)) { if(ev != 200010) { goto error; } }
+			
+			CmtReleaseLock(lock_DAQ);
+			daq_locked = 0;
+			
+			if(rerun) {
+				ev = 0;
+				continue;
+			}
+			
+			if(ev)  { goto error; }
 
-				// Only request the average data if you need it.
-				if(avg_data != NULL) {
-					free(avg_data);
-					avg_data = NULL;
+			// Only request the average data if you need it.
+			if(avg_data != NULL) {
+				free(avg_data);
+				avg_data = NULL;
+			}
+			
+			if(ce.p->nt > 1) {
+				if(ev = update_avg_data_mcd(MCD_AVGCACHE_FNAME, &avg_data, p, data, ce.cind, ce.nchan, ce.hash)) { goto error; }
+			}
+			
+			if(ce.cind == 0) {
+				dheader d = null_dh();
+				
+				d.filename = ce.path;
+				d.expname = ce.bfname;
+				d.num = ce.num;
+				d.desc = ce.desc;
+				
+				d.hash = ce.hash;
+				
+				d.tstarted = ce.tstart;
+				d.tdone = ce.tstart;
+				d.nchans = ce.nchan;
+				
+				d.cind = ce.cind;
+													   
+				if(ev = initialize_mcd_safe(ce.path, ce.p, d)) { goto error; }	
+				refresh_dir_box();
+			}
+			
+			if(ev = save_data_mcd(ce.path, p, data, ce.cind, ce.nchan, ce.tdone)) { goto error; }
+			
+			if(!ce.data.valid) {
+			 	ce.data = free_ds(&ce.data);
+				
+				ce.data.nt = ce.p->nt;
+				ce.data.np = ce.p->np;
+				ce.data.nc = ce.nchan;
+				ce.data.nd = ce.p->nDims;
+				
+				ce.data.maxds = 1;
+				ce.data.dim_step = (p->nDims)?calloc(p->nDims, sizeof(int)):NULL;
+				
+				for(int i = 0; i < p->nDims; i++) {
+					ce.data.maxds *= p->maxsteps[i+p->nCycles];
 				}
 				
-				if(ce.p->nt > 1) {
-					if(ev = update_avg_data_mcd(MCD_AVGCACHE_FNAME, &avg_data, p, data, ce.cind, ce.nchan, ce.hash)) { goto error; }
+				calloc_ds(&(ce.data));
+			}
+			
+			int dind = 0;
+			if(p->nDims) {
+				get_dim_step(p, ce.cind, ce.data.dim_step);
+				dind = get_lindex(ce.data.dim_step, p->maxsteps+p->nCycles, p->nDims);
+			}
+			
+			if(ce.data.data[ct][dind] == NULL) { ce.data.data[ct][dind] = calloc(ce.data.np * ce.data.nc, sizeof(double)); }
+			
+			memcpy(ce.data.data[ct][dind], data, sizeof(double)*(ce.data.np*ce.data.nc));
+			for(int i = 0; i < ce.data.nc; i++) {
+				ce.data.data4[ct][dind][i] = &(ce.data.data[ct][dind][i*ce.data.np]);	
+			}
+			
+			// Update the navigation controls.
+			if(ce.p->nDims) { 
+				update_experiment_nav(); 
+			} else {	
+				update_transients(); 
+			}
+			
+			CmtReleaseLock(lock_ce);
+			ce_locked = 0;
+			
+			CmtGetLock(lock_uidc);
+			
+			if(uidc.disp_update < 2) {	// We're plotting stuff for 0 (Avg) or 1 (Latest)
+				CmtGetLock(lock_ce);
+				if(uidc.disp_update == 0 && ct > 1) { 
+					plot_data(avg_data, p->np, p->sr, ce.nchan);
+				} else if(uidc.disp_update == 1) {
+					plot_data(data, p->np, p->sr, ce.nchan);
 				}
 				
-				if(ce.cind == 0) {
-					dheader d = null_dh();
-					
-					d.filename = ce.path;
-					d.expname = ce.bfname;
-					d.num = ce.num;
-					d.desc = ce.desc;
-					
-					d.hash = ce.hash;
-					
-					d.tstarted = ce.tstart;
-					d.tdone = ce.tstart;
-					d.nchans = ce.nchan;
-					
-					d.cind = ce.cind;
-														   
-					if(ev = initialize_mcd_safe(ce.path, ce.p, d)) { goto error; }	
-				}
-				
-				if(ev = save_data_mcd(ce.path, p, data, ce.cind, ce.nchan, ce.tdone)) { goto error; }
-				
-				if(!ce.data.valid) {
-				 	ce.data = free_ds(&ce.data);
-					
-					ce.data.nt = ce.p->nt;
-					ce.data.np = ce.p->np;
-					ce.data.nc = ce.nchan;
-					ce.data.nd = ce.p->nDims;
-					
-					ce.data.maxds = 1;
-					ce.data.dim_step = (p->nDims)?calloc(p->nDims, sizeof(int)):NULL;
-					
-					for(int i = 0; i < p->nDims; i++) {
-						ce.data.maxds *= p->maxsteps[i+p->nCycles];
-					}
-					
-					calloc_ds(&(ce.data));
-				}
-				
-				int dind = 0;
-				if(p->nDims) {
-					get_dim_step(p, ce.cind, ce.data.dim_step);
-					dind = get_lindex(ce.data.dim_step, p->maxsteps+p->nCycles, p->nDims);
-				}
-				
-				if(ce.data.data[ct][dind] == NULL) { ce.data.data[ct][dind] = calloc(ce.data.np * ce.data.nc, sizeof(double)); }
-				
-				memcpy(ce.data.data[ct][dind], data, sizeof(double)*(ce.data.np*ce.data.nc));
-				for(int i = 0; i < ce.data.nc; i++) {
-					ce.data.data4[ct][dind][i] = &(ce.data.data[ct][dind][i*ce.data.np]);	
-				}
-				
-				// Update the navigation controls.
-				if(ce.p->nDims) { 
-					update_experiment_nav(); 
-				} else {	
-					update_transients(); 
+				// Update the nav controls now.
+				for(int i = 0; i < 2; i++) {
+					set_nav_from_lind(ce.cind, dc.cloc[i], !uidc.disp_update);
 				}
 				
 				CmtReleaseLock(lock_ce);
-				ce_locked = 0;
-				
-				CmtGetLock(lock_uidc);
-				
-				if(uidc.disp_update < 2) {	// We're plotting stuff for 0 (Avg) or 1 (Latest)
-					CmtGetLock(lock_ce);
-					if(uidc.disp_update == 0 && ct > 1) { 
-						plot_data(avg_data, p->np, p->sr, ce.nchan);
-					} else if(uidc.disp_update == 1) {
-						plot_data(data, p->np, p->sr, ce.nchan);
-					}
-					
-					// Update the nav controls now.
-					for(int i = 0; i < 2; i++) {
-						set_nav_from_lind(ce.cind, dc.cloc[i], !uidc.disp_update);
-					}
-					
-					CmtReleaseLock(lock_ce);
-				}
-				
-				CmtReleaseLock(lock_uidc);
-			
-				// Free memory
-				if(avg_data != NULL) {
-					free(avg_data);
-					avg_data = NULL;
-				}
-			
-				free(data);
-				data = NULL;
 			}
+			
+			CmtReleaseLock(lock_uidc);
+		
+			// Free memory
+			if(avg_data != NULL) {
+				free(avg_data);
+				avg_data = NULL;
+			}
+		
+			free(data);
+			data = NULL;
 		}
+		
+		
+		// Update the timers and such
+		ce.t_el = Timer()-t_s;
+		ce.t_prog += pt;
+		
+		ce.t_rem -= pt;
+		
+		e_time = time_string(ce.t_el, 0, 0);
+		r_time = time_string(ce.t_rem, 0, 0);
+		
+		SetCtrlVal(mc.etime[1], mc.etime[0], e_time);
+		GetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_WIDTH, &t_width);
+		SetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_LEFT, et_right-t_width);
+		
+		SetCtrlVal(mc.rtime[1], mc.rtime[0], r_time);
+		GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_WIDTH, &t_width);
+		SetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_LEFT, rt_right-t_width);
+		
+		free(e_time);
+		free(r_time);
+		
+		done = prepare_next_step_safe(p);
 	
 	}
 	
@@ -502,7 +574,7 @@ int run_experiment(PPROGRAM *p) {
 }
 
 
-double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error, int safe) {
+double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, double max_time, int *error, int safe) {
 	// This is the main function dealing with getting data from the DAQ.
 	// ce must be initialized properly and the DAQ task needs to have been started.
 	//
@@ -511,6 +583,7 @@ double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error
 	// 2: Data could not be read
 	// 3: Data missing after read
 	// 4: Acquisition interrupted by quit command.
+	// 5: max_time has elapsed
 	
 	
 	int32 nsread;
@@ -567,6 +640,11 @@ double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error
 		*/
 		
 		Delay(0.1);
+		
+		if(Timer() - time > max_time) {
+			err = 5;
+			goto error;
+		}
 	}
 	
 	if(GetDoubleQuitIdle()) {
@@ -981,7 +1059,8 @@ int initialize_mcd(char *fname, PPROGRAM *p, dheader d) {
 	
 	// Experiment number
 	fs[++cf] = make_fs(MCD_EXPNUM);
-	if(rv = put_fs(&(fs[cf]), &(d.num), FS_UINT, 1)) { goto error; }
+	int num = d.num;
+	if(rv = put_fs(&(fs[cf]), &num, FS_UINT, 1)) { goto error; }
 	
 	// Description
 	fs[++cf] = make_fs(MCD_DATADESC);
@@ -993,7 +1072,8 @@ int initialize_mcd(char *fname, PPROGRAM *p, dheader d) {
 	
 	// Hash
 	fs[++cf] = make_fs(MCD_HASH);
-	if(rv = put_fs(&(fs[cf]), &(d.hash), FS_UINT64, 1)) { goto error; }
+	int hash = d.hash;
+	if(rv = put_fs(&(fs[cf]), &hash, FS_UINT64, 1)) { goto error; }
 	
 	// Number of channels
 	fs[++cf] = make_fs(MCD_NCHANS);
@@ -1128,6 +1208,54 @@ int initialize_mcd(char *fname, PPROGRAM *p, dheader d) {
 	fs[++cf] = make_fs(MCD_FCHANSON);
 	if(rv = put_fs(&(fs[cf]), fchanson, FS_UCHAR, nc)) { goto error; }
 	
+	// Magnetization calibration
+	fs[++cf] = make_fs(MCD_MAGCAL);
+	if(rv = put_fs(&(fs[cf]), &(uiep.cal_val), FS_DOUBLE, 1)) { goto error; }
+	
+	// Magnetization calibration units
+	char units[5] = "";
+	char *base[11] = MC_UNIT_BASE;
+	int mag;
+	if(uiep.calmag < -6 || uiep.calmag > 4 || uiep.calunits == NULL) {
+		strcpy(units, "pT");	
+	} else {
+		sprintf(units, "%s%s", base[uiep.calmag+6], uiep.calunits);
+	}
+	
+	fs[++cf] = make_fs(MCD_MAGCALU);
+	if(rv = put_fs(&(fs[cf]), units, FS_CHAR, 4)) { goto error; }
+	
+	// X Units
+	if(uiep.xumag < -6 || uiep.xumag > 4 || uiep.xunits == NULL) {
+		strcpy(units, "s");
+	} else {
+		sprintf(units, "%s%s", base[uiep.xumag+6], uiep.xunits);	
+	}
+	
+	fs[++cf] = make_fs(MCD_XUNITS);
+	if(rv = put_fs(&(fs[cf]), units, FS_CHAR, 4)) { goto error; }
+	
+	// Y Units
+	if(uiep.yumag < -6 || uiep.yumag > 4 || uiep.yunits == NULL) {
+		strcpy(units, "V");
+	} else {
+		sprintf(units, "%s%s", base[uiep.yumag+6], uiep.yunits);	
+	}
+	
+	fs[++cf] = make_fs(MCD_YUNITS);
+	if(rv = put_fs(&(fs[cf]), units, FS_CHAR, 4)) { goto error; }
+	
+	// Amplifier gain
+	if(uiep.agon) {
+		fs[++cf] = make_fs(MCD_AMPGAIN);
+		if(rv = put_fs(&(fs[cf]), &(uiep.again), FS_DOUBLE, 1)) { goto error; }
+	} 
+	
+	// Resistor value
+	if(uiep.ron) {
+		fs[++cf] = make_fs(MCD_RESVAL);
+		if(rv = put_fs(&(fs[cf]), &(uiep.res), FS_DOUBLE, 1)) { goto error; }
+	}
 	
 	// Put it all in the container, then write the container to file.
 	header = make_fs(MCD_DISPHEADER);
@@ -1789,6 +1917,10 @@ int load_experiment(char *filename, int prog) {
 	// Load the UI portions of this
 	set_data_from_nav(dc.cloc[0]);
 	
+	// Load the file info from the header.
+	load_file_info_dh(dh);
+	
+	
 	error:
 	if(f != NULL) { fclose(f); }
 	
@@ -1994,7 +2126,6 @@ double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
 	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
 	
 	data = load_data_file(f, lindex, p, ev);
-	
 	
 	error:
 	fclose(f);
@@ -2762,6 +2893,42 @@ int *parse_cstep(char *step, int *ev) {
 }
 
 /******************** File Navigation *******************/
+void refresh_dir_box() {
+	// Just refresh the items in the directory box.
+	int index, slen, flen;
+	char *path = NULL;
+	char *fname = NULL;
+	
+	GetCtrlIndex(mc.datafbox[1], mc.datafbox[0], &index);
+	GetCtrlValStringLength(mc.datafbox[1], mc.datafbox[0], &flen);
+	
+	if(index != 0  && flen > 0) {
+		fname = malloc(++flen);	
+	}
+	
+	GetCtrlValStringLength(mc.path[1], mc.path[0], &slen);
+	path = malloc(++slen);
+	
+	GetCtrlVal(mc.path[1], mc.path[0], path);
+	
+	select_directory(path);
+							   
+	free(path);
+	
+	if(fname != NULL) {
+		int ind2;
+		GetIndexFromValue(mc.datafbox[1], mc.datafbox[0], &ind2, fname);
+		
+		if(ind2 >= 0) {
+			index = ind2;
+		}
+		
+		free(fname);
+	}
+	
+	SetCtrlIndex(mc.datafbox[1], mc.datafbox[0], index);
+}
+
 void select_data_item() {
 	int index, type, len;
 	char *path = NULL;
@@ -2868,63 +3035,116 @@ void select_file(char *path) {
 	}
 }
 
-void load_file_info(char *path, char *old_path) {
-	// First we'll try to save the old description.
-	if(old_path != NULL) {
-		update_file_info(old_path);
-	}
-	
-	if(!FileExists(path, NULL))	{ return; }
-
-	int rv;
-	DDCFileHandle file = NULL;
-	int len;
-	char *desc = NULL, *name = NULL;
-	
-	if(rv = DDC_OpenFileEx(path, "TDM", 1, &file)) { goto error; }
-	
-	// Get the base filename
-	DDC_GetFileStringPropertyLength(file, DDC_FILE_NAME, &len);
-	name = malloc(++len+10);
-	DDC_GetFileProperty(file, DDC_FILE_NAME, name, len);
+void load_file_info_dh(dheader dh) {
+	// Loads the file infrom from a dheader header struct. Optionally pass
+	// the variable path to save a few CPU cycles. If NULL is passed to 
+	// path, it will be determined from the UI.
 
 	// Set the base file name
-	SetCtrlVal(mc.basefname[1], mc.basefname[0], name);
-
-	// Calculate the next actual file name
-	// First we need the base path.
-	char *c = strrchr(path, '\\');
-	if(c != NULL) {
-		strncpy(name, c+1, strlen(c+1)-3);  // Copy filename without extension.
-		name[strlen(c+1)-4] = '\0';		// Null terminate
+	SetCtrlVal(mc.basefname[1], mc.basefname[0], dh.expname);
+	
+	// Get the actual filename.
+	char *fname = NULL;
+	int p = 0;
+	
+	// Extensino first
+	int i = strlen(dh.filename);
+	for(i; i > 0; i--) {
+		if(dh.filename[i] == '.') {
+			// Extension ends here
+			p = strlen(dh.filename)-i;
+			break;
+		}
+	}
+	
+	for(i; i > 0; i--) {
+		if(dh.filename[i] == '\\') {
+			fname = &(dh.filename[i+1]);
+			break;
+		}
+	}
+	
+	if(fname != NULL) {
+		int l = strlen(fname)-p;
+		char *name = malloc(l+1);
+		strncpy(name, fname, l);
+		name[l] = '\0';
+		
 		SetCtrlVal(mc.cdfname[1], mc.cdfname[0], name);
 	}
-	// Now get and set the description
-	DDC_GetFileStringPropertyLength(file, DDC_FILE_DESCRIPTION, &len);
-	desc = malloc(++len);
 	
-	DDC_GetFileProperty(file, DDC_FILE_DESCRIPTION, desc, len);
-	
-	ResetTextBox(mc.datadesc[1], mc.datadesc[0], desc);
-	SetCtrlAttribute(mc.datadesc[1], mc.datadesc[0], ATTR_DFLT_VALUE, desc);
-	
-	error:
-	if(file != NULL) { DDC_CloseFile(file); }
-	if(name != NULL) { free(name); }
-	if(desc != NULL) { free(desc); }
+	// First we need the base path.
+	ResetTextBox(mc.datadesc[1], mc.datadesc[0], dh.desc);
+	SetCtrlAttribute(mc.datadesc[1], mc.datadesc[0], ATTR_DFLT_VALUE, dh.desc);
 }
 
-void load_file_info_safe(char *path, char *old_path) {
-	CmtGetLock(lock_tdm);
-	load_file_info(path, old_path);
-	CmtReleaseLock(lock_tdm);
-}
-
-void update_file_info(char *path) {
-	// Saves a new description for a TDM file.
-	if(!FileExists(path, NULL)) { return; }
+int load_file_info(char *path, char *old_path) {
+	// Loads information from the file.
+	FILE *f = NULL;
+	dheader dh = null_dh();
+	
+	// First we'll try to save the old description.
+	if(old_path != NULL) {
+	//	update_file_info(old_path);
+	}
 	
 	int rv;
+	if(path == NULL || !FileExists(path, NULL))	{ 
+		rv = MCD_ERR_NOFILENAME;
+		goto error;
+	}
+ 
+	f = fopen(path, "rb");
+	if(f == NULL) {
+		rv = MCD_ERR_NOFILE;
+		goto error;	
+	}
+	
+	// Load the data from the header
+	dh = load_dataheader_file(f, &rv);
+	if(rv != 0) { goto error; }
+	
+	load_file_info_dh(dh);
+	
+	error:
+	if(f != NULL) { fclose(f); }
+	free_dh(&dh);
+	
+	return rv;
+}
+
+int load_file_info_safe(char *path, char *old_path) {
+	CmtGetLock(lock_tdm);
+	int rv = load_file_info(path, old_path);
+	CmtReleaseLock(lock_tdm);
+	
+	return rv;
+}
+
+int update_file_info(char *path) {
+	// Update the file header - needs to actually copy over the entire file,
+	// so this can be time-consuming for large files.
+	//
+	// Doesn't actually do much now, no time to fix it.
+	dheader dh = null_dh();
+	dstor ds = null_ds();
+	
+	FILE *f = NULL;
+	int rv = 0;
+	
+	if(path == NULL || !FileExists(path, NULL)) { 
+		rv = MCD_ERR_NOFILENAME;
+		
+		goto error;
+	}
+	
+	if((f = fopen(path, "rb")) == NULL) {
+		rv = MCD_ERR_NOFILE;	
+	}
+	
+	
+	
+	/*int rv;
 	DDCFileHandle file = NULL;
 	int len;
 	char *desc = NULL, *old_desc = NULL;
@@ -2952,17 +3172,21 @@ void update_file_info(char *path) {
 	if(rv = DDC_SetFileProperty(file, DDC_FILE_DESCRIPTION, desc)) { goto error; }
 	
 	DDC_SaveFile(file);
-	
+		   */
 	error:
-	if(desc != NULL) { free(desc); }
-	if(old_desc != NULL) { free(old_desc); }
-	if(file != NULL) { DDC_CloseFile(file); }
+	free_ds(&ds);
+	free_dh(&dh);
+	if(f != NULL) { fclose(f); }
+	
+	return rv;
 }
 
-void update_file_info_safe(char *path) {
+int update_file_info_safe(char *path) {
 	CmtGetLock(lock_tdm);
-	update_file_info(path);
+	int rv = update_file_info(path);
 	CmtReleaseLock(lock_tdm);
+	
+	return rv;
 }
 
 //////////////////////////////////////////////////////////////

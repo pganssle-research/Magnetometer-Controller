@@ -205,6 +205,39 @@
 			 *MCXML_PHASEORDER>-Correction-</MCXML_PHASE>
 		</MCXML_CHANNEL>
 	</MCXML_SPEC>
+	
+	<MCXML_EP>
+		<MCXML_AGAIN
+		*MCXML_ON>--Value--</MCXML_AGAIN>
+		
+		<MCXML_RES
+		*MCXML_ON>--Value--</MCXML_RES>
+	
+		<MCXML_X
+		*MCXML_UNITS
+		*MCXML_UBASE 
+		*MCXML_UBASEN />
+		
+		<MCXML_Y
+		*MCXML_UNITS
+		*MCXML_UBASE 
+		*MCXML_UBASEN />
+		
+		<MCXML_F
+		*MCXML_UNITS
+		*MCXML_UBASE 
+		*MCXML_UBASEN />
+		
+		<MCXML_S
+		*MCXML_UNITS
+		*MCXML_UBASE 
+		*MCXML_UBASEN />
+		
+		<MCXML_CAL
+		*MCXML_UNITS
+		*MCXML_UBASE
+		*MCXML_UBASEN > --Value-- </MCXML_CAL>
+	</MCXML_EP>
 </MCXML_DATADISP>
 
 *******************************************************/
@@ -215,6 +248,16 @@
 #define MCXML_SPEC "Spectrum"				// Parent element for all Spectrum info
 
 #define MCXML_PHASE "Phase"					// Element representing a phase of a given order.
+
+#define MCXML_EP "ExperimentParams"
+
+#define MCXML_AGAIN "AmpGain"
+#define MCXML_RESVAL "ResistorVal"
+#define MCXML_X "X"
+#define MCXML_Y "Y"
+#define MCXML_F "F"
+#define MCXML_S "S"
+#define MCXML_CAL "Calibration"
 
 // Attributes
 #define MCXML_AUTOSCALE "Autoscale"			// Whether or not autoscale is on.
@@ -231,6 +274,11 @@
 
 // Phase Attributes
 #define MCXML_PHASEORDER "Order"			// Phase order
+
+// Unit Attributres
+#define MCXML_UNITS "Units"					// Name of the unit
+#define MCXML_UBASE "UnitBase"				// Base of the unit -> numeric
+#define MCXML_UBASEN "UnitBaseName"			// Name of the unit base
 
 /************************* Function Declarations *************************/    
 extern char *get_element_val(CVIXMLElement elem, char *buff, int *blen, int *ev);

@@ -3,6 +3,7 @@
 #define SAVE_SESSION_LIB_H
 
 #include <cvirte.h>
+#include <UIControls.h>
 
 // UI Manipulation
 extern int load_ui(char *uifname);
@@ -21,6 +22,13 @@ extern void initialize_ec(void);
 extern int *get_broken_ttl_ctrls(void);
 
 // File I/O
+extern EP save_ep(void);
+extern void load_ep(EP ep);
+extern EP null_ep(void);
+extern EP free_ep(EP *ep);
+
+EP uiep;
+
 extern int save_session(char *filename, int safe);
 extern int load_session(char *filename, int safe);
 
