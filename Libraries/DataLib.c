@@ -393,6 +393,8 @@ int run_experiment(PPROGRAM *p) {
 			daq_locked = 0;
 			
 			if(rerun) {
+				CmtReleaseLock(lock_ce);
+				ce_locked = 0;
 				ev = 0;
 				continue;
 			}
