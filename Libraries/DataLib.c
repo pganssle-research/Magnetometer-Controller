@@ -19,25 +19,26 @@
 *****************************************************************************/
 
 // Includes
-#include <analysis.h>
-#include <cvixml.h>  
-#include <NIDAQmx.h>
-#include <toolbox.h>
-#include <userint.h>
-#include <ansi_c.h>
-#include <formatio.h>  
-#include <spinapi.h>					// SpinCore functions
 
-#include <PulseProgramTypes.h>
-#include <cvitdms.h>
-#include <cviddc.h> 
-#include <UIControls.h>					// For manipulating the UI controls
-#include <MathParserLib.h>				// For parsing math
-#include <DataLib.h>
-#include <MCUserDefinedFunctions.h>		// Main UI functions
-#include <PulseProgramLib.h>			// Prototypes and type definitions for this file
-#include <SaveSessionLib.h>
+#include <analysis.h>
+#include <userint.h>
+#include "toolbox.h"
+#include <ansi_c.h>
+#include <utility.h>
+
+#include <Version.h> 
 #include <General.h>
+#include <MCUserDefinedFunctions.h>
+
+#include <UIControls.h>
+#include <DataLib.h>
+#include <DataLibPriv.h>
+#include <PulseProgramLib.h>
+#include <FileSave.h>
+#include <PPConversion.h> // For now.
+
+#include <ErrorDefs.h>
+#include <ErrorLib.h>
 
 //////////////////////////////////////////////////////////////
 // 															//
@@ -50,8 +51,48 @@ int CVICALLBACK IdleAndGetData (void *functionData) {
 	// Start by getting the current program.
 	PPROGRAM *p = get_current_program_safe();
 	
+	
+	// Initialize ce
+	CmtGetLock(lock_ce);
+	ce.cind = 0;
+	ce.p = p;
+	
+	if(ce.cstep != NULL) {			// In case this has been allocated already.
+		free(ce.cstep);
+		ce.cstep = NULL;
+	}
+	
+	if(ce.steps != NULL) {
+		free(ce.steps);
+		ce.steps = NULL;
+	}
+	
+	ce.steps_size = 0;
+	
+	if(p->scan) {
+		ce.data = free_ds(&(ce.data));
+		ce.adata = free_ds(&(ce.adata));
+	}
+	
+	if(p->varied) {
+		ce.steps_size = get_steps_array_size(ce.p->tmode, ce.p->nCycles, ce.p->nDims);
+		
+		if(ce.steps_size > 0) {
+			ce.steps = get_steps_array(ce.p->tmode,  ce.p->maxsteps, ce.p->nCycles, ce.p->nDims, ce.p->nt);
+			ce.cstep = calloc(ce.steps_size, sizeof(int));
+		}
+	}
+	
+	ce.cind = -1;
+	int done = prepare_next_step(p);
+	CmtReleaseLock(lock_ce);
+	
 	// Run the experiment
-	int rv = run_experiment(p);
+	int rv = 0;
+	
+	if(!done) {
+		rv = run_experiment(p);
+	}
 	
 	CmtExitThreadPoolThread(rv);	
 	
@@ -118,13 +159,15 @@ int CVICALLBACK UpdateStatus (void *functiondata)
 	return 0;
 }
 
+
 int run_experiment(PPROGRAM *p) {
 	// The main thread for running an experiment. This should be called from the main 
-	// run-program type thread (IdleAndGetData).
+	// run-program type thread (IdleAndGetData).   ce should be initialized before running.
 	
 	int scan = p->scan;
 	int ev = 0, done = 0;
 	int ce_locked = 0, daq_locked = 0;
+	int ct = 0;
 	int cont_mode = 1;		// If cont_mode is on, it is checked in the first iteration of the loop anyway.
 							// This will be more relevant when cont_run in ND is implemented
 	
@@ -141,30 +184,12 @@ int run_experiment(PPROGRAM *p) {
 	SetCtrlAttribute(mc.mainstatus[1], mc.mainstatus[0], ATTR_LABEL_TEXT, "Running");
 	SetRunning(1);
 	
-	// Initialize ce
-	CmtGetLock(lock_ce);
-	ce_locked = 1;
-	ce.ct = 0;
-	ce.p = p;
-	
-	if(ce.cstep != NULL) {			// In case this has been allocated already.
-		free(ce.cstep);
-		ce.cstep = NULL;
-	}
-	
-	if(p->varied) {
-		ce.cstep = malloc(sizeof(int)*(p->nCycles+p->nDims));
-		get_cstep(0, ce.cstep, p->maxsteps, p->nCycles+p->nDims); 
-	}
 	
 	if(scan) {
 		if(setup_DAQ_task_safe(1, 1, 0) != 0) {
 			ev = 1;
 			goto error;
 		}
-		
-		// Initialize the TDM file
-		if(ev = initialize_tdm_safe(0, 1)) { goto error; }
 		
 		update_experiment_nav();
 	}
@@ -178,11 +203,8 @@ int run_experiment(PPROGRAM *p) {
 	
 	int aouts = ce.nochans?1:0;
 	
-	CmtReleaseLock(lock_ce);
-	ce_locked = 0;
-	
 	// Make sure the pulseblaster is initiated.
-	if(!GetInitialized()) {
+	if(!GetInitialized() && p->use_pb) {
 		ev = pb_init_safe(1);
 		if(ev < 0) { goto error; }
 	}
@@ -193,60 +215,16 @@ int run_experiment(PPROGRAM *p) {
 	GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode);
 	if(cont_mode && p->varied) {  SetCtrlVal(pc.rc[1], pc.rc[0], 0); }
 	
-	// Main loop to keep track of where we're at in the experiment, etc.
-	while(!GetQuitIdle() && ce.ct <= p->nt) {
-		if(cont_mode) { GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode); }
-			
-		if(done = prepare_next_step_safe(p) != 0)
-		{
-			if(cont_mode && done == 1) {
-				CmtGetLock(lock_ce);		// No possibility of break/goto, don't need to set ce_locked
-				ce.ct--;
-				p->nt++;
-				done = prepare_next_step(p);
-				CmtReleaseLock(lock_ce);
-			}
-			
-			if(done < 0) { ev = done; }
-		}
-
-		if(!done) {
-			// This is the part where data acquisition takes place.
-			
-			if(scan ||  aouts) {
-				// Get data from device
-				CmtGetLock(lock_DAQ);
-				daq_locked = 1;
-				
-				if(scan) {
-					if(ev = DAQmxStartTask(ce.cTask)) { goto error; }			// Tasks should be started BEFORE the program is run.
-					if(ev = DAQmxStartTask(ce.aTask)) { goto error; }
-				}
-				
-				if(aouts) {
-					// Since this task is just a change in the DC output levels,
-					// we can currently just start it, update the values, then stop
-					// it. When triggering and function outputs are added, we'll have 
-					// to move the DAQmxStopTask call to later.
-					
-					if(ev = DAQmxStartTask(ce.oTask)) { goto error; }
-					
-					if(ev = update_DAQ_aouts_safe(!daq_locked, !ce_locked)) { goto error; }
-					
-					if(ev = DAQmxStopTask(ce.oTask)) { goto error; }
-				}
-				
-				CmtReleaseLock(lock_DAQ);
-				daq_locked = 0;
-			}
-			//  Program and start the pulseblaster.
-			if(program_pulses_safe(ce.ilist, ce.ninst, 1) < 0) { goto error; }
+	// We're going to start with loading the "first run" -> Add in the "reps" later.
+	int rep = 0;
+	if(p->fr) {
+		for(int i = 0; i < p->frnReps; i++) {
+			if(program_pulses_safe(p->frins, p->frnInstrs, 1) < 0) { goto error; };
 			if(pb_start_safe(1) < 0) { goto error; }
 			
-			// Check the status once now.
 			update_status_safe(0);
 			
-			// Start checking for updates in another thread.
+			// TODO: Move this into a function for better code reuse.
 			CmtGetLock(lock_ce);
 			ce_locked = 1;
 			if(ce.update_thread == -1)
@@ -259,84 +237,309 @@ int run_experiment(PPROGRAM *p) {
 			}
 			CmtReleaseLock(lock_ce);
 			ce_locked = 0;
-			
+	
 			// Chill out and wait for the next step.
 			while( !GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
 				Delay(0.01);
 			}
 			
+			if(GetQuitIdle()) { break; }
+		}
+	}
+	
+	// Set up the initial time-elapsed stuff, etc.
+	int et_right, t_width, t_left;
+	int rt_right;
+	
+	double t_s = Timer();
+	if(p->use_pb) {
+		ce.t_tot = calc_prog_time(p, ce.cind, NULL);
+	} else {
+		ce.t_tot = (p->np/p->sr)*(p->max_n_steps*p->nt);	
+	}
+	
+	ce.t_rem = ce.t_tot;
+	
+	char *e_time = time_string(0, 0, 0);
+	GetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_LEFT, &t_left);
+	GetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_WIDTH, &t_width);
+	et_right = t_left+t_width;
+	
+	SetCtrlVal(mc.etime[1], mc.etime[0], e_time);
+	GetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_WIDTH, &t_width);
+	SetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_LEFT, et_right-t_width);
+	
+	free(e_time);
+	e_time = NULL;
+	
+	char *r_time = time_string(ce.t_rem, 0, 0);
+	GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_LEFT, &t_left);
+	GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_WIDTH, &t_width);
+	rt_right = t_left+t_width;
+	
+	SetCtrlVal(mc.rtime[1], mc.rtime[0], r_time);
+	
+	GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_WIDTH, &t_width);
+	SetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_LEFT, rt_right-t_width);
+	
+	
+	free(r_time);
+	r_time = NULL;
+	
+	double pt = 0;
+	int rerun;
+	
+	// Main loop to keep track of where we're at in the experiment, etc.
+	while(!GetQuitIdle() && !done) {
+		rerun = 0;
+		
+		if(cont_mode) { GetCtrlVal(pc.rc[1], pc.rc[0], &cont_mode); }
+			
+		CmtGetLock(lock_ce);
+		ce_locked = 1;
+		
+		ct = get_ct(&ce);
+		if(ct < 0) { ev = ct; goto error; }
+		
+		CmtReleaseLock(lock_ce);
+		ce_locked = 0;
+		
+		// Calculate the program time
+		if(p->use_pb) {
+			pt = calc_list_time(ce.ilist, 0, ce.ninst, NULL);
+		} else {
+			pt = p->np/p->sr;
+		}
+		
+	
+		// This is the part where data acquisition takes place.
+			
+		if(scan ||  aouts) {
+			// Get data from device
+			CmtGetLock(lock_DAQ);
+			daq_locked = 1;
+			
 			if(scan) {
-				data = get_data(ce.aTask, ce.p->np, ce.nchan, ce.p->nt, ce.p->sr, &ev, 1);
+				if(ev = DAQmxStartTask(ce.cTask)) { goto error; }			// Tasks should be started BEFORE the program is run.
+				if(ev = DAQmxStartTask(ce.aTask)) { goto error; }
+			}
 			
-				CmtGetLock(lock_DAQ);
-				daq_locked = 1;
-			
-				// Stop the tasks qhen you are done with them. They can be started again
-				// later. Clear them when you are really done.
-				if(ev = DAQmxStopTask(ce.cTask)) { goto error; }
-				if(ev = DAQmxStopTask(ce.aTask)) { goto error; }			
-			
-				CmtReleaseLock(lock_DAQ);
-				daq_locked = 0;
+			if(aouts) {
+				// Since this task is just a change in the DC output levels,
+				// we can currently just start it, update the values, then stop
+				// it. When triggering and function outputs are added, we'll have 
+				// to move the DAQmxStopTask call to later.
 				
-				if(ev)  { goto error; }
-			
-				// Update the navigation controls.
-				if(ce.p->nDims) { update_experiment_nav(); }
-			
-				update_transients_safe();
-
-				// Only request the average data if you need it.
-				if(avg_data != NULL) {
-					free(avg_data);
-					avg_data = NULL;
-				}
-			
-				CmtGetLock(lock_uidc);
-				if(ev = save_data_safe(data, (uidc.disp_update == 0)?&avg_data:NULL))  { 
-					CmtReleaseLock(lock_uidc);
-					goto error; 
-				}
-			
-				if(uidc.disp_update < 2) {	// We're plotting stuff for 0 (Avg) or 1 (Latest)
-					CmtGetLock(lock_ce);
-					if(uidc.disp_update && ce.ct > 1) { 
-						plot_data(avg_data, p->np, p->sr, ce.nchan);
-					} else {
-						plot_data(data, p->np, p->sr, ce.nchan);
-					}
-					
-					// Update the nav controls now.
-					for(int i = 0; i < 2; i++) {
-						set_nav_from_lind(ce.cind, dc.cloc[i], !uidc.disp_update);
-					}
-					
-					CmtReleaseLock(lock_ce);
-				}
+				if(ev = DAQmxStartTask(ce.oTask)) { goto error; }
 				
-				CmtReleaseLock(lock_uidc);
+				if(ev = update_DAQ_aouts_safe(!daq_locked, !ce_locked)) { goto error; }
+				
+				if(ev = DAQmxStopTask(ce.oTask)) { goto error; }
+			}
 			
-				// Free memory
-				if(avg_data != NULL) {
-					free(avg_data);
-					avg_data = NULL;
-				}
-			
-				free(data);
-				data = NULL;
+			CmtReleaseLock(lock_DAQ);
+			daq_locked = 0;
+		}
+		//  Program and start the pulseblaster.
+		if(p->use_pb) {
+			if(program_pulses_safe(ce.ilist, ce.ninst, 1) < 0) { goto error; }
+			if(pb_start_safe(1) < 0) { goto error; }
+		}
+		
+		// Check the status once now.
+		update_status_safe(0);
+		
+		// Start checking for updates in another thread.
+		if(p->use_pb) {
+			CmtGetLock(lock_ce);
+			ce_locked = 1;
+			if(ce.update_thread == -1)
+				CmtScheduleThreadPoolFunction(DEFAULT_THREAD_POOL_HANDLE, UpdateStatus, NULL, &ce.update_thread);
+			else {
+				int threadstat;
+				CmtGetThreadPoolFunctionAttribute(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, ATTR_TP_FUNCTION_EXECUTION_STATUS, &threadstat);
+				if(threadstat > 1) 
+					CmtWaitForThreadPoolFunctionCompletion(DEFAULT_THREAD_POOL_HANDLE, ce.update_thread, 0);
+			}
+			CmtReleaseLock(lock_ce);
+			ce_locked = 0;
+		
+			// Chill out and wait for the next step.
+			while( !GetQuitIdle() && !(GetStatus()&PB_STOPPED)) {	// Wait for things to finish.
+				Delay(0.01);
+				
 			}
 		}
+		
+		if(scan) {
+			data = get_data(ce.aTask, ce.p->np, ce.nchan, ce.p->nt, ce.p->sr, pt*1.5, &ev, 1);
+			
+			if(ev == 5) {
+				rerun = 1;	
+			}
+			
+			CmtGetLock(lock_DAQ);
+			CmtGetLock(lock_ce);
+			daq_locked = 1;
+			ce_locked = 1;
+		
+			// Stop the tasks qhen you are done with them. They can be started again
+			// later. Clear them when you are really done.
+			
+			if(ev = DAQmxStopTask(ce.cTask)) { if(ev != 200010) { goto error; } }
+			if(ev = DAQmxStopTask(ce.aTask)) { if(ev != 200010) { goto error; } }
+			
+			CmtReleaseLock(lock_DAQ);
+			daq_locked = 0;
+			
+			if(rerun) {
+				CmtReleaseLock(lock_ce);
+				ce_locked = 0;
+				ev = 0;
+				continue;
+			}
+			
+			if(ev)  { goto error; }
+
+			// Only request the average data if you need it.
+			if(avg_data != NULL) {
+				free(avg_data);
+				avg_data = NULL;
+			}
+			
+			if(ce.p->nt > 1) {
+				if(ev = update_avg_data_mcd(MCD_AVGCACHE_FNAME, &avg_data, p, data, ce.cind, ce.nchan, ce.hash)) { goto error; }
+			}
+			
+			if(ce.cind == 0) {
+				dheader d = null_dh();
+				
+				d.filename = ce.path;
+				d.expname = ce.bfname;
+				d.num = ce.num;
+				d.desc = ce.desc;
+				
+				d.hash = ce.hash;
+				
+				d.tstarted = ce.tstart;
+				d.tdone = ce.tstart;
+				d.nchans = ce.nchan;
+				
+				d.cind = ce.cind;
+													   
+				if(ev = initialize_mcd_safe(ce.path, ce.p, d)) { goto error; }	
+				refresh_dir_box();
+			}
+			
+			if(ev = save_data_mcd(ce.path, p, data, ce.cind, ce.nchan, ce.tdone)) { goto error; }
+			
+			if(!ce.data.valid) {
+			 	ce.data = free_ds(&ce.data);
+				
+				ce.data.nt = ce.p->nt;
+				ce.data.np = ce.p->np;
+				ce.data.nc = ce.nchan;
+				ce.data.nd = ce.p->nDims;
+				
+				ce.data.maxds = 1;
+				ce.data.dim_step = (p->nDims)?calloc(p->nDims, sizeof(int)):NULL;
+				
+				for(int i = 0; i < p->nDims; i++) {
+					ce.data.maxds *= p->maxsteps[i+p->nCycles];
+				}
+				
+				calloc_ds(&(ce.data));
+			}
+			
+			int dind = 0;
+			if(p->nDims) {
+				get_dim_step(p, ce.cind, ce.data.dim_step);
+				dind = get_lindex(ce.data.dim_step, p->maxsteps+p->nCycles, p->nDims);
+			}
+			
+			if(ce.data.data[ct][dind] == NULL) { ce.data.data[ct][dind] = calloc(ce.data.np * ce.data.nc, sizeof(double)); }
+			
+			memcpy(ce.data.data[ct][dind], data, sizeof(double)*(ce.data.np*ce.data.nc));
+			for(int i = 0; i < ce.data.nc; i++) {
+				ce.data.data4[ct][dind][i] = &(ce.data.data[ct][dind][i*ce.data.np]);	
+			}
+			
+			// Update the navigation controls.
+			if(ce.p->nDims) { 
+				update_experiment_nav(); 
+			} else {	
+				update_transients(); 
+			}
+			
+			CmtReleaseLock(lock_ce);
+			ce_locked = 0;
+			
+			CmtGetLock(lock_uidc);
+			
+			if(uidc.disp_update < 2) {	// We're plotting stuff for 0 (Avg) or 1 (Latest)
+				CmtGetLock(lock_ce);
+				if(uidc.disp_update == 0 && ct > 1) { 
+					plot_data(avg_data, p->np, p->sr, ce.nchan);
+				} else if(uidc.disp_update == 1) {
+					plot_data(data, p->np, p->sr, ce.nchan);
+				}
+				
+				// Update the nav controls now.
+				for(int i = 0; i < 2; i++) {
+					set_nav_from_lind(ce.cind, dc.cloc[i], !uidc.disp_update);
+				}
+				
+				CmtReleaseLock(lock_ce);
+			}
+			
+			CmtReleaseLock(lock_uidc);
+		
+			// Free memory
+			if(avg_data != NULL) {
+				free(avg_data);
+				avg_data = NULL;
+			}
+		
+			free(data);
+			data = NULL;
+		}
+		
+		
+		// Update the timers and such
+		ce.t_el = Timer()-t_s;
+		ce.t_prog += pt;
+		
+		ce.t_rem -= pt;
+		
+		e_time = time_string(ce.t_el, 0, 0);
+		r_time = time_string(ce.t_rem, 0, 0);
+		
+		SetCtrlVal(mc.etime[1], mc.etime[0], e_time);
+		GetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_WIDTH, &t_width);
+		SetCtrlAttribute(mc.etime[1], mc.etime[0], ATTR_LEFT, et_right-t_width);
+		
+		SetCtrlVal(mc.rtime[1], mc.rtime[0], r_time);
+		GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_WIDTH, &t_width);
+		SetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_LEFT, rt_right-t_width);
+		
+		free(e_time);
+		free(r_time);
+		
+		done = prepare_next_step_safe(p);
 	
+	}
+	
+	// Now that the main loop is done, we can finish with the last run if necessary.
+	// TODO: Use the repetitions parameter.
+	if(p->lr) {
+		if(program_pulses_safe(p->lrins, p->lrnInstrs, 1) < 0) { goto error; };
+		if(pb_start_safe(1) < 0) { goto error; }            	
 	}
 	
 	error:
 	
 	if(ce_locked) {
 		CmtReleaseLock(lock_ce);	
-	}
-	
-	if(daq_locked) {
-		CmtReleaseLock(lock_DAQ);
 	}
 	
 	SetCtrlVal(mc.mainstatus[1], mc.mainstatus[0], 0);	// Experiment is done!
@@ -347,27 +550,33 @@ int run_experiment(PPROGRAM *p) {
 	if(avg_data != NULL) { free(avg_data); }
 	
 	if(ev)  {
-		
-		if((ev < -247 && ev >= -250) || (ev < 6201 && ev >= -6224)) {  
-			display_ddc_error(ev); 
+		if(is_mc_error(ev)) {  
+			display_error(ev); 
 		} else {
 			uInt32 es_size = DAQmxGetExtendedErrorInfo(NULL, 0);
 			
-			char *es = malloc(es_size+1);
-			DAQmxGetExtendedErrorInfo(es, es_size);
-		
+			char *es = malloc((es_size > 0)?(es_size+1):100);
 			
-			MessagePopup("DAQmx Error", es);
+			if(es_size > 0) {
+				DAQmxGetExtendedErrorInfo(es, es_size);
+			} else {
+				sprintf(es, "Unknown DAQmx Error, code was %d", ev);
+			}
 			
+			 MessagePopup("DAQmx Error", es);
 			free(es);
 		}
-		
+	}
+	
+	if(daq_locked) {
+		CmtReleaseLock(lock_DAQ);
 	}
 
 	return ev;
 }
 
-double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error, int safe) {
+
+double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, double max_time, int *error, int safe) {
 	// This is the main function dealing with getting data from the DAQ.
 	// ce must be initialized properly and the DAQ task needs to have been started.
 	//
@@ -376,6 +585,7 @@ double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error
 	// 2: Data could not be read
 	// 3: Data missing after read
 	// 4: Acquisition interrupted by quit command.
+	// 5: max_time has elapsed
 	
 	
 	int32 nsread;
@@ -404,7 +614,7 @@ double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error
 			locked = 1;
 		}
 		
-		DAQmxGetReadAttribute(aTask, DAQmx_Read_AvailSampPerChan, &bc);
+		if(err = DAQmxGetReadAttribute(aTask, DAQmx_Read_AvailSampPerChan, &bc)) { goto error; }
 
 		if(bc >= np) 	// It's ready to be read out
 			break;
@@ -432,6 +642,11 @@ double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error
 		*/
 		
 		Delay(0.1);
+		
+		if(Timer() - time > max_time) {
+			err = 5;
+			goto error;
+		}
 	}
 	
 	if(GetDoubleQuitIdle()) {
@@ -444,10 +659,12 @@ double *get_data(TaskHandle aTask, int np, int nc, int nt, double sr, int *error
 	
 	// Now we know it's ready to go, so we should read out the values.
 	out = malloc(sizeof(float64)*np*nc);
-	DAQmxReadAnalogF64(aTask, -1, 0.0, DAQmx_Val_GroupByChannel, out, np*nc, &nsread, NULL);
+	if(err = DAQmxReadAnalogF64(aTask, -1, 0.0, DAQmx_Val_GroupByChannel, out, np*nc, &nsread, NULL)) { goto error; }
 	
-	if(nsread != np)
+	if(nsread != np) { 
 		err = 3;
+		goto error;
+	}
 	
 	error:
 	
@@ -471,75 +688,115 @@ int prepare_next_step (PPROGRAM *p) {
 	// ct/nt counters are 1-based indices.
 
 	// It's all the same if you aren't using varied instructions
+	ce.cind++;
+	int ct = get_ct(&ce);
+	
 	if(!p->varied) {
-		ce.cind = ++ce.ct;
-		if(ce.ct <= p->nt) {
-			if(ce.ilist == NULL) {
-				ce.ilist = generate_instructions(p, NULL, &ce.ninst);
+		if(ct < p->nt) {	// Transients are internally on a zero-based index.
+			if(p->use_pb) {
+				if(ce.ilist == NULL) { 
+					ce.ilist = generate_instructions(p, ce.cind, &ce.ninst);
+				}
 			}
 			return 0;
-		} else
-			return 1;
+		} else {
+			return 1;	
+		}
 	}
-
+	
 	// Free the old ilist
 	if(ce.ilist != NULL) {
 		free(ce.ilist);
 		ce.ilist = NULL;
 	}
 	
-	// Get linear indexes for the phase cycles and the dimensions, plus the maximum linear indexes of each one.
-	int i, cli, dli;
-	
-	if(++ce.ct > 1)
-		dli = p->nDims?get_lindex(&ce.cstep[p->nCycles], &p->maxsteps[p->nCycles], p->nDims):-1;
-	else
-		dli = 0;
-	
-	int mcli = 1, mdli = 1;
-	
-	for(i = 0; i < p->nCycles; i++) {
-		mcli *= p->maxsteps[i];
+	int end = get_cstep(ce.cind, ce.cstep, ce.steps, ce.steps_size);
+	if(end != 1) {
+		return 1;	
+	} else if(p->skip) {
+		if(p->skip_locs[ce.cind]) {
+			return prepare_next_step(p);
+		}	
 	}
 	
-	for(i = 0; i < p->nDims; i++) {
-		mdli *= p->maxsteps[p->nCycles+i];
+	if(p->use_pb) {
+		ce.ilist = generate_instructions(p, ce.cind, &ce.ninst); // Generate the next instructions list.
+	
+		if(ce.ilist == NULL) { return -2; }
 	}
-	
-	if(p->nt%mcli != 0) { return -1; }
-	
-	// First check -> Have we finished all the transients?
-	if(ce.ct > p->nt) {
-		if(dli >= --mdli) {		// Done condition.
-			return 1;	
-		} else {
-			// Reset the transients and increase the dimension index.
-			ce.ct = 1;
-			cli = 0;
-			dli++;
-		}
-	} else 
-		cli = (ce.ct-1)%mcli;	// Transients are 1-based index, so we need to convert.
-	
-	// Update the cstep vars.
-	if(p->nCycles) { get_cstep(cli, ce.cstep, p->maxsteps, p->nCycles); }
-	if(p->nDims) { get_cstep(dli, &ce.cstep[p->nCycles], &p->maxsteps[p->nCycles], p->nDims); }
-	
-	// Keep going (recursive function call - probably a bad idea) if this is in the skips.
-	int lind = get_lindex(ce.cstep, p->maxsteps, p->nCycles+p->nDims);
-	if(p->skip & 1) {
-		if(p->skip_locs[lind]) {
-			prepare_next_step(p);
-		}
-	}
-	
-	ce.ilist = generate_instructions(p, ce.cstep, &ce.ninst); // Generate the next instructions list.
-	
-	if(ce.ilist == NULL) { return -2; }
-	
-	ce.cind = dli*p->nt+ce.ct-1;	// Current index in [nt {dim1, ... , dimn}] space
 	
 	return 0;
+}
+
+int setup_cexp(CEXP *cexp) {
+	// Initializes the CEXP for proper linear indexing
+	// If filename is not null, this also sets up the hash.
+	if(cexp == NULL) { return MCEX_ERR_NOCEXP; }
+	if(cexp->p == NULL) { return MCEX_ERR_NOPROG; }
+
+	int rv = 0; 
+	PPROGRAM *p = cexp->p;
+	CEXP c = *cexp;
+	
+	c.cind = 0;
+	
+	if(c.cstep != NULL) {
+		free(c.cstep);
+		c.cstep = NULL;
+	}
+	
+	if(c.steps != NULL) {
+		free(c.steps);
+		c.steps = NULL;
+	}
+	
+	c.steps_size = 0;
+	if(p->varied) { 
+		c.cstep = calloc(p->steps_size, sizeof(unsigned int));
+	}
+	
+	add_hash_to_cexp(cexp);
+	
+	*cexp = c;
+	return rv;
+}
+
+int add_hash_to_cexp(CEXP *cexp) {
+	if(cexp->fname != NULL) {
+		cexp->hash = basic_string_hash(cexp->fname);	
+	} else {
+		return MCEX_ERR_NOFNAME;	
+	}
+	
+	return 0;	
+}
+
+int get_ct(CEXP *cexp) {
+	CEXP c = *cexp;
+	if(!c.p->varied) {
+		return c.cind;
+	} else if (c.cstep == NULL || c.steps_size == 0) {
+		return MCEX_ERR_NOSTEPS;
+	}
+	
+	int ct = 0;
+	
+	unsigned int tmode, npc, nd;
+	tmode = c.p->tmode;
+	npc = c.p->nCycles;
+	nd = c.p->nDims;
+	
+	if(tmode == MC_TMODE_ID || (tmode == MC_TMODE_PC && npc == 0)) {
+		ct = c.cstep[c.steps_size-1];
+	} else if (tmode == MC_TMODE_TF) {
+		ct = c.cstep[0];	
+	} else if (tmode == MC_TMODE_PC) {
+		ct = get_lindex(&(c.cstep[nd]), &(c.steps[nd]), npc+1);
+	} else {
+		return MCEX_ERR_INVALIDTMODE;
+	}
+	
+	return ct;
 }
 
 int prepare_next_step_safe(PPROGRAM *p) {
@@ -605,13 +862,12 @@ int initialize_tdm() {
 		if(rv = DDC_AddChannelGroup(data_file, MCTD_AVGDATA, "", &acg)) { goto error; }
 	}
 	
-	free(vname);
 	free(desc);
 	free(name);
 	vname = desc = name = NULL;
 	
-	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tdone);
-	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tstart);
+	// Current time
+	ce.tstart = ce.tdone = time(NULL);
 
 	// Now since it's the first time, we need to set up the attributes, metadata and program.
 	if(rv = DDC_CreateChannelGroupProperty(mcg, MCTD_NP, DDC_Int32, np)) { goto error; } 
@@ -630,7 +886,7 @@ int initialize_tdm() {
 	DDCChannelGroupHandle pcg = NULL;
 	DDC_AddChannelGroup(data_file, MCTD_PGNAME, "", &pcg);
 	
-	save_program(pcg, p);
+	save_programDDC(pcg, p);
 
 	// Create the data channels
 	chans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
@@ -651,7 +907,6 @@ int initialize_tdm() {
 	
 	if(name != NULL) { free(name); }
 	if(desc != NULL) { free(desc); }
-	if(vname != NULL) { free(vname); }
 	if(chans != NULL) { free(chans); }
 	if(achans != NULL) { free(achans); }
 	
@@ -670,7 +925,634 @@ int initialize_tdm_safe(int CE_lock, int TDM_lock) {
 	return rv;
 }
 
+char *make_cstep_str(PPROGRAM *p, int cind, int avg, int *ev) {
+	// Create a cstep string for indexing mcd files. 
+	// If avg evaluates true, transients will be collapsed.
+	// Output must be freed.
+	
+	int i, rv = 0;
+	int *steps = NULL;
+	char *out = NULL;
+	char *title_format = NULL;
+	char *buff = NULL;
+	
+	
+	if(p == NULL) { rv = MCD_ERR_NOPROG; goto error; }
+	if(cind < 0) { rv = MCD_ERR_BADCIND; goto error; }
+	
+	// Create the data array.
+	int max = 0;
+	for(i = 0; i < p->steps_size; i++) {
+		if(p->steps[i] > max) {
+			max = p->steps[i];
+		}
+	}
+	
+	int ndigits = (max > 0)?(((int)log10(max))+1):1;	// Number of digits per step
+	
+	int nsteps = 1;
+	
+	if(avg) {
+		if(!p->nDims) {
+			steps = malloc(sizeof(int)*1);
+			steps[0] = 0;
+			ndigits = 1;
+		} else {
+			nsteps = p->nDims;
+			steps = malloc(p->nDims*sizeof(unsigned int));
+			get_dim_step(p, cind, steps);
+		}
+	} else {
+		nsteps = p->steps_size;
+		steps = malloc(sizeof(unsigned int) * p->steps_size);
+		get_cstep(cind, steps, p->steps, p->steps_size);
+	}
+	
+	out = malloc(nsteps*(ndigits+1)+2);
+	
+	title_format = malloc(6);
+	buff = malloc(ndigits+2);
+	
+	sprintf(title_format, "%%0%dd,", ndigits);
+	strcpy(out, "[");
+	
+	for(i = 0; i < nsteps; i++) {		   
+		sprintf(buff, title_format, steps[i]);
+		strcat(out, buff);
+	}
+	out[strlen(out)-1] = ']';
+
+	error:
+	if(rv != 0 && out != NULL) { 
+		free(out);
+		out = NULL;
+	}
+	
+	if(buff != NULL) { free(buff); }
+	if(title_format != NULL) { free(title_format); }
+	if(steps != NULL) { free(steps); }
+	
+	*ev = rv;
+	return out;
+}
+
+int initialize_mcd_safe(char *fname, PPROGRAM *p, dheader d) {
+	CmtGetLock(lock_uidc);
+	int rv = initialize_mcd(fname, p, d);
+	CmtReleaseLock(lock_uidc);
+	
+	return rv;
+}
+
+
+int initialize_mcd(char *fname, PPROGRAM *p, dheader d) {
+	// Creates the proper headers for the data file.
+	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
+	if(p == NULL) { return MCD_ERR_NOPROG; }
+	
+	int i, rv = 0;
+	int nc = d.nchans;
+	FILE *f = NULL;
+	char *ext = NULL, *fbuff = NULL, *ds = NULL, *buff = NULL;
+	fsave *fs = NULL, header = null_fs();
+	float *phases = NULL;
+	unsigned char *fchanson = NULL, *schanson = NULL;
+	
+	int fs_size = 0;
+
+	// Enforce valid extension
+	ext = get_extension(fname);
+	if(ext != NULL || strcmp(ext, MCD_EXTENSION) != 0) {
+		int elen = (ext != NULL)?strlen(ext):0;
+		elen = strlen(fname)-elen;
+		
+		fbuff = calloc(elen+strlen(MCD_EXTENSION)+2, 1);
+		
+		strncpy(fbuff, fname, elen);
+		strcat(fbuff, ".");
+		strcat(fbuff, MCD_EXTENSION);
+	} else {
+		fbuff = malloc(strlen(fname)+1);
+		strcpy(fbuff, fname);
+	}
+	
+	fname = fbuff;		// C is pass-by-value, so this is just a pointer
+	
+	// Create the file - this WILL overwrite if it exists.
+	f = fopen(fname, "wb+");
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	
+	//////////////////////////
+	//						//
+	//		Data Header     //
+	//						//
+	//////////////////////////
+	fs_size = MCD_DATANUM;
+	fs = calloc(MCD_DATANUM, sizeof(fsave));
+	int cf = 0;
+	
+	// File name
+	fs[cf] = make_fs(MCD_FILENAME);
+	if(rv = put_fs(&(fs[cf]), fname, FS_CHAR, strlen(fname)+1)) { goto error; }
+	
+	// Experiment name
+	fs[++cf] = make_fs(MCD_EXPNAME);
+	if(rv = put_fs(&(fs[cf]), d.expname, FS_CHAR, strlen(d.expname)+1)) { goto error; }
+	
+	// Experiment number
+	fs[++cf] = make_fs(MCD_EXPNUM);
+	int num = d.num;
+	if(rv = put_fs(&(fs[cf]), &num, FS_UINT, 1)) { goto error; }
+	
+	// Description
+	fs[++cf] = make_fs(MCD_DATADESC);
+	if(d.desc != NULL) {
+		if(rv = put_fs(&(fs[cf]), d.desc, FS_CHAR, strlen(d.desc)+1)) { goto error; }
+	} else {
+		if(rv = put_fs(&(fs[cf]), "", FS_CHAR, 1)) { goto error; }	
+	}
+	
+	// Hash
+	fs[++cf] = make_fs(MCD_HASH);
+	int hash = d.hash;
+	if(rv = put_fs(&(fs[cf]), &hash, FS_UINT64, 1)) { goto error; }
+	
+	// Number of channels
+	fs[++cf] = make_fs(MCD_NCHANS);
+	if(rv = put_fs(&(fs[cf]), &nc, FS_UINT, 1)) { goto error; }
+	
+	// Date stamp
+	time_t ts;			// Get the time first
+	time(&ts);
+	
+	struct tm *tptr;	// Get local time
+	tptr = localtime(&ts);
+	
+	ds = malloc(MCD_DATESTAMP_MAXSIZE+1);	// Get the string
+	strftime(ds, MCD_DATESTAMP_MAXSIZE+1, MCD_DATE_FORMAT, tptr);
+	
+	fs[++cf] = make_fs(MCD_DATESTAMP);
+	if(rv = put_fs(&(fs[cf]), ds, FS_CHAR, strlen(ds)+1)) { goto error; }
+	
+	free(ds);
+	ds = NULL;
+	
+	// Timestamps - both the same for now
+	ds = calloc(MCD_TIMESTAMP_MAXSIZE+1, 1);
+	strftime(ds, MCD_TIMESTAMP_MAXSIZE+1, MCD_TIME_FORMAT, tptr);
+	
+	fs[++cf] = make_fs(MCD_TIMESTART);	// Time started
+	if(rv = put_fs(&(fs[cf]), ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
+	
+	fs[++cf] = make_fs(MCD_TIMEDONE);	// Time completed
+	if(rv = put_fs(&(fs[cf]), ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
+	
+	int epoch = (int)ts;
+	fs[++cf] = make_fs(MCD_TSTART);
+	if(rv = put_fs(&(fs[cf]), &epoch, FS_UINT, 1)) { goto error; }
+	
+	fs[++cf] = make_fs(MCD_TDONE);
+	if(rv = put_fs(&(fs[cf]), &epoch, FS_UINT, 1)) { goto error; }
+	
+	// Current step
+	unsigned int cind = 0;
+	fs[++cf] = make_fs(MCD_CIND);
+	if(rv = put_fs(&(fs[cf]), &cind, FS_UINT, 1)) { goto error; }
+	
+	// Max steps
+	fs[++cf] = make_fs(MCD_MAXSTEPS);
+	int one = 1;
+	if(p->nDims + p->nCycles > 1) {
+		if(rv = put_fs(&(fs[cf]), p->maxsteps, FS_INT, p->nDims + p->nCycles)) { goto error; }
+	} else {
+		if(rv = put_fs(&(fs[cf]), &one, FS_INT, 1)) { goto error; }	
+	}
+	
+	// Generate the container
+	header = make_fs(MCD_DATAHEADER);
+	if(rv = put_fs_container(&header, fs, cf)) { goto error; }
+	
+	// Print the container.
+	if(rv = fwrite_fs(f, &header)) { goto error; }
+	
+	fs = free_fsave_array(fs, cf+1);
+	header = free_fsave(&header);
+
+	//////////////////////////////
+	//							//
+	//		Display Header     	//
+	//							//
+	//////////////////////////////
+	fs = calloc(MCD_DISPNUM, sizeof(fsave));
+	fs_size = MCD_DISPNUM;
+	cf = 0;
+	
+	// Polynomial fit on/off - boolean UCHAR
+	fs[cf] = make_fs(MCD_POLYFITON);
+	if(rv = put_fs(&(fs[cf]), &(uidc.polyon), FS_UCHAR, 1)) { goto error; }
+	
+	// Polynomial fit order - UINT.
+	fs[++cf] = make_fs(MCD_POLYFITORDER);
+	if(rv = put_fs(&(fs[cf]), &(uidc.polyord), FS_UINT, 1)) { goto error; }
+	
+	// FFT Phases - Linear indexed array of the 3 phase components.
+	unsigned int n_phase = 3*nc;
+	phases = calloc(n_phase, sizeof(float)) ;
+	for(int j = 0; j < nc; j++) {
+		for(i = 0; i < 3; i++) {
+			phases[3*j + i] = uidc.sphase[j][i];	
+		}
+	}
+	
+	fs[++cf] = make_fs(MCD_PHASE);
+	if(rv = put_fs(&(fs[cf]), phases, FS_FLOAT, n_phase)) { goto error; }
+
+	// Currently displayed FFT channel.
+	fs[++cf] = make_fs(MCD_FFTCHAN);
+	if(rv = put_fs(&(fs[cf]), &uidc.schan, FS_INT, 1)) { goto error; }
+
+	// Gains and offsets - FLOAT x nc
+	// Spectrum gains
+	fs[++cf] = make_fs(MCD_SGAINS);
+	if(rv = put_fs(&(fs[cf]), uidc.sgain, FS_FLOAT, nc)) { goto error; }
+	
+	// Spectrum offsets
+	fs[++cf] = make_fs(MCD_SOFFS);
+	if(rv = put_fs(&(fs[cf]), uidc.soff, FS_FLOAT, nc)) { goto error; }
+	
+	// FID Gains
+	fs[++cf] = make_fs(MCD_FGAINS);
+	if(rv = put_fs(&(fs[cf]), uidc.fgain, FS_FLOAT, nc)) { goto error; }
+	
+	// FID Offsets
+	fs[++cf] = make_fs(MCD_FOFFS);
+	if(rv = put_fs(&(fs[cf]), uidc.foff, FS_FLOAT, nc)) { goto error; }
+	
+	// Channels on
+	fchanson = calloc(nc, sizeof(unsigned char));
+	schanson = calloc(nc, sizeof(unsigned char));
+	
+	for(i = 0; i < nc; i++) {
+		if(uidc.fchans[i]) {
+			fchanson[i] = 1;
+		}
+		
+		if(uidc.schans[i]) {
+			schanson[i] = 1;	
+		}
+	}
+	
+	// Spectrum Channels on
+	fs[++cf] = make_fs(MCD_SCHANSON);
+	if(rv = put_fs(&(fs[cf]), schanson, FS_UCHAR, nc)) { goto error; }
+	
+	// FID Channels on
+	fs[++cf] = make_fs(MCD_FCHANSON);
+	if(rv = put_fs(&(fs[cf]), fchanson, FS_UCHAR, nc)) { goto error; }
+	
+	// Magnetization calibration
+	fs[++cf] = make_fs(MCD_MAGCAL);
+	if(rv = put_fs(&(fs[cf]), &(uiep.cal_val), FS_DOUBLE, 1)) { goto error; }
+	
+	// Magnetization calibration units
+	char units[5] = "";
+	char *base[11] = MC_UNIT_BASE;
+	int mag;
+	if(uiep.calmag < -6 || uiep.calmag > 4 || uiep.calunits == NULL) {
+		strcpy(units, "pT");	
+	} else {
+		sprintf(units, "%s%s", base[uiep.calmag+6], uiep.calunits);
+	}
+	
+	fs[++cf] = make_fs(MCD_MAGCALU);
+	if(rv = put_fs(&(fs[cf]), units, FS_CHAR, 4)) { goto error; }
+	
+	// X Units
+	if(uiep.xumag < -6 || uiep.xumag > 4 || uiep.xunits == NULL) {
+		strcpy(units, "s");
+	} else {
+		sprintf(units, "%s%s", base[uiep.xumag+6], uiep.xunits);	
+	}
+	
+	fs[++cf] = make_fs(MCD_XUNITS);
+	if(rv = put_fs(&(fs[cf]), units, FS_CHAR, 4)) { goto error; }
+	
+	// Y Units
+	if(uiep.yumag < -6 || uiep.yumag > 4 || uiep.yunits == NULL) {
+		strcpy(units, "V");
+	} else {
+		sprintf(units, "%s%s", base[uiep.yumag+6], uiep.yunits);	
+	}
+	
+	fs[++cf] = make_fs(MCD_YUNITS);
+	if(rv = put_fs(&(fs[cf]), units, FS_CHAR, 4)) { goto error; }
+	
+	// Amplifier gain
+	if(uiep.agon) {
+		fs[++cf] = make_fs(MCD_AMPGAIN);
+		if(rv = put_fs(&(fs[cf]), &(uiep.again), FS_DOUBLE, 1)) { goto error; }
+	} 
+	
+	// Resistor value
+	if(uiep.ron) {
+		fs[++cf] = make_fs(MCD_RESVAL);
+		if(rv = put_fs(&(fs[cf]), &(uiep.res), FS_DOUBLE, 1)) { goto error; }
+	}
+	
+	// Put it all in the container, then write the container to file.
+	header = make_fs(MCD_DISPHEADER);
+	if(rv = put_fs_container(&header, fs, cf)) { goto error; }
+	
+	if(rv = fwrite_fs(f, &header)) { goto error; }
+	
+	header = free_fsave(&header);
+	fs = free_fsave_array(fs, fs_size);
+	fs_size = 0;
+	
+	
+	//////////////////////////////
+	//							//
+	//			Program     	//
+	//							//
+	//////////////////////////////
+	
+	rv = save_pprogram(p, f);
+	if(rv != 0) { goto error; }		// That was anti-climactic.
+	
+	error:
+	if(ext != NULL) { free(ext); }
+	if(buff != NULL) { free(buff); }
+	if(fbuff != NULL) { free(fbuff); }
+	if(ds != NULL) { free(ds); }
+	
+	if(phases != NULL) { free(phases); }
+	if(fchanson != NULL) { free(fchanson); }
+	if(schanson != NULL) { free(schanson); }
+	
+	free_fsave(&header);
+	if(fs != NULL) { free_fsave_array(fs, fs_size); }
+	
+	if(f != NULL) { fclose(f); }
+	
+	return rv;
+}
+
+int update_avg_data_mcd(char *fname, double **avg_data, PPROGRAM *p, double *data, int cind, int nc, int64 hash) {
+	// This is basically for cacheing average data in a local file.
+	// First call will create a file (overwrites when cind == 0)
+	// Subsequent calls will update it with the new data.
+	
+	int i, rv = 0;
+
+	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
+	if(data == NULL) { return MCD_ERR_NODATA; }
+	if(p == NULL) { return MCD_ERR_NOPROG; }
+	
+	FILE *f = NULL;
+	char *step_title = NULL, *buff = NULL;
+	fsave ag = null_fs(), dg = null_fs(), chash = null_fs();
+	
+	if(!file_exists(fname) && cind > 0) {
+		return MCD_ERR_NOFILE;
+	}
+	
+	if(cind == 0) {
+		f = fopen(fname, "wb+");
+		
+		// Write the hash to make sure it's the same thing.
+		chash = make_fs(MCD_HASH);
+		if(rv = put_fs(&chash, &hash, FS_INT, 1)) { goto error; }
+		if(rv = fwrite_fs(f, &chash)) { goto error; }
+	} else {
+		f = fopen(fname, "rb+");
+		
+		// This file must open with the hash.
+		long hoff = find_fsave_in_file(f, MCD_HASH, MCF_EOF);
+		
+		fseek(f, hoff, SEEK_SET);
+		
+		chash = read_fsave_from_file(f, &rv);
+		if(rv != 0) { goto error; }
+		
+		if(*(chash.val.i) != hash) {
+			rv = MCD_ERR_NOAVGDATA;		// Not the right file!
+			goto error;
+		}
+	}
+	
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	
+	if(p->varied) {
+		step_title = make_cstep_str(p, cind, 1, &rv);
+	} else {
+		step_title = malloc(strlen("[0]")+1);
+		strcpy(step_title, "[0]");
+	}
+		
+	if(rv != 0) { goto error; }
+	
+	int stlen;
+	if(step_title != NULL) {
+		stlen = strlen(step_title);	
+	} else {
+		rv = MCD_ERR_NOAVGDATA;
+		goto error;
+	}
+	
+	unsigned int data_size = p->np * nc;
+	int ct = get_transient(p, cind);
+	if(ct < 0) { rv = ct; goto error; }
+	
+	if(cind == 0) {
+		// Create the AVGDATA group
+		dg = make_fs(step_title);
+		if(rv = put_fs(&dg, data, FS_DOUBLE, data_size)) { goto error; }
+		
+		ag = make_fs(MCD_AVGDATA);
+		if(rv = put_fs_container(&ag, &dg, 1)) { goto error; }
+		
+		if(rv = fwrite_fs(f, &ag)) { goto error; }
+	} else {
+		// In this case we have to find the AVGDATA group
+		// and either append the data or replace it.
+		rewind(f);
+		long ag_pos = find_fsave_in_file(f, MCD_AVGDATA, MCF_EOF);
+		if(ag_pos < 0) {
+			rv = ag_pos;
+			goto error;
+		}
+		
+		// This will set the file to be pointing to the contents.
+		fseek(f, ag_pos, SEEK_SET);
+		if(rv = get_fs_header_from_file(f, &ag)) { goto error; }
+		
+		
+		// See if the relevant group already exists.
+		long ad_pos = find_fsave_in_file(f, step_title, ag.size);
+		if(ad_pos == MCF_ERR_FSAVE_NOT_FOUND) {
+			// This means we need to insert the group at the end.
+			dg = make_fs(step_title);
+			if(rv = put_fs(&dg, data, FS_DOUBLE, data_size));
+			
+			// Add this to MCD_AVGDATA
+			fseek(f, ag_pos, SEEK_SET);
+			if(rv = fadd_fs_to_container(f, &dg)) { goto error; }
+		} else if(ad_pos < 0) {
+			rv = ad_pos;
+			goto error;
+		} else {
+			fseek(f, ad_pos, SEEK_SET);
+			
+			dg = read_fsave_from_file(f, &rv);
+			if(rv != 0) { goto error; }
+			
+			unsigned int data_size = dg.size/sizeof(double);
+			
+			// Perform the averaging now.
+			for(i = 0; i < data_size; i++) {
+				dg.val.d[i] = (dg.val.d[i]*ct + data[i])/(ct+1);
+			}
+			
+			if(avg_data != NULL && data_size > 0) {
+				*avg_data = malloc(data_size*sizeof(double));
+				memcpy(*avg_data, dg.val.d, data_size*sizeof(double));
+			}
+			
+			// Overwrite the data.
+			unsigned int off = get_fs_header_size_from_ns(dg.ns);
+			
+			fseek(f, ad_pos, SEEK_SET);
+			if(rv = overwrite_fsave_in_file(f, &dg)) { goto error; }
+		}
+	}
+	
+	error:
+	
+	if(f != NULL) { fclose(f); }
+	if(step_title != NULL) { free(step_title); }
+	if(buff != NULL) { free(buff); }
+	
+	free_fsave(&ag);
+	free_fsave(&dg);
+	free_fsave(&chash);
+	
+	return rv;
+}
+
+
+int save_data_mcd(char *fname, PPROGRAM *p, double *data, int cind, int nc, time_t done) {
+	// Save data to existing file, with the header already written
+	// 
+	// New specification:
+	// Files will contain ONLY parameters and main data files, no averages.
+	// The headers are written ahead of tiem and save_data_mcd basically appends data to the
+	// existing group, in a linear-indexed fashion. Based on the nature of the serialization
+	// format, even for very long files it should be fairly quick to navigate between points.
+	//
+	// Since average data will be updated frequently, we'll generate "current buffer" files 
+	// which contain the running average for the currently loaded file.
+	//
+	// The reasoning behind this is that if we have one file, our only options will be to 
+	// pre-allocate all arrays or to risk frequently changing the size of TWO arrays. Since 
+	// there's no good way to "insert" data into a file without simply buffering the remainder
+	// of the file and writing it afterwards, this seems excessive.
+	
+	if(fname == NULL) { return MCD_ERR_NOFILENAME; }
+	if(data == NULL) { return MCD_ERR_NODATA; }
+	if(p == NULL) { return MCD_ERR_NOPROG; }
+	
+	if(!file_exists(fname)) {
+		return MCD_ERR_NOFILE;	
+	}
+	
+	int i, rv = 0;
+	
+	FILE *f = NULL;
+	
+	unsigned int data_size = p->np * nc;
+	fsave mg = null_fs(), dg = null_fs(), *rgs = NULL;
+	char *step_title = NULL;
+	char *buff = NULL;
+	char *ds = NULL;
+	
+	int num_rgs = 3;
+	
+	f = fopen(fname, "rb+");	// If it doesn't exist, there's a problem.
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	
+	// Make the label for this particular step
+	if(p->varied) {
+		step_title = make_cstep_str(p, cind, 0, &rv);
+		if(rv != 0) { goto error; }
+	} else {
+		step_title = malloc(strlen("[00000000]")+1);
+		sprintf(step_title, "[%d]", cind);
+	}
+	
+	// Generate the label fsave
+	dg = make_fs(step_title);
+	if(rv = put_fs(&dg, data, FS_DOUBLE, data_size)) { goto error; }
+	
+	if(cind == 0) {
+		// If it's the first time through, create the main data group.
+		mg = make_fs(MCD_MAINDATA);
+		if(rv = put_fs_container(&mg, &dg, 1)) { goto error; }
+		
+		fseek(f, 0, SEEK_END);
+		if(rv = fwrite_fs(f, &mg)) { goto error; }
+	} else {
+		// Otherwise we should find the main data group and append our data
+		long mgp = find_fsave_in_file(f, MCD_MAINDATA, MCF_EOF);
+		if(mgp < 0) { rv = mgp; goto error; }
+		
+		fseek(f, mgp, SEEK_SET);
+		if(rv = fadd_fs_to_container(f, &dg)) { goto error; }
+	}
+	
+	// Update the data header
+	rgs = calloc(num_rgs, sizeof(fsave));
+	int cf = 0;
+	
+	struct tm *tptr;
+	tptr = localtime(&done);
+	
+	ds = calloc(MCD_TIMESTAMP_MAXSIZE+1, 1);
+	strftime(ds, MCD_TIMESTAMP_MAXSIZE, MCD_TIME_FORMAT, tptr);
+	
+	rgs[cf] = make_fs(MCD_TIMEDONE);
+	if(rv = put_fs(&(rgs[cf]), ds, FS_CHAR, MCD_TIMESTAMP_MAXSIZE+1)) { goto error; }
+	
+	int epoch = (int)done;
+	rgs[++cf] = make_fs(MCD_TDONE);
+	if(rv = put_fs(&(rgs[cf]), &epoch, FS_UINT, 1)) { goto error; }
+	
+	rgs[++cf] = make_fs(MCD_CIND);
+	if(rv = put_fs(&(rgs[cf]), &cind, FS_UINT, 1)) { goto error; }
+	
+	rewind(f);
+	
+	if(rv = replace_fsaves(f, MCD_DATAHEADER, rgs, num_rgs, NULL)) { goto error; }
+	
+	error:
+	if(f != NULL) { fclose(f); }
+	
+	if(step_title != NULL) { free(step_title); }
+	if(buff != NULL) { free(buff); }
+	if(ds != NULL) { free(ds); }
+	
+	free_fsave_array(rgs, num_rgs);
+	free_fsave(&mg);
+	free_fsave(&dg);
+	
+	return rv;
+}
+
 int save_data(double *data, double **avg) {
+	return 0;	
+}
+
+ 
+int save_data_ddc(double *data, double **avg) {
 	// In order for this to work, the ce variable needs to be set up appropriately. This function is
 	// used to write data to an existing and open file. If for whatever reason 
 	
@@ -686,7 +1568,7 @@ int save_data(double *data, double **avg) {
 	int i, np = p->np, nd = p->nDims;
 	char *csstr = NULL;
 	double *avg_data = NULL;
-	DDCFileHandle file = NULL;
+	DDCFileHandle file = NULL, file2 = NULL;
 	DDCChannelGroupHandle *cgs = NULL;
 	DDCChannelHandle *achans = NULL, *mchans = NULL;
 	DDCChannelGroupHandle mcg, acg;
@@ -695,6 +1577,8 @@ int save_data(double *data, double **avg) {
 
 	// Open the file.
 	if(rv = DDC_OpenFileEx(ce.path, "TDM", 0, &file)) { goto error; }
+//	if(rv = DDC_OpenFileEx(ce.path, "TDM", 0, &file2)) { goto error; }
+	
 	
 	// Get the channel groups -> Allocate space for two, but only look for 1 if nt == 1
 	cgs = malloc(sizeof(DDCChannelGroupHandle)*2);
@@ -710,7 +1594,8 @@ int save_data(double *data, double **avg) {
 	if(rv = DDC_SetChannelGroupProperty(mcg, MCTD_CSTEP, ce.cind)) { goto error; }
 	
 	csstr = malloc(12*(p->nDims+2)+3); // Signed maxint is 10 digits, plus - and delimiters.
-	sprintf(csstr, "[%d", ce.ct-1);
+	int ct = get_ct(&ce);
+	sprintf(csstr, "[%d", ct-1);
 	for(i = 0; i < p->nDims; i++) {
 		sprintf(csstr, "%s; %d", csstr, ce.cstep[i+p->nCycles]);	
 	}
@@ -722,7 +1607,7 @@ int save_data(double *data, double **avg) {
 	csstr = NULL;
 	
 	// Save the time completed
-	CVIAbsoluteTimeFromCVIANSITime(time(NULL), &ce.tdone);
+	ce.tdone = time(NULL);
 	if(rv = DDC_SetChannelGroupProperty(mcg, MCTD_TIMEDONE, ce.tdone)) { goto error; }
 	
 	// Grab the channels.
@@ -740,7 +1625,10 @@ int save_data(double *data, double **avg) {
 		achans = malloc(sizeof(DDCChannelHandle)*ce.nchan);
 		if(rv = DDC_GetChannels(acg, achans, ce.nchan)) { goto error; }
 
-		if(ce.ct == 1) {	// First run.
+		ct = get_ct(&ce);
+		if(ct < 0) { rv = ct; goto error; }
+		
+		if(ct == 1) {	// First run.
 			for(i = 0; i < ce.nchan; i++) {
 				if(rv = DDC_AppendDataValues(achans[i], &data[i*np], np)) { goto error;}
 			}
@@ -749,12 +1637,11 @@ int save_data(double *data, double **avg) {
 			int dli = (int)((ce.cind-1)/p->nt); // ct is a 1-based index.
 			avg_data = load_data_tdm(dli, file, acg, achans, ce.p, ce.nchan, &rv);
 			
-			if(rv != 0)
-				goto error;
+			if(rv != 0) { goto error; }
 			
 			// Now update the average.
 			for(i = 0; i < (p->np*ce.nchan); i++) {
-				avg_data[i] = ((avg_data[i]*(ce.ct-1))+data[i])/ce.ct;
+				avg_data[i] = ((avg_data[i]*(ct-1))+data[i])/ct;
 			}
 			
 			// And write it to file again.
@@ -765,7 +1652,7 @@ int save_data(double *data, double **avg) {
 	}
 	
 	// Save the data
-	DDC_SaveFile(file);
+	if(rv = DDC_SaveFile(file)) { goto error; };
 	
 	error:
 	if(csstr != NULL) { free(csstr); }
@@ -794,7 +1681,275 @@ int save_data_safe(double *data, double **avg) {
 	
 }
 
-int load_experiment(char *filename) {
+int load_experiment(char *filename, int prog) {
+	// Loads the experiment from file into UIDC, data into the cache, etc.
+	// 
+	// Inputs:
+	// filename: 	The path to the experiment file. Must end in .mcd.
+	// prog:		Boolean - whether to load the program with it.
+	//
+	// Output:
+	// Returns 0 on success, negative on failure.
+	
+	if(filename == NULL) { return MCD_ERR_NOFILENAME; }
+	
+	int rv = 0, i, cind = 0;
+	int *glocs = NULL;
+	dheader dh = null_dh();
+	char *ext = NULL, **names = NULL;
+	FILE *f = NULL;
+	PPROGRAM *p;
+	dstor data = null_ds();
+	
+	fsave dg = null_fs(), dig = null_fs();
+	fsave *dihs = NULL;
+	
+	int dhs_size = 0, dihs_size = 0;
+	
+	ext = get_extension(filename);
+	if(ext == NULL || strcmp(MCD_EXTENSION, ext+1) != 0) {
+		
+		rv = MCD_ERR_INVALID_EXTENSION;
+		goto error;
+	}
+	
+	if((f = fopen(filename, "rb")) == NULL) {
+		rv = MCD_ERR_NOFILE;
+		goto error;
+	}
+	
+	// Start by reading out the data header.
+	dh = load_dataheader_file(f, &rv);
+	if(rv < 0) { goto error; }
+
+	// Copy the stuff into the current experiment header.
+	int len;
+	if(dh.filename != NULL) {
+		if(ce.fname != NULL) { free(ce.fname); ce.fname = NULL; }
+		len = strlen(dh.filename)+1;
+		
+		if(len > 0) {
+			ce.fname = malloc(len);
+			strcpy(ce.fname, dh.filename);
+		}
+	}
+	
+	if(dh.expname != NULL) {
+		if(ce.bfname != NULL) { free(ce.bfname); ce.bfname = NULL; }
+		len = strlen(dh.expname)+1;
+		
+		if(len > 0) {
+			ce.bfname = malloc(len);
+			strcpy(ce.bfname, dh.expname);
+		}
+	}
+	
+	ce.num = dh.num;
+	ce.hash = dh.hash;
+	ce.nchan = dh.nchans;
+	ce.cind = dh.cind;
+	ce.tstart = dh.tstarted;
+	ce.tdone = dh.tdone;
+	
+	// Need to load the pulse program next.
+	p = load_pprogram(f, &rv); 
+	if(rv < 0) { goto error; }
+	
+	if(ce.p != NULL) { free_pprog(ce.p); }
+	ce.p = p;
+	
+	// Now maxsteps.
+	if(dh.maxsteps != NULL) {
+		if(ce.steps != NULL) { free(ce.steps); ce.steps = NULL; }
+		
+		ce.steps_size = 0;
+		if((rv = get_steps_array_size(p->tmode, p->nCycles, p->nDims)) < 0) { goto error; }
+		ce.steps_size = rv;
+		rv = 0;
+		
+		ce.steps = get_steps_array(p->tmode, dh.maxsteps, p->nCycles, p->nDims, p->nt);
+	}
+	
+	// Get the display values now - if they aren't found that's fine.
+	long loc = find_fsave_in_file(f, MCD_DISPHEADER, MCF_WRAP);
+	if(loc < 0) { goto disp_err; }
+	
+	fseek(f, loc, SEEK_SET);
+	if(get_fs_header_from_file(f, &dig)) { goto disp_err; }
+	
+	dihs = read_all_fsaves_from_file(f, &rv, &dihs_size, dig.size);
+	if(rv < 0 || dihs_size == 0) { rv = 0; goto disp_err; }
+	
+	names = calloc(dihs_size, sizeof(char *));
+	for(i = 0; i < dihs_size; i++) { 
+		if(dihs[i].ns == 0 || dihs[i].name == NULL) { continue; }
+		names[i] = malloc(dihs[i].ns);
+		memcpy(names[i], dihs[i].name, dihs[i].ns);
+	}
+	
+	char *dih_names[MCD_DISPNUM] = {MCD_POLYFITON, MCD_POLYFITORDER, MCD_PHASE, MCD_FFTCHAN,
+							  MCD_SGAINS, MCD_SOFFS, MCD_FGAINS, MCD_FOFFS,
+							  MCD_SCHANSON, MCD_FCHANSON};
+	
+	int phpos = 3;
+	
+	// Flags for what should and should not be loaded.
+	// TODO: Allow this to be set as a preference.
+	int load_pon = 0;
+	int load_pord = 0;
+	
+	int load_sgain = 0;
+	int load_soff = 0;
+	int load_schan = 0;
+	
+	int load_fgain = 0;
+	int load_foff = 0;
+	
+	int load_schans = 0;
+	int load_fchans = 0;
+	
+	
+	void *dih_vals[MCD_DISPNUM] = {load_pon?(&(uidc.polyon)):NULL, (load_pord)?(&(uidc.polyord)):NULL, NULL, 
+								load_schan?(&(uidc.schan)):NULL, load_sgain?uidc.sgain:NULL, load_soff?uidc.soff:NULL, 
+								load_fgain?uidc.fgain:NULL, load_foff?uidc.foff:NULL, load_schans?uidc.schans:NULL, 
+								load_fchans?uidc.fchans:NULL};
+	
+	glocs = strings_in_array(names, dih_names, dihs_size, MCD_DISPNUM);
+	if(glocs == NULL) { goto disp_err; }
+	
+	int *ib;
+	float *fb;
+	int j;
+	fsave fsb;
+	
+	for(i = 0; i < MCD_DISPNUM; i++) {
+		if(dih_vals[i] == NULL || glocs[i] < 0) { continue; }
+		
+		j = glocs[i];
+		fsb = dihs[j];
+		int s = fsb.size/get_fs_type_size(fsb.type);
+		switch(fsb.type) {
+			case FS_UCHAR:
+				ib = (int *)dih_vals[j];
+				for(int k = 0; k < s; k++) {
+					ib[k] = (int)(fsb.val.uc[k]);
+				}
+				break;
+			case FS_UINT:
+				ib = (unsigned int *)dih_vals[j];
+				for(int k = 0; k < s; k++) {
+					ib[k] = fsb.val.ui[k];	
+				}
+				break;
+			case FS_INT:
+				ib = (int *)dih_vals[j];
+				for(int k = 0; k < s; k++) {
+					ib[k] = fsb.val.i[k];	
+				}
+				break;
+			case FS_FLOAT:
+				fb = (float *)dih_vals[j];
+				for(int k = 0; k < s; k++) {
+					fb[k] = fsb.val.f[k];	
+				}
+				break;
+		}
+	}
+	
+	SetCtrlVal(dc.fid, dc.fpolysub, uidc.polyon);
+	SetCtrlVal(dc.spec, dc.spolysub, uidc.polyon);
+	
+	SetCtrlVal(dc.fid, dc.fpsorder, uidc.polyord);
+	SetCtrlVal(dc.spec, dc.spsorder, uidc.polyord);
+	
+	// The phase is its own thing, linearly indexed.
+	if(glocs[phpos] >= 0) {
+		fsb = dihs[phpos];
+		int nc = (fsb.size/get_fs_type_size(fsb.type))/3;
+		if(nc > 8) { nc = 8; }
+		
+		for(j = 0; j < nc; j++) {
+			for(i = 0; i < 3; i++) {
+				uidc.sphase[j][i] = fsb.val.f[3*j+i];
+			}
+		}
+	}
+	
+	// Update the boxes and rings and shit.
+	update_chan_ring(dc.fid, dc.fcring, uidc.fchans);
+	update_chan_ring(dc.spec, dc.scring, uidc.schans);
+	
+	disp_err:
+	if(glocs != NULL) {
+		free(glocs);
+		glocs = NULL;
+	}
+	
+	if(names != NULL) {
+		free(names);
+		names = NULL;
+	}
+	
+	dihs = free_fsave_array(dihs, dihs_size);
+	dihs_size = 0;
+	
+	if(feof(f)) { rewind(f); }
+
+	// Get the data
+	data = load_all_data_file(f, ce.p, &dh, &rv);
+	if(rv < 0) { goto error; }
+	
+	if(prog) {
+		set_current_program(ce.p);
+	}	
+	
+	update_fid_chan_box();
+	update_spec_chan_box();
+	update_spec_fft_chan();
+	update_experiment_nav();  
+	
+	// Update ce.
+	ce.data = data;
+	ce.adata = get_avg_data(data);
+	
+	if(ce.path != NULL) { free(ce.path); ce.path = NULL; }
+	ce.path = malloc(strlen(filename)+1);
+	strcpy(ce.path, filename);
+	
+	// Load the UI portions of this
+	set_data_from_nav(dc.cloc[0]);
+	
+	// Load the file info from the header.
+	load_file_info_dh(dh);
+	
+	
+	error:
+	if(f != NULL) { fclose(f); }
+	
+	if(ext != NULL) { free(ext); }
+	
+	free_fsave(&dg);
+	free_fsave(&dig);
+	free_fsave_array(dihs, dihs_size);
+	
+	if(rv < 0) {
+		ce.data = free_ds(&ce.data);	
+		ce.adata = free_ds(&ce.adata);
+		
+		free_ds(&data);
+	}
+	
+	return rv;
+}
+
+int load_experiment_safe(char *filename, int prog) {
+	
+	int rv = load_experiment(filename, prog);	
+
+	return rv;
+}
+
+int load_experiment_tdm(char *filename) {
 	// Loads the experiment into the uidc file and loads the first experiment to the controls.
 	// Filename must end in .tdm
 	// Pass NULL to p if you are not interested in the program.
@@ -841,7 +1996,7 @@ int load_experiment(char *filename) {
 	
 	// Grab the program.
 	int err_val;
-	p = load_program(pcg, &ev);
+	p = load_programDDC(pcg, &ev);
 	if(ev || p == NULL) { goto error; }
 	
     // Get the current step index.
@@ -908,7 +2063,8 @@ int load_experiment(char *filename) {
 	
 	// Now we want to plot the data and set up the experiment navigation.
 	plot_data(data, p->np, p->sr, ce.nchan);
-	free(data);
+	free(data);	
+	data = NULL;
 	
 	update_experiment_nav();
 
@@ -930,18 +2086,301 @@ int load_experiment(char *filename) {
 	return ev;
 }
 
-int load_experiment_safe(char *filename) {
+int load_experiment_tdm_safe(char *filename) {
 	CmtGetLock(lock_tdm);
 	CmtGetLock(lock_ce);
 	CmtGetLock(lock_uidc);
 	
-	int rv = load_experiment(filename);
+	int rv = load_experiment_tdm(filename);
 	
 	CmtReleaseLock(lock_uidc);
 	CmtReleaseLock(lock_ce);
 	CmtReleaseLock(lock_tdm);
 	
 	return rv;
+}
+
+double *load_data_fname(char *filename, int lindex, PPROGRAM *p, int *ev) {
+	// Loads MCD data from a not-opened file.
+	// 
+	// Inputs:
+	// filename:	Path to the file you want to open
+	// lindex:		Linear index to the data you want to retrieve.
+	//				Pass -1 to get the average data
+	//				Pass -2 to get an ND array of all data.
+	//
+	// Outputs:
+	// p:			Pulse program used in generating the file.
+	// ev: 			Error value. Returns 0 on success, negative number on failure.
+	//
+	// Returns:
+	// Returns a dynamically allocated double array, which needs to be freed.
+	
+	double *data = NULL;
+	int rv = 0;
+	
+	if(filename == NULL) { rv = MCD_ERR_NOFILENAME; goto error; }
+	
+	// Now load the relevant data.
+	// Start by finding the data group.
+	// TODO: Allow loading all data into the data cache.
+	FILE *f = fopen(filename, "rb");
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	
+	data = load_data_file(f, lindex, p, ev);
+	
+	error:
+	fclose(f);
+	
+	*ev = rv;
+	return data;
+}
+		 
+dstor load_all_data_file(FILE *f, PPROGRAM *p, dheader *dhead, int *ev) {
+	// Loads all data from MCD. The file will be rewound when passed to this function,
+	// but not after. To retrieve the program, pass a dynamically allocated PPROGRAM
+	// with p->valid set to 0. Passing NULL to p will retrieve the program from the
+	// file, but it will not be passed to the calling function.
+	//
+	// The output is a 4D array:
+	// data[nt][dims][nc][points]
+	
+	fsave dhg = null_fs(), dg = null_fs();
+	fsave fsb = null_fs();
+	fsave *all_data = NULL;
+	dheader d = null_dh();
+	int ind =-1, rv = 0, i, nc = 0;
+	int ad_size = 0;
+	
+	dstor ds = null_ds(), ads = null_ds();
+	int *cstep = NULL;  
+	int *dim_step = NULL;
+	
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	
+	rewind(f);
+	int null_p = (p == NULL);
+	int null_d = (dhead == NULL);
+	
+	if(null_p) {
+		p = load_pprogram(f, &rv);
+		if(rv < 0) { goto error; }
+	} else if(!p->valid) {
+		PPROGRAM *pb = load_pprogram(f, &rv);
+		if(rv < 0) { goto error; }
+		memcpy(p, pb, sizeof(PPROGRAM));
+		
+		free(pb); // All the pointers are copied over, so this is OK.
+	}
+	
+	if(!null_d && dhead->valid) {
+		d = *dhead;	
+	} else {
+		d = load_dataheader_file(f, &rv);
+		if(rv < 0) { goto error; }
+	}
+
+	// Need to get the current index.
+	ind = d.valid?d.cind:-1;
+	
+	if(d.nchans < 1) { rv = MCD_ERR_NOCHANS; goto error; }
+	
+	nc = d.nchans;
+	
+	// Grab the data now - first we grab it, then we parse it.
+	long loc = find_fsave_in_file(f, MCD_MAINDATA, MCF_WRAP);
+	if(loc < 0) { rv = MCD_ERR_NODATA; goto error; }
+	fseek(f, loc, SEEK_SET);    
+		
+	if(rv = get_fs_header_from_file(f, &dg)) { goto error; }
+
+	
+	all_data = read_all_fsaves_from_file(f, &rv, &ad_size, dg.size);
+	if(rv < 0) { goto error; }
+	
+	if(ad_size < 1) { rv = MCD_ERR_NODATA; goto error; }
+	
+	if(ind < 0 || ind > ad_size) {
+		ind = ad_size;	
+	}
+	
+	int np = all_data[0].size/(nc*get_fs_type_size(all_data[0].type));
+	if(np != p->np) {
+		rv = MCD_ERR_MALFORMED_PROG;
+		goto error;
+	}
+	
+	// Generate the data storage structure metadata.
+	ds.nt = p->nt;
+	ds.maxds = 1;
+	ds.nd = (p->nDims < 1)?1:p->nDims;
+	ds.np = np;
+	ds.nc = nc;
+	
+	if(p->nDims >= 0) {
+		ds.dim_step = malloc(sizeof(int)*((p->nDims == 0)?1:p->nDims));
+	} else {
+		rv = MCD_ERR_MALFORMED_PROG;
+		goto error;
+	}
+	
+	for(i = 0; i < p->nDims; i++) {
+		ds.dim_step[i] = p->maxsteps[i+p->nCycles];
+		ds.maxds *= p->maxsteps[i+p->nCycles];
+	}
+	
+	if(p->nDims < 1) {
+		ds.dim_step[0] = 1;	
+	}
+	
+	// Now we can allocate the data storage structure.
+	if(rv = calloc_ds(&ds)) { goto error; }
+	
+	int t = 0, lindex = 0;
+	dim_step = calloc(p->nDims, sizeof(int));
+	
+	for(i = 0; i <= ind; i++) {
+		// Determine which one we're on.
+		cstep = parse_cstep(all_data[i].name, &rv);
+		if(rv < 0) { goto error; }
+		
+		if(p->nDims) {
+			lindex = get_lindex(cstep, p->steps, p->steps_size);
+			free(cstep);
+			cstep = NULL;
+		
+			// Get the transient and dimensions-only linear index.
+			t = get_transient(p, lindex);
+		
+			get_dim_step(p, lindex, dim_step);
+			lindex = get_lindex(dim_step, p->maxsteps + p->nCycles, p->nDims);
+		} else {
+			t = cstep[0];
+			lindex = 0;	
+		}
+		
+		ds.data[t][lindex] = malloc(nc*np*sizeof(double));
+		memcpy(ds.data[t][lindex], all_data[i].val.d, nc*np*sizeof(double));
+		
+		// Stored two ways for convenience.
+		for(int j = 0; j < nc; j++) {
+			ds.data4[t][lindex][j] = &(ds.data[t][lindex][j*np]);	
+		}
+	}
+	
+	error:
+	if(cstep != NULL) { free(cstep); }
+	if(dim_step != NULL) { free(dim_step); }
+	
+	free_fsave(&dhg);
+	free_fsave(&dg);
+	
+	free_fsave_array(all_data, ad_size);
+	
+	if(!null_d) { *dhead = d; }
+	
+	ds.valid = 1;
+	if(rv < 0) {
+		ds = free_ds(&ds);
+	}
+	
+	*ev = rv;
+	
+	return ds;
+}
+
+double *load_data_file(FILE *f, int lindex, PPROGRAM *p, int *ev) {
+	// Loads MCD data from an opened file. The file will be rewound when passed to this
+	// function, but not after.
+	// 
+	// Inputs:
+	// f:			The file to get data from.
+	// lindex:		Linear index to the data you want to retrieve.
+	//
+	// Outputs:
+	// p:			Pulse program used in generating the file.
+	// ev: 			Error value. Returns 0 on success, negative number on failure.
+	//
+	// Returns:
+	// Returns a dynamically allocated double array, which needs to be freed.
+
+	fsave dg = null_fs();
+	fsave fdata = null_fs();
+	
+	double *data = NULL;
+	int rv = 0;
+	unsigned int fs_size = 0;
+	int null_p = (p == NULL);
+	
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	rewind(f);
+	
+	if(null_p) {
+		p = load_pprogram(f, &rv);
+		if(rv < 0) { goto error; }
+	} else if(!p->valid) {
+		PPROGRAM *pb = load_pprogram(f, &rv);
+		if(rv < 0) { goto error; }
+		memcpy(p, pb, sizeof(PPROGRAM));
+		
+		free(pb);
+	}
+	
+	if(p == NULL) { rv = MCD_ERR_NOPROG; goto error; }
+	
+	long loc = find_fsave_in_file(f, MCD_MAINDATA, MCF_WRAP);
+	if(loc < 0) { rv = MCD_ERR_NODATA; goto error; }
+	
+	fseek(f, loc, SEEK_SET);
+	if(rv = get_fs_header_from_file(f, &dg)) { goto error; }
+	
+	// Convert the lindex as expected into the lindex as it's stored.
+	// We're assuming that all navigation lindexes are calculated from
+	// MC_TMODE_TF (transients first)
+	if(lindex > 0) {
+		lindex = convert_lindex(p, lindex, MC_TMODE_TF, p->tmode);
+		if(lindex < 0) { 
+			rv = lindex;
+			goto error;
+		}
+	}
+	
+	if(lindex >= 0) {
+		// Seek the lindex-th group in the file.
+		loc = find_fsave_in_file(f, MCD_MAINDATA, dg.size);
+		if(loc < 0) { 
+			rv = loc;
+			goto error; 
+		}
+	
+		// Get the data
+		fdata = read_fsave_from_file(f, &rv);
+		if(rv < 0) { goto error; }
+
+		if(fdata.val.d == NULL) { 
+			rv = MCD_ERR_NODATA;
+			goto error;
+		} else {
+			data = malloc(fdata.size);
+			memcpy(data, fdata.val.d, fdata.size);
+		}
+	} else {
+		rv = MCD_ERR_BADCIND;
+		goto error;
+	}
+	
+	error:
+	free_fsave(&dg);
+	free_fsave(&fdata);
+	
+	if(null_p && p != NULL) {
+		free_pprog(p);
+		p = NULL;
+	}
+
+	*ev = rv;
+	return data;
+
 }
 
 double *load_data(char *filename, int lindex, PPROGRAM *p, int avg, int nch, int *rv) {
@@ -1087,7 +2526,7 @@ int get_ddc_channel_groups(DDCFileHandle file, char **names, int num, DDCChannel
 	for(i = 0; i < ncg; i++) {
 		// Get the channel name from the list of all channels
 		DDC_GetChannelGroupStringPropertyLength(all_cgs[i], DDC_CHANNELGROUP_NAME, &len); 
-		g = realloc_if_needed(buff, g, ++len, s);	// Allocate space for the name if we need it.
+		buff = realloc_if_needed(buff, &g, ++len, s);	// Allocate space for the name if we need it.
 		DDC_GetChannelGroupProperty(all_cgs[i], DDC_CHANNELGROUP_NAME, buff, len);
 		
 		for(j = 0; j < num; j++) {
@@ -1116,15 +2555,382 @@ int get_ddc_channel_groups(DDCFileHandle file, char **names, int num, DDCChannel
 	return rv;
 }
 
- int get_ddc_channel_groups_safe(DDCFileHandle file, char **names, int num, DDCChannelGroupHandle *cgs) {
+int get_ddc_channel_groups_safe(DDCFileHandle file, char **names, int num, DDCChannelGroupHandle *cgs) {
 	CmtGetLock(lock_tdm);
 	int rv = get_ddc_channel_groups(file, names, num, cgs);
 	CmtReleaseLock(lock_tdm);
 	
 	return rv;
  }
+ 
+ // Data Parsing Functions
+dstor get_avg_data(dstor ds) {
+	// Creates a new dstor containing the averaged data.
+	dstor ads = null_ds();
+
+	ads.nt = 1;
+	ads.maxds = ds.maxds;
+	ads.np = ds.np;
+	ads.nc = ds.nc;
+	
+	if(ds.nd > 0) {
+		ads.dim_step = malloc(ds.nd*sizeof(int));	
+		
+		memcpy(ads.dim_step, ds.dim_step, ds.nd*sizeof(int));
+	}
+	
+	calloc_ds(&ads);
+	
+	int i, j, k, l;
+	double w1 = 1.0, w2 = 1.0;
+	int ps = ds.np*ds.nc;
+	for(j = 0; j < ds.maxds; j++) {
+		l = 0;
+		for(i = 0; i < ds.nt; i++) {
+			if(ds.data[i][j] != NULL) {
+				if(ads.data[0][j] == NULL) { 
+					ads.data[0][j] = calloc(ps, sizeof(double));
+				}
+			
+				l++;
+				w1 = (l-1.0)/l;	// For a running average where we won't have to 
+				w2 = 1.0/l;		// worry about overflows, hopefully.
+				
+				for(k = 0; k < ps; k++) {
+					ads.data[0][j][k] = ads.data[0][j][k]*w1 + ds.data[i][j][k]*w2;	
+				}
+				
+				for(k = 0; k < ds.nc; k++) {
+					ads.data4[0][j][k] = &(ads.data[0][j][ds.np*k]);	
+				}
+			}
+		}
+	}
+	
+	ads.valid = 1;
+	
+	return ads;
+}
+
+int calloc_ds(dstor *ds) {
+	int rv = 0;
+	
+	if(ds->nt < 1 || ds->maxds < 1) { return MCD_ERR_NODATA; }
+	
+	ds->data = calloc(ds->nt, sizeof(double **));
+	ds->data4 = calloc(ds->nt, sizeof(double ***));
+	
+	for(int i = 0; i < ds->nt; i++) {
+		ds->data[i] = calloc(ds->maxds, sizeof(double *));
+		ds->data4[i] = calloc(ds->maxds, sizeof(double **));
+		for(int j = 0; j < ds->maxds; j++) {
+			ds->data4[i][j] = calloc(ds->nc, sizeof(double *));	
+		}
+	}
+	
+	return rv;
+}
+
+dstor free_ds(dstor *ds) {
+	// Need to free dim_step, data and data4.
+	// The [nc] level to data4 points to the data stored in data, and so it should
+	// not be freed.
+	if(ds->dim_step != NULL) {
+		free(ds->dim_step);
+		ds->dim_step = NULL;
+	}
+	
+	if(ds->nt > 0 && ds->maxds > 0 && ds->nc > 0 &&
+		(ds->data != NULL || ds->data4 != NULL)) {
+		int i, j;
+		for(i = 0; i < ds->nt; i++) {
+			for(j = 0; j < ds->maxds; j++) {
+				if(ds->data[i] != NULL && ds->data[i][j] != NULL) {
+					free(ds->data[i][j]);
+					ds->data[i][j] = NULL;
+				}
+				
+				if(ds->data4[i] != NULL && ds->data4[i][j] != NULL) {
+					free(ds->data4[i][j]);
+					ds->data4[i][j] = NULL;
+				}
+			}
+			
+			if(ds->data[i] != NULL) { free(ds->data[i]); }
+			if(ds->data4[i] != NULL) { free(ds->data4[i]); }
+		}
+		
+		if(ds->data != NULL) { free(ds->data); ds->data = NULL; }
+		if(ds->data4 != NULL) { free(ds->data4); ds->data4 = NULL; }
+	}
+	
+	return null_ds();
+}
+
+dstor null_ds() {
+	dstor ds = {.nt = -1,
+				.maxds = -1,
+				.np = -1,
+				.nc = -1,
+				.nd = -1,
+				.dim_step = NULL,
+				.data = NULL,
+				.data4 = NULL,
+				.valid = 0};
+	
+	return ds;
+}
+
+dheader load_dataheader_file(FILE *f, int *ev) {
+	dheader d = null_dh();
+	fsave fsb = null_fs();
+	fsave dhg = null_fs();
+	fsave *dhs = NULL;
+
+	char **names = NULL;
+	int i, rv = 0;
+	int *glocs = NULL;
+	unsigned int dhs_size = 0, nsize = 0;
+	
+	if(f == NULL) { rv = MCD_ERR_NOFILE; goto error; }
+	rewind(f);
+	
+	// Find the header.
+	long loc;
+	if((loc = find_fsave_in_file(f, MCD_DATAHEADER, MCF_EOF)) < 0) { rv = loc; goto error; }
+	fseek(f, loc, SEEK_SET);
+	if(rv = get_fs_header_from_file(f, &dhg)) { goto error; }
+	
+	dhs = read_all_fsaves_from_file(f, &rv, &dhs_size, dhg.size);
+	if(rv < 0) { goto error; }
+	
+	if(dhs_size == 0) {
+		rv = MCD_ERR_BADHEADER;
+		goto error;
+	}
+	
+	// Read out all these FSAVES into the relevant variables.
+	int tse = 0, tde = 0;
+	int mspos = 12;
+	char *dh_names[MCD_DATANUM] = {MCD_FILENAME, MCD_EXPNAME, MCD_EXPNUM, MCD_DATADESC, MCD_HASH,
+								   MCD_NCHANS, MCD_DATESTAMP, MCD_TIMESTART, MCD_TIMEDONE,
+								   MCD_TSTART, MCD_TDONE, MCD_CIND, MCD_MAXSTEPS};
+	
+	char **dh_string_vals[MCD_DATANUM] = {&(d.filename), &(d.expname), NULL, &(d.desc), NULL, &(d.dstamp),
+										  NULL, NULL, NULL, NULL, NULL, NULL};
+	
+	void *dh_vals[MCD_DATANUM] = {NULL, NULL, &(d.num), NULL, &(d.hash), &(d.nchans),
+								   NULL, NULL, NULL, &tse, &tde,  &(d.cind), NULL};
+
+	nsize = dhs_size;
+	names = calloc(nsize, sizeof(char*));
+	for(i = 0; i < nsize; i++) {
+		if(dhs[i].ns == 0 || dhs[i].name == NULL) { continue; }
+		names[i] = malloc(dhs[i].ns);
+		memcpy(names[i], dhs[i].name, dhs[i].ns);
+	}
+
+	glocs = strings_in_array(names, dh_names, dhs_size, MCD_DATANUM);
+	if(glocs == NULL) { rv = MCD_ERR_BADHEADER; goto error; }
+
+	int j;
+	char *sb;
+	
+	for(i = 0; i < MCD_DATANUM; i++) {
+		if( glocs[i] < 0 || (dh_vals[i] == NULL && dh_string_vals[i] == NULL)) { continue; }
+		j = glocs[i];
+		
+		fsb = dhs[j];
+		
+		switch(fsb.type) {
+			case FS_CHAR:
+				if(dh_string_vals[j] == NULL) { continue; }
+				
+				if(*dh_string_vals[j] != NULL) { 
+					free(*dh_string_vals[j]);
+					*dh_string_vals[j] = NULL;
+				}
+				
+				sb = malloc(fsb.size);
+				memcpy(sb, fsb.val.c, fsb.size);
+				*dh_string_vals[j] = sb;
+				break;
+			case FS_INT:
+				if(dh_vals[j] == NULL) { continue; }
+				memcpy(dh_vals[j], fsb.val.i, fsb.size);
+			case FS_UINT:
+				if(dh_vals[j] == NULL) { continue; }
+				
+				*(unsigned int *)dh_vals[j] = *(fsb.val.ui);
+				break;
+			case FS_INT64:
+				*(__int64 *)dh_vals[j] = *(fsb.val.ll);
+				break;
+			case FS_UINT64:
+				*(unsigned __int64 *)dh_vals[j] = *(fsb.val.ull);
+				break;
+		}
+	}
+	
+	if(glocs[mspos] >= 0) {
+		fsb = dhs[glocs[mspos]];
+		d.maxsteps = malloc(fsb.size);
+		
+		memcpy(d.maxsteps, fsb.val.i, fsb.size);
+	}
+	
+	if(tse > 0) {
+		d.tstarted = (time_t)tse;
+	}
+	
+	if(tde > 0) {
+		d.tdone = (time_t)tde;	
+	}
+	
+	rewind(f);
+	
+	error:
+	if(glocs != NULL) { free(glocs); }
+	
+	free_fsave_array(dhs, dhs_size);
+	free_fsave(&dhg);
+	
+	free_string_array(names, nsize);
+	
+	d.valid = 1;
+	
+	if(rv < 0) { d = free_dh(&d); }
+	*ev = rv;
+
+	return d;
+} 
+
+dheader free_dh(dheader *d) {
+	if(d != NULL) {
+		if(d->filename != NULL) { 
+			free(d->filename);
+			d->filename = NULL;
+		}
+		
+		if(d->expname != NULL) { 
+			free(d->expname); 
+			d->expname = NULL;
+		}
+		
+		if(d->dstamp != NULL) {
+			free(d->dstamp);
+			d->dstamp = NULL;
+		}
+		
+		if(d->maxsteps != NULL) {
+			free(d->maxsteps);
+			d->maxsteps = NULL;
+		}
+	}
+	
+	return null_dh();
+}
+
+dheader null_dh() {
+	// Returns a null dataheader.
+	
+	dheader d = {.filename = NULL,
+				 .expname = NULL,
+				 .desc = NULL,
+			  	 .num = -1,
+				 .hash = 0,
+				 .dstamp = NULL,
+				 .tstarted = NULL,
+				 .tdone = NULL,
+				 .nchans = 0,
+				 .cind = 0,
+				 .maxsteps = NULL,
+				 .valid = 0};
+ 
+	return d;
+}
+ 
+ 
+int *parse_cstep(char *step, int *ev) {
+	// Parses titles of the form [0, 0, 0, 0]
+	// If the result is not NULL, it is a dynamically allocated array which must be freed.
+	int rv = 0;
+	int *cstep = NULL;
+	int strl = 0;
+
+	if(step == NULL || (strl = strlen(step)) == 0) { rv = MCD_ERR_NOSTEPSTR; goto error; }
+	
+	// Figure out how many values there are first
+	int i, s = 1;
+	for(i = 0; i < strl; i++) {
+		if(step[i] == ',') { 
+			s++; 
+		}
+	}
+	
+	cstep = calloc(s, sizeof(unsigned int));
+	char *m = step+1; // Skip the opening bracket.
+	int n;
+	for(i = 0; i < s; i++) {
+		n = sscanf(m, "%d%*s", cstep+i);
+		if(n != 1) { 
+			rv = MCD_ERR_INVALIDSTR;
+			goto error;
+		}
+		
+		m = strchr(m, ',');
+		if(m == NULL) { break; }
+		m++;
+	}
+
+	error:
+	
+	if(rv != 0) { 
+		free(cstep);
+		cstep = NULL;
+	}
+	
+	*ev = rv;
+	return cstep;
+}
 
 /******************** File Navigation *******************/
+void refresh_dir_box() {
+	// Just refresh the items in the directory box.
+	int index, slen, flen;
+	char *path = NULL;
+	char *fname = NULL;
+	
+	GetCtrlIndex(mc.datafbox[1], mc.datafbox[0], &index);
+	GetCtrlValStringLength(mc.datafbox[1], mc.datafbox[0], &flen);
+	
+	if(index != 0  && flen > 0) {
+		fname = malloc(++flen);	
+	}
+	
+	GetCtrlValStringLength(mc.path[1], mc.path[0], &slen);
+	path = malloc(++slen);
+	
+	GetCtrlVal(mc.path[1], mc.path[0], path);
+	
+	select_directory(path);
+							   
+	free(path);
+	
+	if(fname != NULL) {
+		int ind2;
+		GetIndexFromValue(mc.datafbox[1], mc.datafbox[0], &ind2, fname);
+		
+		if(ind2 >= 0) {
+			index = ind2;
+		}
+		
+		free(fname);
+	}
+	
+	SetCtrlIndex(mc.datafbox[1], mc.datafbox[0], index);
+}
+
 void select_data_item() {
 	int index, type, len;
 	char *path = NULL;
@@ -1157,7 +2963,7 @@ void select_directory(char *path) {
 	DeleteListItem(mc.datafbox[1], mc.datafbox[0], 0, -1);	// Clear the list.
 	int ind = 0;											// Running tally of tine index
 	
-	char *spath = calloc(strlen(path)+strlen("*.tdm")+2, sizeof(char));
+	char *spath = calloc(strlen(path)+strlen("*.mcd")+2, sizeof(char));
 
 	int pchanged = 0;
 	
@@ -1190,7 +2996,7 @@ void select_directory(char *path) {
 	}
 	
 	// Now load all the files.
-	sprintf(spath, "%s\\%s", path, "*.tdm");
+	sprintf(spath, "%s\\%s", path, "*.mcd");
 	
 	rv = GetFirstFile(spath, 1, 0, 0, 0, 0, 1, filename);
 	while(rv == 0) {	// Get the rest of them.
@@ -1224,70 +3030,123 @@ void select_file(char *path) {
 	free(msg);
 	
 	if(rv) {
-		rv = load_experiment_safe(path);
+		rv = load_experiment(path, 1);
 		
 		if(rv != 0)
-			display_ddc_error(rv);
+			display_error(rv);
 	}
 }
 
-void load_file_info(char *path, char *old_path) {
-	// First we'll try to save the old description.
-	if(old_path != NULL) {
-		update_file_info(old_path);
-	}
-	
-	if(!FileExists(path, NULL))	{ return; }
-
-	int rv;
-	DDCFileHandle file = NULL;
-	int len;
-	char *desc = NULL, *name = NULL;
-	
-	if(rv = DDC_OpenFileEx(path, "TDM", 1, &file)) { goto error; }
-	
-	// Get the base filename
-	DDC_GetFileStringPropertyLength(file, DDC_FILE_NAME, &len);
-	name = malloc(++len+10);
-	DDC_GetFileProperty(file, DDC_FILE_NAME, name, len);
+void load_file_info_dh(dheader dh) {
+	// Loads the file infrom from a dheader header struct. Optionally pass
+	// the variable path to save a few CPU cycles. If NULL is passed to 
+	// path, it will be determined from the UI.
 
 	// Set the base file name
-	SetCtrlVal(mc.basefname[1], mc.basefname[0], name);
-
-	// Calculate the next actual file name
-	// First we need the base path.
-	char *c = strrchr(path, '\\');
-	if(c != NULL) {
-		strncpy(name, c+1, strlen(c+1)-3);  // Copy filename without extension.
-		name[strlen(c+1)-4] = '\0';		// Null terminate
+	SetCtrlVal(mc.basefname[1], mc.basefname[0], dh.expname);
+	
+	// Get the actual filename.
+	char *fname = NULL;
+	int p = 0;
+	
+	// Extensino first
+	int i = strlen(dh.filename);
+	for(i; i > 0; i--) {
+		if(dh.filename[i] == '.') {
+			// Extension ends here
+			p = strlen(dh.filename)-i;
+			break;
+		}
+	}
+	
+	for(i; i > 0; i--) {
+		if(dh.filename[i] == '\\') {
+			fname = &(dh.filename[i+1]);
+			break;
+		}
+	}
+	
+	if(fname != NULL) {
+		int l = strlen(fname)-p;
+		char *name = malloc(l+1);
+		strncpy(name, fname, l);
+		name[l] = '\0';
+		
 		SetCtrlVal(mc.cdfname[1], mc.cdfname[0], name);
 	}
-	// Now get and set the description
-	DDC_GetFileStringPropertyLength(file, DDC_FILE_DESCRIPTION, &len);
-	desc = malloc(++len);
 	
-	DDC_GetFileProperty(file, DDC_FILE_DESCRIPTION, desc, len);
-	
-	ResetTextBox(mc.datadesc[1], mc.datadesc[0], desc);
-	SetCtrlAttribute(mc.datadesc[1], mc.datadesc[0], ATTR_DFLT_VALUE, desc);
-	
-	error:
-	if(file != NULL) { DDC_CloseFile(file); }
-	if(name != NULL) { free(name); }
-	if(desc != NULL) { free(desc); }
+	// First we need the base path.
+	ResetTextBox(mc.datadesc[1], mc.datadesc[0], dh.desc);
+	SetCtrlAttribute(mc.datadesc[1], mc.datadesc[0], ATTR_DFLT_VALUE, dh.desc);
 }
 
-void load_file_info_safe(char *path, char *old_path) {
-	CmtGetLock(lock_tdm);
-	load_file_info(path, old_path);
-	CmtReleaseLock(lock_tdm);
-}
-
-void update_file_info(char *path) {
-	// Saves a new description for a TDM file.
-	if(!FileExists(path, NULL)) { return; }
+int load_file_info(char *path, char *old_path) {
+	// Loads information from the file.
+	FILE *f = NULL;
+	dheader dh = null_dh();
+	
+	// First we'll try to save the old description.
+	if(old_path != NULL) {
+	//	update_file_info(old_path);
+	}
 	
 	int rv;
+	if(path == NULL || !FileExists(path, NULL))	{ 
+		rv = MCD_ERR_NOFILENAME;
+		goto error;
+	}
+ 
+	f = fopen(path, "rb");
+	if(f == NULL) {
+		rv = MCD_ERR_NOFILE;
+		goto error;	
+	}
+	
+	// Load the data from the header
+	dh = load_dataheader_file(f, &rv);
+	if(rv != 0) { goto error; }
+	
+	load_file_info_dh(dh);
+	
+	error:
+	if(f != NULL) { fclose(f); }
+	free_dh(&dh);
+	
+	return rv;
+}
+
+int load_file_info_safe(char *path, char *old_path) {
+	CmtGetLock(lock_tdm);
+	int rv = load_file_info(path, old_path);
+	CmtReleaseLock(lock_tdm);
+	
+	return rv;
+}
+
+int update_file_info(char *path) {
+	// Update the file header - needs to actually copy over the entire file,
+	// so this can be time-consuming for large files.
+	//
+	// Doesn't actually do much now, no time to fix it.
+	dheader dh = null_dh();
+	dstor ds = null_ds();
+	
+	FILE *f = NULL;
+	int rv = 0;
+	
+	if(path == NULL || !FileExists(path, NULL)) { 
+		rv = MCD_ERR_NOFILENAME;
+		
+		goto error;
+	}
+	
+	if((f = fopen(path, "rb")) == NULL) {
+		rv = MCD_ERR_NOFILE;	
+	}
+	
+	
+	
+	/*int rv;
 	DDCFileHandle file = NULL;
 	int len;
 	char *desc = NULL, *old_desc = NULL;
@@ -1315,17 +3174,21 @@ void update_file_info(char *path) {
 	if(rv = DDC_SetFileProperty(file, DDC_FILE_DESCRIPTION, desc)) { goto error; }
 	
 	DDC_SaveFile(file);
-	
+		   */
 	error:
-	if(desc != NULL) { free(desc); }
-	if(old_desc != NULL) { free(old_desc); }
-	if(file != NULL) { DDC_CloseFile(file); }
+	free_ds(&ds);
+	free_dh(&dh);
+	if(f != NULL) { fclose(f); }
+	
+	return rv;
 }
 
-void update_file_info_safe(char *path) {
+int update_file_info_safe(char *path) {
 	CmtGetLock(lock_tdm);
-	update_file_info(path);
+	int rv = update_file_info(path);
 	CmtReleaseLock(lock_tdm);
+	
+	return rv;
 }
 
 //////////////////////////////////////////////////////////////
@@ -1347,7 +3210,7 @@ void load_data_popup() {
 		add_data_path_to_recent_safe(path);
 	}
 	
-	int err_val = load_experiment_safe(path);
+	int err_val = load_experiment_tdm_safe(path);
 	
 	free(path);
 	
@@ -1407,6 +3270,8 @@ int plot_data(double *data, int np, double sr, int nc) {
 	
 	int ev = 0;
 	
+	double *db = NULL;
+	
 	// If the inputs are invalid, return 1.
 	if(np <= 0 || sr <= 0.0 || nc <= 0 || data == NULL) { return 1; }
 	
@@ -1420,22 +3285,23 @@ int plot_data(double *data, int np, double sr, int nc) {
 	if(as) {
 		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_BOTTOM_XAXIS, VAL_AUTOSCALE, 0, 0);
 		SetAxisScalingMode(dc.fid, dc.fgraph, VAL_LEFT_YAXIS, VAL_AUTOSCALE, 0, 0);
-	}
+	} 
 	
 	GetCtrlVal(dc.spec, dc.sauto, &as); // Spectrum autoscale
 	if(as) {
 		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_BOTTOM_XAXIS, VAL_AUTOSCALE, 0, 0);
 		SetAxisScalingMode(dc.spec, dc.sgraph, VAL_LEFT_YAXIS, VAL_AUTOSCALE, 0, 0);
 	}
-
+	
 	// We want to zero-pad the FFT out to a power of 2.
 	int npfft = ceil(log10(np)/log10(2)); // ceil(log2(np))
 	npfft = 1<<npfft; // Bitshifting 1 gives you pow(2, npfft);
 	int i, j;
 	
-	double *curr_data = NULL, *fft_re = NULL, *fft_im = NULL, *fft_mag = NULL, *phase = NULL, *freq = NULL;
+	double *curr_data = NULL, *fft_data, *fft_re = NULL, *fft_im = NULL, *fft_mag = NULL, *phase = NULL, *freq = NULL;
 	NIComplexNumber *curr_fft = NULL;
 	
+	fft_data = malloc(sizeof(double)*np);
 	curr_data = malloc(sizeof(double)*np); // Buffer for each channel's data.
 	fft_re = malloc(sizeof(double)*npfft/2); 	// Real channel
 	fft_im = malloc(sizeof(double)*npfft/2); 	// Imaginary channel
@@ -1450,24 +3316,32 @@ int plot_data(double *data, int np, double sr, int nc) {
 		goto error;
 	 }
 	// Generate the frequency vector for the phase evaluation
-	for(i = 0; i < npfft/2; i++)
+	for(i = 0; i < npfft/2; i++) {
 		freq[i] = i*sr/(2*(npfft/2-1)); 
+	}
 	
 	for(i = 0; i < nc; i++) {  // Iterate through the channels
 		// Get the data for this channel
-		for(j = 0; j < np; j++)
-			curr_data[j] = data[j+i*np];
-	
-		FFTEx(curr_data, np, npfft, NULL, FALSE, curr_fft);  // Do the fourier transform before any gain stuff
+		// Pre-scale the data to have 0 change in the power spectrum - i.e. multiply by (2/np)
+
+		memcpy(curr_data, data+(i*np), sizeof(double)*np); 
 		
-		if(uidc.fgain[i] != 1.0 || uidc.foff[i] != 0.0) {
-			for(j = 0; j < np; j++)
-				curr_data[j] = curr_data[j]*uidc.fgain[i] + uidc.foff[i];
+		if(uidc.polyon) {
+			polynomial_subtraction(curr_data, np, uidc.polyord, 0);	// 0 Skip for now
 		}
 		
+		// Scale the curr_data for gains, then pre-scale the FFT data
+		// to have no change in the power spectrum (multiply by (2/np)
+		for(j = 0; j < np; j++) {
+			fft_data[j] = curr_data[j]*2/np;
+			curr_data[j] = curr_data[j]*uidc.fgain[i] + uidc.foff[i];
+		}
+
 		uidc.fplotids[i] = PlotY(dc.fid, dc.fgraph, curr_data, np, VAL_DOUBLE, VAL_THIN_LINE, VAL_NO_POINT, VAL_SOLID, 1, uidc.fchans[i]?uidc.fcol[i]:VAL_TRANSPARENT);
 		
 		// Prepare the data.
+		FFTEx(fft_data, np, npfft, NULL, FALSE, curr_fft);  // Do the fourier transform
+		
 		PolyEv1D(freq, npfft/2, (double *)uidc.sphase[i], 3, phase);
 		for(j = 0; j < npfft/2; j++) {
 			// Apply the initial phase correction
@@ -1508,6 +3382,7 @@ int plot_data(double *data, int np, double sr, int nc) {
 	
 	// Free our vectors
 	error:
+	if(fft_data != NULL) { free(fft_data); }
 	if(curr_data != NULL) { free(curr_data); }
 	if(curr_fft != NULL) { free(curr_fft); }
 	if(fft_re != NULL) { free(fft_re); }
@@ -1525,6 +3400,159 @@ int plot_data_safe(double *data, int np, double sr, int nc) {
 	CmtReleaseLock(lock_uidc);
 	
 	return rv;
+}
+
+int run_hotkey(int panel, int control, int eventData1, int eventData2)
+{
+	//Sets up a series of hotkeys for the graph controls.
+	switch (eventData1)
+	{
+		case (VAL_MENUKEY_MODIFIER | VAL_UP_ARROW_VKEY):
+		case (VAL_SHIFT_AND_MENUKEY | '+'):
+			zoom_graph(panel, control, 1, MC_XYAXIS);
+		break;
+		
+		case (VAL_MENUKEY_MODIFIER | VAL_DOWN_ARROW_VKEY):
+		case (VAL_MENUKEY_MODIFIER | '='):
+			zoom_graph(panel, control, 0, MC_XYAXIS);
+			break;
+		
+		case (VAL_SHIFT_MODIFIER | VAL_RIGHT_ARROW_VKEY):
+			pan_graph(panel, control, MC_RIGHT);
+			break;
+			
+		case (VAL_SHIFT_MODIFIER | VAL_LEFT_ARROW_VKEY):
+			pan_graph(panel, control, MC_LEFT);
+			break;
+		
+		case (VAL_SHIFT_MODIFIER | VAL_UP_ARROW_VKEY):
+			pan_graph(panel, control, MC_UP);
+			break;
+			
+		case (VAL_SHIFT_MODIFIER | VAL_DOWN_ARROW_VKEY):
+			pan_graph(panel, control, MC_DOWN);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY | 'H'):
+			fit_graph(panel, control, MC_XAXIS);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY | 'V'):
+			fit_graph(panel, control, MC_YAXIS);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY | VAL_UP_ARROW_VKEY):
+			zoom_graph(panel, control, 1, MC_YAXIS);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY |  VAL_DOWN_ARROW_VKEY):
+			zoom_graph(panel, control, 0, MC_YAXIS);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY | VAL_RIGHT_ARROW_VKEY):
+			zoom_graph(panel, control, 1, MC_XAXIS);
+			break;
+		
+		case (VAL_SHIFT_AND_MENUKEY | VAL_LEFT_ARROW_VKEY):
+			zoom_graph(panel, control, 0, MC_XAXIS);
+			break;
+	
+	}
+	return 0;	
+}
+
+int zoom_graph (int panel, int control, int in, int xy)
+{
+	//Give this a panel and a control and tell it to zoom in or out (in = 0 -> zoom out, in = 1 -> zoom in)
+	//xy = MC_XAXIS gives you zoom on the x, xy = MC_YAXIS gives you zoom on y only, xy = MC_XYAXIS gives zoom on both x and y.
+	int xmode, ymode;
+	double xmin, xmax, ymin, ymax, min, max;
+	
+	GetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, &xmode, &xmin, &xmax);
+	GetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, &ymode, &ymin, &ymax);
+	
+	if(xy == MC_XAXIS || xy == MC_XYAXIS)
+	{
+		max = xmax - xmin;
+		min = (xmax + xmin)/2;
+		max += (0.1-0.2*in)*max;
+		max /= 2;
+		xmax = min+max;
+		xmin = min-max;
+	}
+	
+	if(xy == MC_YAXIS || xy == MC_XYAXIS)
+	{
+		max = ymax - ymin;
+		min = (ymax + ymin)/2;
+		max += (0.1-0.2*in)*max;
+		max /= 2;
+		ymax = min+max;
+		ymin = min-max;
+	}
+	
+	SetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, VAL_MANUAL, xmin, xmax);
+	SetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, VAL_MANUAL, ymin, ymax);
+	
+	RefreshGraph(panel, control);
+
+	return 0;
+}
+
+int pan_graph (int panel, int control, int dir)
+{
+	int xmode;
+	double xmin, xmax, disp, diff, axis;
+	
+	if(dir == MC_LEFT || dir == MC_RIGHT)
+		axis = VAL_BOTTOM_XAXIS;
+	else if(dir == MC_UP || dir == MC_DOWN)
+		axis = VAL_LEFT_YAXIS;
+	else
+		return -1;
+	
+	GetAxisScalingMode(panel, control, axis, &xmode, &xmin, &xmax);
+	
+	if(dir == MC_LEFT || dir == MC_DOWN)
+		disp = -0.05;
+	else
+		disp = 0.05;
+
+	diff = xmax - xmin;
+	
+	xmin += disp*diff;
+	xmax += disp*diff;
+
+	SetAxisScalingMode(panel, control, axis, VAL_MANUAL, xmin, xmax);
+	
+	RefreshGraph(panel, control);
+
+	return 0;
+}
+
+int fit_graph (int panel, int control, int xy)
+{
+	int xmode, ymode, val;
+	double xmin, xmax, ymin, ymax;
+	
+	GetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, &xmode, NULL, NULL);
+	GetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, &ymode, NULL, NULL);
+
+	if(xy == MC_XAXIS || xy == MC_XYAXIS)
+		SetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, VAL_AUTOSCALE, NULL, NULL);
+	
+	if(xy == MC_YAXIS || xy == MC_XYAXIS)
+		SetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, VAL_AUTOSCALE, NULL, NULL);
+	
+	RefreshGraph(panel, control);
+	
+	GetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, &val, &xmin, &xmax);
+	GetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, &val, &ymin, &ymax);
+	
+	SetAxisScalingMode(panel, control, VAL_BOTTOM_XAXIS, xmode, xmin, xmax);
+	SetAxisScalingMode(panel, control, VAL_LEFT_YAXIS, ymode, ymin, ymax);
+	
+	return 0;
 }
 
 int change_phase(int chan, double phase, int order) {
@@ -1608,6 +3636,62 @@ int change_phase_safe(int chan, double phase, int order) {
 	CmtReleaseLock(lock_uidc);
 	
 	return rv;
+}
+
+int polynomial_subtraction(double *data, int np, int order, int skip) {
+	// Performs a polynomial subtraction on the data in data.
+	// Polynomial fit will be of order "order" and will skip the first
+	// "skip" points.
+	
+	int i, rv = 0;
+	double *x = NULL, *output = NULL, *coef = NULL;
+	double err;
+	
+	if(skip < 0) { skip = 0; }
+	
+	if(order > 0) {
+		x = malloc(sizeof(double)*(np));
+		
+		for(i = 0; i< np; i++)
+			x[i] = (double)i;
+		
+		output = calloc(np, sizeof(double));
+		coef = malloc((order+1)*sizeof(double));
+		
+		// This will give us the polynomial fit for all the points after skip. 
+		if(PolyFit(&(x[skip]), &(data[skip]), np-skip, order, &(output[skip]), coef, &err) < 0) {
+			rv = MCD_ERR_POLYFIT;
+			goto error;
+		}
+		
+		// Back-fill the pars we skipped.
+		if(skip > 0) {
+			if(PolyEv1D(x, skip, coef, order+1, output) < 0) { 
+				rv = MCD_ERR_POLY_BACK; 
+				goto error;
+			}
+		}
+		
+		for(i = 0; i < np; i++) {
+			data[i] -= output[i];
+		}
+		
+	} else {
+		double mean = 0;
+		Mean(data+skip, np-skip, &mean);
+		
+		for(i = 0; i < np; i++) {
+			data[i] -= mean;	
+		}
+	}
+	
+	error:
+	
+	if(coef != NULL) { free(coef); }
+	if(x != NULL) { free(x); }
+	if(output != NULL) { free(output); }
+	
+	return 0;
 }
 
 
@@ -1729,7 +3813,7 @@ void update_transients() {
 			ind = get_selected_ind(pan, 0, NULL);
 			nt = calculate_num_transients(ce.cind, ind, p->nt);
 		} else {
-			nt = ce.cind;
+			nt = ce.cind+1;
 		}
 		
 		if(nt)
@@ -1751,7 +3835,7 @@ void update_transients() {
 				// Check to make sure that the "Average" entry is there.
 				int len, buff;
 				
-				GetCtrlVal(pan, dc.ctrans, &buff);
+				GetValueFromIndex(pan, dc.ctrans, 0, &buff);
 				
 				if(buff != 0) { 					// Average has value 0.
 					DeleteListItem(pan, dc.ctrans, 0, -1); // Delete them all and start over.
@@ -1802,8 +3886,11 @@ void set_nav_from_lind(int lind, int panel, int avg) {
 	if(get_cstep(lind, cstep, steps, p->nDims+1) != 1) { return; }	// Return on error
 	
 	// Set the values, then we're done.
-	SetCtrlVal(panel, dc.ctrans, avg?0:cstep[0]+1);
 	for(i = 0; i < p->nDims; i++) { SetCtrlVal(panel, dc.idrings[i], cstep[i+1]); }
+	
+	update_experiment_nav();
+	
+	SetCtrlIndex(panel, dc.ctrans, avg?0:cstep[0]+1);
 	
 	free(cstep);
 	free(steps);
@@ -1819,41 +3906,64 @@ void set_data_from_nav(int panel) {
 	// Grabs the current index from the nav and plots the data from the file.
 	// Panel should be a CurrentLoc panel
 	int lind, t;
+	int rv = 0;
 	
 	// Gets the position from the nav.
 	GetCtrlVal(panel, dc.ctrans, &t);
 	
+	SetCtrlVal(dc.cloc[((panel == dc.cloc[0])?1:0)], dc.ctrans, t);
+	
+	if(ce.p == NULL) { return; }
+	
 	if(ce.p->nDims) {
 		lind = get_selected_ind(panel, (t != 0), NULL); // If t == 0, we're getting an average. 
 		set_nav_from_lind(lind, dc.cloc[(panel == dc.cloc[0])?1:0], (t == 0));	// Setup the corresponding other tab.
-	} else
-		lind = (t == 0)?0:t-1;
+		
+		lind = get_selected_ind(panel, 0, NULL); // We no longer want the transient in the lindex.
+	} else 
+		lind = 0;
 	
-	int rv = 0;
+	if(!ce.data.valid && ce.path != NULL) {			
+		FILE *f = fopen(ce.path, "rb");
+		
+		ce.data = load_all_data_file(f, ce.p, NULL, &rv);
+		
+		fclose(f);
+		
+		if(rv < 0) { goto error; }
+	}
 	
-	double *data = load_data(ce.path, lind, ce.p, (t == 0), ce.nchan, &rv);
+	if(!ce.adata.valid) {
+		if(ce.data.valid) {
+			ce.adata = get_avg_data(ce.data);	
+		}
+	}
 	
-	if(rv != 0) {
-		display_ddc_error(rv);
-		goto error;
-	} 
+	dstor data = null_ds();
 	
-	plot_data(data, ce.p->np, ce.p->sr, ce.nchan);	// Plot the data.
+	if(t == 0) {
+		data = ce.adata;
+	} else {
+		data = ce.data;
+		t--;
+	}
+	
+	plot_data(data.data[t][lind], data.np, ce.p->sr, data.nc);	// Plot the data.
 	
 	error:
-	if(data != NULL) { free(data); }
+	if(rv != 0) { display_error(rv); }
 }
 
 void set_data_from_nav_safe(int panel) {
+	CmtGetLock(lock_tdm);
 	CmtGetLock(lock_ce);
 	CmtGetLock(lock_uidc);
-	CmtGetLock(lock_tdm);
 	
 	set_data_from_nav(panel);
 	
-	CmtReleaseLock(lock_tdm);
 	CmtReleaseLock(lock_uidc);
 	CmtReleaseLock(lock_ce);
+	CmtReleaseLock(lock_tdm);
 }
 
 void clear_plots() {
@@ -1969,14 +4079,14 @@ int calculate_num_transients(int cind, int ind, int nt) {
 	// including transients. cind should be [nt {dim1, ..., dimn}]
 	
 	if(nt > cind)
-		return cind;
+		return cind+1;
 	
 	int cindid = (int)(floor(cind/nt)); 	// This is the position in acquisition space we're in.
 	
 	if(ind > cindid)
 		return -1; // Invalid position.
 	else if(ind == cindid)
-		return cind-(cindid*nt); 			// The number of transients completed in the most recent acquisition.
+		return cind-(cindid*nt)+1; 			// The number of transients completed in the most recent acquisition.
 	else
 		return nt;							// All transients should be available.
 }
@@ -2192,7 +4302,7 @@ void change_spec_offset(int num) {
 	
 	// Get the old gain
 	float oldoff = uidc.soff[c];
-	GetCtrlVal(dc.spec, dc.scgain, &uidc.soff[c]);
+	GetCtrlVal(dc.spec, dc.scoffset, &uidc.soff[c]);
 	
 	if(uidc.splotids[c][0] < 0 || uidc.splotids[c][1] < 0 || uidc.splotids[c][2] < 0)  // If we don't need to update the plot, we're good
 		return;
@@ -2234,21 +4344,30 @@ void change_spec_offset_safe(int num) {
 }
 
 void toggle_fid_chan(int num) {
+	if(num < 0 || num >= 8) {
+		return;
+	}
+	
+	int on;
+	GetCtrlVal(dc.fid, dc.fchans[num], &on);
+	
+	set_fid_chan(num, !on);
+}
+
+void toggle_fid_chan_safe(int num) {
+	CmtGetLock(lock_uidc);
+	toggle_fid_chan(num);
+	CmtReleaseLock(lock_uidc);
+}
+
+void set_fid_chan(int num, int on) {
 	// Turns whether or not a given channel is on on or off and
 	// updates all the relevant controls.
-	
-	/****** TODO *******
-	 Once the data loading and such is done, this also needs to hide or show
-	 the appropriate data, update the channel preferences, etc.   (Is this done?)
-	 *******************/
-	
-	if(num < 0 || num >= 8)
+
+	if(num < 0 || num >= 8 || uidc.fchans[num] == on)
 		return;
 	
 	// Update UIDC
-	int i, on;
-	GetCtrlVal(dc.fid, dc.fchans[num], &on);
-	
 	uidc.fchans[num] = on;
 	
 	if(on) {
@@ -2258,6 +4377,7 @@ void toggle_fid_chan(int num) {
 	}
 
 	// Turn the data on or off
+	int i; 
 	if(uidc.fplotids[num] >= 0) {
 		SetPlotAttribute(dc.fid, dc.fgraph, uidc.fplotids[num], ATTR_TRACE_COLOR, on?uidc.fcol[num]:VAL_TRANSPARENT);
 	}
@@ -2268,6 +4388,8 @@ void toggle_fid_chan(int num) {
 	// Reverse it if any channels are on.
 	int c_on = (uidc.fnc < 1);
 	
+	SetCtrlVal(dc.fid, dc.fchans[num], on);
+	
 	SetCtrlAttribute(dc.fid, dc.fccol, ATTR_DIMMED, c_on);
 	SetCtrlAttribute(dc.fid, dc.fcgain, ATTR_DIMMED, c_on);
 	SetCtrlAttribute(dc.fid, dc.fcoffset, ATTR_DIMMED, c_on);
@@ -2277,25 +4399,38 @@ void toggle_fid_chan(int num) {
 	}
 }
 
-void toggle_fid_chan_safe(int num) {
+void set_fid_chan_safe(int num, int on) {
 	CmtGetLock(lock_uidc);
-	toggle_fid_chan(num);
+	set_fid_chan(num, on);
 	CmtReleaseLock(lock_uidc);
 }
 
+
 void toggle_spec_chan(int num) {
-	// Turns whether or not a given spectrumc hannel is on or off and updates the relevant controls
+	int on;
+	GetCtrlVal(dc.spec, dc.schans[num], &on);
 	
-	if(num < 0 || num >= 8) { return; }
+	set_spec_chan(num, !on);
+}
+
+
+void toggle_spec_chan_safe(int num) {
+	CmtGetLock(lock_uidc);		  
+	toggle_spec_chan(num);
+	CmtReleaseLock(lock_uidc);
+}
+
+void set_spec_chan(int num, int on) {
+	// Turns whether or not a given spectrum channel is on or off and updates the relevant controls
+	
+	if(num < 0 || num >= 8 || uidc.schans[num] == on) { return; }
 	
 	/****** TODO *******
 	 Once the data loading and such is done, this also needs to hide or show
 	 the appropriate data, update the channel preferences, etc.
 	 *******************/
 	
-	int i, on;
-	GetCtrlVal(dc.spec, dc.schans[num], &on);
-	
+	// Update UIDC
 	uidc.schans[num] = on;
 	
 	if(on) {
@@ -2305,6 +4440,7 @@ void toggle_spec_chan(int num) {
 	}
 
 	// Turn the data on or off
+	int i; 
 	if(uidc.schan >= 0 && uidc.schan < 3 && uidc.splotids[num][uidc.schan] >= 0) {
 		SetPlotAttribute(dc.spec, dc.sgraph, uidc.splotids[num][uidc.schan], ATTR_TRACE_COLOR, on?uidc.scol[num]:VAL_TRANSPARENT);
 		for(i = 0; i < 8; i++) {
@@ -2325,6 +4461,8 @@ void toggle_spec_chan(int num) {
 	// Reverse it if any channels are on.
 	int c_on = (uidc.snc < 1);
 	
+	SetCtrlVal(dc.spec, dc.schans[num], on);
+	
 	SetCtrlAttribute(dc.spec, dc.sccol, ATTR_DIMMED, c_on);
 	SetCtrlAttribute(dc.spec, dc.scgain, ATTR_DIMMED, c_on);
 	SetCtrlAttribute(dc.spec, dc.scoffset, ATTR_DIMMED, c_on);
@@ -2344,9 +4482,9 @@ void toggle_spec_chan(int num) {
 	}
 }
 
-void toggle_spec_chan_safe(int num) {
-	CmtGetLock(lock_uidc);		  
-	toggle_spec_chan(num);
+void set_spec_chan_safe(int num, int on) {
+	CmtGetLock(lock_uidc);
+	set_spec_chan(num, on);
 	CmtReleaseLock(lock_uidc);
 }
 
@@ -2473,9 +4611,10 @@ void update_spec_fft_chan_safe() {
 
 /********* Device Interaction Settings ********/
 
-int get_current_fname (char *path, char *fname, int next) {
-	// Make sure that fname has been allocated to the length of the fname + 4 chars.
-	// Output is "fname", which is overwritten.
+int get_current_fname (char *path, char *fname, int next, time_t *cdate) {
+	// Output is "fname", which must be pre-allocated.
+	// Passing NULL to path returns the length of the new filename.
+	// This will NOT check if the new filename will be valid, clearly
 	// 
 	// If "next" is TRUE, passes the next available one. Otherwise it
 	// passes the most recent one.
@@ -2485,61 +4624,118 @@ int get_current_fname (char *path, char *fname, int next) {
 	// -2: Malformed path or fname
 	// -3: Maximum number of filenames used
 	//
-	// Success returns 1;
+	// Success returns 0 or positive;
 	
-	if(path == NULL || fname == NULL) { return -1; }
+	if(fname == NULL) { return -1; }
+	char *ext = MCD_EXTENSION, *str_format = NULL, *npath = NULL;
+	char *dstr = NULL;
+	time_t d = time(cdate);
+	
+	int i, rv = 0;
 	
 	// Allocate space for the full pathname.
-	char *npath = malloc(strlen(path)+strlen(fname)+11);
+	int flen = strlen(fname);
+	if(flen < 1) { rv = -2; goto error; }
 	
+	// Make sure there are no instances of special characters in the filename
+	// and terminate any trailing '\' characters.
+	for(i = 0; i < flen; i++) {
+		if(fname[i] != '\\') { break; }	
+	}
+	
+	if(i > 0) {
+		int ld = flen-i+1; // Also copy the null bit
+		memcpy(fname, fname+i, ld);
+		flen = strlen(fname);
+		if(flen < 1) { rv = -2; goto error; }
+	}
+	
+	flen += MCD_FNAME_FIXED_LEN + 1; // Not including extension, but including null.
+	
+	if(path == NULL) { 
+		rv =  flen;
+		goto error;
+	}
+	
+	npath = malloc(strlen(path)+flen+strlen(ext)+2);  // +2 is for the dot and file separator
 	strcpy(npath, path);
 	
 	// Make sure that there's no path separator at the end of path
 	// or at the beginning or end of fname.
-	while(strlen(npath) > 1 && path[strlen(npath)-1] == '\\') {
-		npath[strlen(npath)-1] = '\0';
+	int nlen = strlen(path);
+	for(i = nlen-1; i >= 0; i--) {
+		if(npath[i] != '\\') {
+			break;
+		}
 	}
+	npath[i+1] = '\0';
 	
-	if(strlen(npath) < 1 || !FileExists(npath, NULL)) {
-		free(npath);
-		return -2;
-	}
-	
-	while(strlen(fname) > 1 && fname[strlen(fname)-1] == '\\') {
-		fname[strlen(fname)-1] = '\0';
-	}
-	
-	if(strlen(fname) < 1) {
-		free(npath);
-		return -2;
-	}
-	
-	int i = 0, l = strlen(fname);
-	while(fname[i] == '\\' && i < l) {
-		i++;
-	}
-	
-	if(i > 0) {
-		strcpy(fname, &fname[i]);
-		fname[l-i+1] = '\0';
-	}
-	
+	if(strlen(npath) < 1 || !FileExists(npath, NULL)) { rv = -2; goto error; }
+
 	strcpy(path, npath);
 	
-	// Check which ones are available.
+	// Create the mechanism for generating filenames.
+	str_format = malloc(strlen("%s.%s")+strlen(MCD_FNAME_FORMAT)+2);
+	sprintf(str_format, "%%s\\%s.%%s", MCD_FNAME_FORMAT);
+	
+	struct tm *tptr = localtime(&d);
+	dstr = malloc(MCD_FNAME_DATE_LEN+1);
+	strftime(dstr, MCD_FNAME_DATE_LEN+1, MCD_FNAME_DATE_FORMAT, tptr);
+	
 	for(i = 0; i < 10000; i++) {
-		sprintf(npath, "%s\\%s%04d.tdm", path, fname, i);
+		sprintf(npath, str_format, path, dstr, fname, i, ext);
 		if(!FileExists(npath, NULL))
 			break;
 	}
 	
-	free(npath);
+	if(i >= 10000) {
+		rv = -3;
+		goto error;
+	}
 	
-	if(i >= 10000)
-		return -3;
+	char *buff = malloc(flen);
+	strcpy(buff, fname);
+	sprintf(fname, MCD_FNAME_FORMAT, dstr, buff, i-((next)?0:1)); // The output    	
 	
-	sprintf(fname, "%s%04d", fname, i-((next)?0:1)); // The output
-	return 1; 
+	free(buff);
+	
+	error:
+	if(npath != NULL) { free(npath); }
+	if(dstr != NULL) { free(dstr); }
+	if(str_format != NULL) { free(str_format); }
+
+	return rv; 
+}
+
+char *get_full_path(char *path, char *fname, char *ext, int *ev) {
+	// Gets the full path from the fname. Output is malloced, so
+	// must be freed. Input path cannot have a file separator
+	// at the end.
+	
+	int rv = 0;
+	char *npath = NULL;
+	if(ext == NULL) {
+		ext = MCD_EXTENSION; 
+	}
+	
+	if(path == NULL || !file_exists(path)) { rv = MCD_ERR_NOPATH; goto error; }
+	if(fname == NULL) { rv = MCD_ERR_NOFILENAME; goto error; }
+	
+	// Path + / + fname + . + ext + \0
+	int nplen = strlen(path) + 1 + strlen(fname) + 1 +  strlen(ext) + 1;
+	npath = malloc(nplen);
+	
+	sprintf(npath, "%s\\%s.%s", path, fname, ext);
+	
+	error:
+	if(rv != 0 && npath != NULL) {
+		free(npath);
+		npath = NULL;
+	}
+	
+	if(ev != NULL) { *ev = rv; }
+	
+	return npath;
 }
 
 int get_devices () {		
@@ -3206,6 +5402,60 @@ int load_DAQ_info_safe(int UIDC_lock, int UIPC_lock, int DAQ_lock) {
 	return rv;
 }
 
+int toggle_ic_ind(int ind) {
+	// Does the back-end work for toggling on a given channel.
+	int nl, rv = 0;
+	
+	char *label = NULL;
+	char *value = NULL;
+	
+	GetNumListItems(pc.ic[1], pc.ic[0], &nl);
+	if(ind < 0 || ind >= nl) {
+		rv = MCD_ERR_NOINPUTCHANS;
+		goto error;
+	}
+	
+	// Get the old label and value   
+	int lablen, len;
+	GetLabelLengthFromIndex(pc.ic[1], pc.ic[0], ind, &lablen);
+	GetValueLengthFromIndex(pc.ic[1], pc.ic[0], ind, &len);
+	
+	label = malloc(lablen+1);
+	value = malloc(len+1);
+	
+	GetLabelFromIndex(pc.ic[1], pc.ic[0], ind, label);
+	GetValueFromIndex(pc.ic[1], pc.ic[0], ind, value);
+	
+	label[0] = uidc.chans[ind]?' ':149; // 149 is a mark
+	
+	// Replace the list item to replace the label
+	ReplaceListItem(pc.ic[1], pc.ic[0], ind, label, value);
+	
+	if(uidc.chans[ind]) {
+		remove_chan(ind);
+	} else {
+		add_chan(&label[1], ind);
+	}
+	
+	// Update the uidc var now.
+	uidc.chans[ind] = !uidc.chans[ind];		// Toggle its place in the var
+	
+	error:
+	
+	if(label != NULL) { free(label); }
+	if(value != NULL) { free(value); }
+	
+	return rv;
+}
+
+int toggle_ic_ind_safe(int ind) {
+	CmtGetLock(lock_uidc);
+	int rv = toggle_ic_ind(ind);
+	CmtReleaseLock(lock_uidc);
+	
+	return rv;
+}
+
 void toggle_ic() {
 	// Toggles a given input channel. If you are turning it off, this
 	// function will jump you back to the previous location. If the previous
@@ -3222,47 +5472,18 @@ void toggle_ic() {
 		SetCtrlAttribute(pc.ic[1], pc.ic[0], ATTR_DFLT_INDEX, 0);	
 	}
 	
-	// Check if we can turn this on or not.
-	if(!uidc.chans[val] && uidc.onchans == 8) {
+	// Check if we can turn this on or not - if so do the back end
+	// On error in the back-end, jump back, clearly.
+	if(!uidc.chans[val] && uidc.onchans == 8 || toggle_ic_ind(val)) {
 		SetCtrlIndex(pc.ic[1], pc.ic[0], oval); // Jump back to where we were
 		return;
 	}
-	
-	// Get the old label and value
-	int lablen, len;
-	char *label, *value;
-	GetLabelLengthFromIndex(pc.ic[1], pc.ic[0], val, &lablen);
-	GetValueLengthFromIndex(pc.ic[1], pc.ic[0], val, &len);
-	
-	// Need to free these later
-	label = malloc(lablen+1);
-	value = malloc(len+1);
-	
-	GetLabelFromIndex(pc.ic[1], pc.ic[0], val, label);
-	GetValueFromIndex(pc.ic[1], pc.ic[0], val, value);
-	
-	label[0] = uidc.chans[val]?' ':149; // 149 is a mark
-	
-	// Replace the list item to replace the label
-	ReplaceListItem(pc.ic[1], pc.ic[0], val, label, value);
 	
 	// Now we're going to insert into the current channels ring in the right place
 	// Either delete the val when we find it, or insert this before the first one
 	// that's bigger than it.
 	int i, ind;
-	
-	if(uidc.chans[val]) {
-		remove_chan(val);
-	} else {
-		add_chan(&label[1], val);
-	}
-	
-	free(label);
-	free(value);
-	
-	// Update the uidc var now.
-	uidc.chans[val] = !uidc.chans[val];		// Toggle its place in the var
-	
+
 	// Finally, we'll do the bit where we set this to the right value.
 	if(!uidc.chans[val]) {
 		if(oval != val) {
@@ -3512,7 +5733,7 @@ int setup_DAQ_task() {
 
 	// Create the output, when this task is started and triggered, it will generate
 	// a train of pulses at frequency sr, until np pulses have occured.
-	DAQmxCreateCOPulseChanFreq(ce.cTask, cc_name, "Counter", DAQmx_Val_Hz, DAQmx_Val_Low, 0.0, sr, 0.5);
+	if(rv = DAQmxCreateCOPulseChanFreq(ce.cTask, cc_name, "Counter", DAQmx_Val_Hz, DAQmx_Val_Low, 0.0, sr, 0.5)) { goto error; }
 	
 	// Set the trigger for the counter and make it retriggerable
 	int edge;
@@ -3523,17 +5744,23 @@ int setup_DAQ_task() {
 	GetCtrlVal(pc.trige[1], pc.trige[0], &edge);	// Trigger edge (rising or falling)
 	
 	// Set up the trigger - use a 6.425 microsecond trigger.
+	int ctype;
 	if(rv = DAQmxCfgDigEdgeStartTrig(ce.cTask, tc_name, (int32)edge)) { goto error; }
 	if(rv = DAQmxCfgImplicitTiming(ce.cTask, DAQmx_Val_FiniteSamps, np)) { goto error; }
 	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_StartTrig_Retriggerable, TRUE)) { goto error; }
-	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_Enable, 1)) { goto error; }
-	if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_MinPulseWidth, 6.425e-6)) { goto error; }
+	
+	// Only available for digital inputs.
+	if(strncmp(tc_name, "PFI", 3) == 0) { 
+		if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_Enable, 1)) { goto error; }
+		if(rv = DAQmxSetTrigAttribute(ce.cTask, DAQmx_DigEdge_StartTrig_DigFltr_MinPulseWidth, 6.425e-6)) { goto error; }
+	}
 	
 	// Set the counter output channel as the clock foro the analog task
-	if (rv = DAQmxCfgSampClkTiming(ce.aTask, cc_out_name, (float64)sr, DAQmx_Val_Rising, DAQmx_Val_ContSamps, np)) { goto error;}
+	
+	if(rv = DAQmxCfgSampClkTiming(ce.aTask, ce.ccname, (float64)sr, DAQmx_Val_Rising, DAQmx_Val_ContSamps, np)) { goto error;}
 	
 	// Set the buffer for the input. Currently there is no programmatic protection against overruns
-	rv = DAQmxSetBufferAttribute(ce.aTask, DAQmx_Buf_Input_BufSize, (np*nc)+1000); // Extra 1000 in case
+	if(rv = DAQmxSetBufferAttribute(ce.aTask, DAQmx_Buf_Input_BufSize, (np*nc)+1000)) { goto error; }  // Extra 1000 in case
 	
 	error:
 	
@@ -3541,7 +5768,6 @@ int setup_DAQ_task() {
 	if(ic_name != NULL) { free(ic_name); }
 	if(cc_name != NULL) { free(cc_name); }
 	if(cc_out_name != NULL) { free(cc_out_name); }
-//	if(ce.ccname != NULL) { ce.ccname = NULL; }  // Why was this being freed?
 	if(tc_name != NULL) { free(tc_name); }
 	if(rv != 0) {
 		if(ce.atset) { DAQmxClearTask(ce.aTask); }
@@ -3719,6 +5945,7 @@ int update_DAQ_aouts() {
 	if(!ce.otset || ce.oTask == NULL) { return -1; }
 	
 	PPROGRAM *p = ce.p;
+	int *dim_step = NULL;
 	
 	// If it's the first time, you need to create ce.ao_vals
 	if(ce.ao_vals == NULL) {
@@ -3733,11 +5960,14 @@ int update_DAQ_aouts() {
 	// Update the ao_vals array
 	if(p->n_ao_var) {
 		int chan, step;
+		dim_step = malloc(p->nDims*sizeof(int));
+		get_dim_step(ce.p, ce.cind, dim_step);
+		
 		for(int i = 0; i < ce.nochans; i++) {
 			int chan = ce.ochanson[i];
 			
 			if(p->ao_varied[chan]) {
-				step = ce.cstep[p->nCycles+p->ao_dim[chan]];
+				step = dim_step[p->ao_dim[chan]];
 				
 				ce.ao_vals[i] = (float64)p->ao_vals[chan][step];
 			}
@@ -3749,6 +5979,7 @@ int update_DAQ_aouts() {
 	if(rv = DAQmxWriteAnalogF64(ce.oTask, 1, 1, -1, DAQmx_Val_GroupByChannel, ce.ao_vals, &ns, NULL)) { goto error; } 
 	
 	error:
+	if(dim_step != NULL) { free(dim_step); }
 	
 	return rv;
 }

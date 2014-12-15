@@ -1,3 +1,6 @@
+#ifndef MATH_PARSER_LIB_H
+#define MATH_PARSER_LIB_H
+
 #define C_INT 0
 #define C_DOUBLE 1
 
@@ -33,3 +36,5 @@ extern double parse_math(char *expr, constants *c,
                          int *err_val, int s_pos);
 
 extern int get_parse_error(int err_code, char *err_message);
+
+#endif

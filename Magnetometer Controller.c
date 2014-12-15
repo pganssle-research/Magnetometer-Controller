@@ -8039,7 +8039,7 @@ int CVICALLBACK FIDGraphClick (int panel, int control, int event,
 	{
 		int RMSBorder;
 		case EVENT_LEFT_CLICK:
-			/*
+		
 			GetCtrlVal(panel, FID_RMSBorders, &RMSBorder);
 			if(RMSBorder)
 				RMS_click(panel, control, eventData2, eventData1);
@@ -8060,7 +8060,6 @@ int CVICALLBACK FIDGraphClick (int panel, int control, int event,
 			break;
 		case EVENT_KEYPRESS:
 			run_hotkey(panel, control, eventData1, eventData2);
-			*/
 			break;
 			
 			

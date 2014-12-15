@@ -57,20 +57,27 @@ Desrip	: Need to add a few things to PPROGRAM that I did not consider at
 
 #include "toolbox.h"
 #include <userint.h>
+#include <utility.h>
 #include <ansi_c.h>
-#include <spinapi.h>					// SpinCore functions
-#include <NIDAQmx.h>
-
-#include <PulseProgramTypes.h>
-#include <cvitdms.h>
-#include <cviddc.h>
-#include <UIControls.h>					// For manipulating the UI controls
+#include <FileSave.h>
 #include <MathParserLib.h>				// For parsing math
-#include <MCUserDefinedFunctions.h>		// Main UI functions
-#include <PulseProgramLib.h>			// Prototypes and type definitions for this file
+#include <UIControls.h>					// For manipulating the UI controls
+
+#include <MCUserDefinedFunctions.h>
+#include <PulseProgramLib.h>
+#include <PulseProgramLibPriv.h>
 #include <SaveSessionLib.h>
-#include <MC10.h>
+
+#include <Version.h>
 #include <General.h>
+#include <ErrorLib.h>
+#include <ErrorDefs.h>
+
+#include <PPConversion.h>
+#include <MC10.h>
+
+
+#include <spinapi.h>
 
 //////////////////////////////////////////////////////////////
 // 															//
@@ -78,132 +85,662 @@ Desrip	: Need to add a few things to PPROGRAM that I did not consider at
 // 															//
 //////////////////////////////////////////////////////////////
 
-int SavePulseProgram(char *filename, int safe, PPROGRAM *ip) {
-	// Feed this a filename and and a PPROGRAM and it will create a pulse program
-	// in the netCDF file with base variable name ppname. If NULL is passed to group
-	// then it is assumed that this is a PPROGRAM-only file, and no base filename will
-	// be used. Additionally, if group is not NULL, the netcdf file will be assumed 
-	// to already exist, and as such it will not be created. 
-	
-	int rv = 0;			// For error checking in the netCDF functions
-	char *fnbuff = NULL, *fname = NULL;
+PPROGRAM *LoadPulseProgram(char *fname, int safe, int *ev) {
+	int rv = 0, locked = 0;
+	FILE *f = NULL;
 	PPROGRAM *p = NULL;
-	int locked = 0;
-	
-	if(filename == NULL)
-		return 0;
-	
-	if(ip == NULL) { 
-			p = safe?get_current_program_safe():get_current_program();
-		if(p == NULL) {
-			rv = -247;
-			goto error;
-		}
-	} else {
-		p = ip;
-	}
-								
-	// Make sure that it has a .tdm ending.
-	int i;
-		
-	if(strcmp(".tdm", &filename[strlen(filename)-4]) != 0) { 
-		// Add the TDM if it's not there.
-		fnbuff = malloc(strlen(filename)+strlen(".tdm")+1);
-		sprintf(fnbuff, "%s%s", filename, ".tdm");
-		fname = fnbuff;
-	} else {
-		fname = filename;
-	}
-	
-	int type = MCTD_TDM;
-	
-	char *title = NULL;
-	title = malloc(MAX_FILENAME_LEN);
-	get_name(filename, title, ".tdm");
 	
 	if(safe) { 
-		CmtGetLock(lock_tdm);    
+		CmtGetLock(lock_tdm);
 		locked = 1;
 	}
 	
-	// Create seems to freak out if the file already exists. 
-	if(FileExists(filename, 0))   { DeleteFile(filename); }
+	if(fname == NULL || !file_exists(fname)) { rv = MCPP_ERR_NOFILE; goto error; }
 	
-	char *index = malloc(strlen(filename)+7);
-	if(type == MCTD_TDMS) {
-		sprintf(index, "%s%s", filename, "_index");
-		if(FileExists(index, NULL)) { DeleteFile(index); }
-	} else if (type == MCTD_TDM) {
-		strcpy(index, filename);
-		index[strlen(index)-1] = 'x';
-		if(FileExists(index, NULL)) { DeleteFile(index); }
-	}
+	f = fopen(fname, "rb");
+	if(f == NULL) { rv = MCPP_ERR_FILEREAD; goto error; }
 	
-	free(index);
-
-	DDCFileHandle p_file;
-	DDCChannelGroupHandle pcg;
+	p = load_pprogram(f, &rv);
+	if(rv != 0) { goto error; }
 	
-	if(rv = DDC_CreateFile(fname, NULL, title, "", title, MC_VERSION_STRING, &p_file)) { goto error; }
-	
-	if(rv = DDC_AddChannelGroup(p_file, MCTD_PGNAME, "The group containing the program", &pcg)) {
-		goto error;
-	}
-	
-	if(rv = save_program(pcg, p)) { goto error; }
-	
-	 if(rv = DDC_SaveFile(p_file))  { goto error; }
 	
 	error:
-	DDC_CloseFile(p_file);
 	
-	if(ip == NULL && p != NULL) { free_pprog(p); }
-	if(title != NULL) { free(title); }
-	if(fnbuff != NULL) { free(fnbuff); }
-	if(rv != 0) { 
-		DeleteFile(filename);
-		
-		// Depending on when the error happened, we may have left the index
-		// file still hanging around. Clean up if necessary.
-		char *buff = malloc(strlen(filename)+strlen("_index")+1);
-		sprintf(buff, "%s%s", filename, "_index");
-		
-		if(FileExists(buff, NULL))
-			DeleteFile(buff);
-		
-		free(buff);
-	}
-	
+	if(f != NULL) { fclose(f); }
+
 	if(safe && locked) {
 		CmtReleaseLock(lock_tdm);
+		locked = 0;
+	}			   
+	
+	if(rv != 0) {
+		if(p != NULL) { free_pprog(p); }
+		p = NULL;
 	}
-
-	return rv;
+	
+	*ev = rv;
+	return p;
 }
 
-PPROGRAM *LoadPulseProgram(char *filename, int safe, int *err_val) {
-	// Loads a netCDF file to a PPROGRAM. p is dynamically allocated
-	// as part of the function, so make sure to free it when you are done with it.
-	// Passing NULL to group looks for a program in the root group, otherwise
-	// the group "group" in the root directory is used.
-	// p is freed on error.
+
+PPROGRAM *load_pprogram(FILE *f, int *ev) {
+	// Load a program from a .pp file (or any file with that format)
 	
-	// Returns 0 if successful, positive integers for errors.
+	if(f == NULL || feof(f)) { *ev = MCPP_ERR_NOFILE; return NULL; }
 	
-	int ev = err_val[0] = 0, ng, locked = 0;
-	DDCFileHandle p_file = NULL;
-	DDCChannelGroupHandle pcg, *groups = NULL;
 	PPROGRAM *p = NULL;
-	char *name_buff = NULL;
-	int tdms = 0;
+	fsave *fs = NULL, *bfs = NULL;
+	char *buff = NULL, **names = NULL;
+	int rv = 0, i, nsize = 0;
+	int *plocs = NULL, *glocs = NULL;
+	PINSTR *ilist = NULL;
+	size_t count, si = sizeof(unsigned int), si8 = sizeof(unsigned char), sd = sizeof(double);
+	unsigned int fs_size = 0, bfs_size = 0;
 	
-	if(strcmp(&filename[strlen(filename)-5], ".tdms") == 0)
-		tdms = 1;
-	else if (strcmp(&filename[strlen(filename)-4], ".tdm") == 0)
-		tdms = 0;
-	else {
-		ev = -250;
+	flocs fl = read_flocs_from_file(f, &rv, -1);
+	if(rv != 0) { goto error; }
+	
+	if(fl.num == 0) {
+		rv = MCPP_ERR_NOFLOCS;
 		goto error;
+	}
+	
+	// Find the pulse program group and read it into a char array.
+	for(i = 0; i < fl.num; i++) {
+		if(strcmp(fl.name[i], MCPP_PROGHEADER) == 0) {
+			fseek(f, fl.pos[i], SEEK_SET); // Move the header to the relevant position
+			
+			buff = malloc(fl.size[i]);
+			
+			count = fread(buff, 1, fl.size[i], f);
+			if(count != fl.size[i]) {
+				rv = MCPP_ERR_FILEREAD;
+				goto error;
+			}
+			
+			break;
+		}
+	}
+	
+	if(buff == NULL) { 
+		rv = MCPP_ERR_FILE_NOPROG;
+		goto error;
+	}
+	
+	// Convert the char array into an fsave array.
+	fs = read_all_fsaves_from_char(buff, &rv, &fs_size, fl.size[i]);
+	if(rv != 0) { goto error; }
+	if(buff != NULL) { free(buff); }
+	buff = NULL;
+	
+	
+	// Index the locations of all the groups.
+	char *groups[MCPP_GROUPSNUM];
+	
+	groups[MCPP_PROPORD] = MCPP_PROPHEADER;
+	groups[MCPP_INSTORD] = MCPP_INSTHEADER;
+	groups[MCPP_AOORD] = MCPP_AOHEADER;
+	groups[MCPP_NDORD] = MCPP_NDHEADER;
+	groups[MCPP_SKIPORD] = MCPP_SKIPHEADER;
+	groups[MCPP_FRINSTORD] = MCPP_FRINSTHEADER;
+	groups[MCPP_LRINSTORD] = MCPP_LRINSTHEADER;
+	
+	// Read out the properties.
+	nsize = fs_size;
+	names = malloc(sizeof(char *)*nsize);
+	for(i = 0; i < fs_size; i++) { names[i] = NULL; }
+
+	// First copy the names out into a string array for quick indexing.
+	for(i = 0; i < fs_size; i++) {
+		names[i] = malloc(fs[i].ns);
+		memcpy(names[i], fs[i].name, fs[i].ns);
+		if(names[i][fs[i].ns-1] != '\0') {
+			rv = MCPP_ERR_MALFORMED_FNAME;
+			goto error;
+		}
+	}
+	
+	// Get the index, then we can throw away the names.
+	glocs = strings_in_array(names, groups, fs_size, MCPP_GROUPSNUM);
+	
+	names = free_string_array(names, fs_size);
+	nsize = 0;
+	
+	int pl = glocs[MCPP_PROPORD];
+	if(pl < 0) {
+		rv = MCPP_ERR_FILE_NOPROPS;
+		goto error;
+	}
+	
+	if(glocs[MCPP_INSTORD] < 0) {
+		rv = MCPP_ERR_NOINSTRS;
+		goto error;
+	}
+	
+	buff = malloc(fs[pl].size);
+	memcpy(buff, fs[pl].val.c, fs[pl].size);
+	
+	bfs = read_all_fsaves_from_char(buff, &rv, &bfs_size, fs[pl].size);
+	if(rv != 0) { goto error; }
+	
+	// Read out the properties.
+	nsize = bfs_size;
+	names = malloc(sizeof(char *)*nsize);
+	for(i = 0; i < bfs_size; i++) { names[i] = NULL; }
+	
+	// First copy the names out into a string array for quick indexing.
+	for(i = 0; i < bfs_size; i++) {
+		names[i] = malloc(bfs[i].ns);
+		memcpy(names[i], bfs[i].name, bfs[i].ns);
+		if(names[i][bfs[i].ns-1] != '\0') {
+			rv = MCPP_ERR_MALFORMED_FNAME;
+			goto error;
+		}
+	}
+	
+	// We need to make the PPROGRAM now.
+	p = calloc(1, sizeof(PPROGRAM));
+	
+	// Initializations for legacy reasons:
+	p->use_pb = 1;
+	p->valid = 1;
+	
+	char *props[MCPP_PROPSNUM] = {MCPP_VERSION, MCPP_NP, MCPP_SR, MCPP_NT, MCPP_TRIGTTL, MCPP_TMODE, 
+								 MCPP_SCAN, MCPP_USE_PB, MCPP_VARIED, MCPP_NINST, MCPP_TOTALTIME, MCPP_NUINSTRS, 
+								 MCPP_FRNINSTRS, MCPP_FRNREPS, MCPP_FRON, MCPP_LRNINSTRS, MCPP_LRNREPS, MCPP_LRON,
+								 MCPP_NDIMS, MCPP_NCYCS, MCPP_NVARIED, MCPP_MAXNSTEPS, MCPP_REALNSTEPS, MCPP_SKIP, 
+								 MCPP_NAOUT, MCPP_NAOVAR};
+	
+	void *pfields[MCPP_PROPSNUM] = {NULL, &(p->np), &(p->sr), &(p->nt), &(p->trigger_ttl), &(p->tmode),
+									&(p->scan), &(p->use_pb), &(p->varied), &(p->n_inst), &(p->total_time),
+									&(p->nUniqueInstrs), &(p->frnInstrs), &(p->frnReps), &(p->fr), 
+									&(p->lrnInstrs), &(p->lrnReps), &(p->lr), &(p->nDims), &(p->nCycles), 
+									&(p->nVaried), &(p->max_n_steps), &(p->real_n_steps), &(p->skip), 
+									&(p->nAout), &(p->n_ao_var)};
+	
+	plocs = strings_in_array(names, props, bfs_size, MCPP_PROPSNUM);
+	
+	if(plocs == NULL) {
+		rv = MCPP_ERR_PROG_PROPS_LABELS;
+		goto error;
+	}
+	
+	// For legacy programs
+	p->fr = p->lr = 0;
+	p->frnInstrs = p->lrnInstrs =0;
+	p->frnReps = p->lrnReps = 1;
+	
+	// These are all scalars, we'll read the values directly into the PPROGRAM;
+	// TODO: Add error checking for required items.
+	int loc;
+	for(i = 0; i < MCPP_PROPSNUM; i++) {
+		loc = plocs[i];
+		if(loc < 0) { continue; }
+	
+		if(pfields[loc] == NULL) { continue; }
+		
+		switch(bfs[loc].type) {
+			case FS_INT:
+				*(int *)pfields[i] = *(bfs[loc].val.i);
+				break;
+			case FS_UCHAR: // Anything stored as UCHAR in the file is actually stored as int in PPROGRAM.
+				*(int *)pfields[i] = *(unsigned char *)(bfs[loc].val.c);
+				break;
+			case FS_DOUBLE:
+				*(double *)pfields[i] = *(bfs[loc].val.d);
+				break;
+			default:
+				continue;
+		}
+	}
+	
+	free(plocs);
+	plocs = NULL;
+	
+	free(buff);
+	buff = NULL;
+	
+	names = free_string_array(names, nsize);
+	nsize = 0;
+	
+	bfs = free_fsave_array(bfs, bfs_size);
+	bfs_size = 0;
+	// We can now create the PPROGRAM before reading out the instrs array and such.
+	create_pprogram(p);
+	
+	// Get the instructions array
+	pl = glocs[MCPP_INSTORD];
+	
+	ilist = read_pinstr_from_char(fs[pl].val.c, p->nUniqueInstrs, &rv);
+	if(rv != 0) { goto error; }
+
+	for(i = 0; i < p->nUniqueInstrs; i++) { 
+		memcpy(p->instrs[i], &(ilist[i]), sizeof(PINSTR));
+	}
+	
+	free(ilist);
+	ilist = NULL;
+	
+	// Get the first run instructions array
+	if(p->frnInstrs) {
+		pl = glocs[MCPP_FRINSTORD];
+	
+		if(pl >= 0) {
+			ilist = read_pinstr_from_char(fs[pl].val.c, p->frnInstrs, &rv);
+			if(rv != 0) { goto error; }
+	
+			memcpy(p->frins, ilist, sizeof(PINSTR)*p->frnInstrs);
+		
+			free(ilist);
+			ilist = NULL;
+		}
+	}
+	
+	// Get the last run instructions array
+	if(p->lrnInstrs) {
+		pl = glocs[MCPP_LRINSTORD];
+		
+		if(pl >= 0) {
+			ilist = read_pinstr_from_char(fs[pl].val.c, p->lrnInstrs, &rv);
+			if(rv != 0) { goto error; }
+	
+			memcpy(p->lrins, ilist, sizeof(PINSTR)*p->lrnInstrs);
+		
+			free(ilist);
+			ilist = NULL;		
+		}
+	}
+
+	// Read out the things related to ND (if necessary)
+	// Must be done before the AOut and Skip stuff
+	pl = glocs[MCPP_NDORD];
+	if(p->varied) {
+		if(pl < 0) { rv = MCPP_ERR_NOPROG; goto error; }
+		
+		buff = malloc(fs[pl].size);
+		memcpy(buff, fs[pl].val.c, fs[pl].size);
+		
+		bfs = read_all_fsaves_from_char(buff, &rv, &bfs_size, fs[pl].size);
+	
+		free(buff);
+		buff = NULL;
+		
+		nsize = bfs_size;
+		names = malloc(sizeof(char *)*nsize);
+		for(i = 0; i < bfs_size; i++) { names[i] = NULL; }
+
+		for(i = 0; i < bfs_size; i++) {
+			names[i] = malloc(bfs[i].ns);
+			memcpy(names[i], bfs[i].name, bfs[i].ns);
+			if(names[i][bfs[i].ns-1] != '\0') {
+				rv = MCPP_ERR_MALFORMED_FNAME;
+				goto error;
+			}
+		}
+		
+		char *ndnames[MCPP_NDNUM] = { MCPP_MAXSTEPS, MCPP_STEPS, MCPP_VINS, MCPP_VINSDIM, 
+									  MCPP_VINSMODE, MCPP_VINSLOCS, MCPP_DELAYEXPRS, 
+									  MCPP_DATAEXPRS };
+		plocs = strings_in_array(names, ndnames, nsize, MCPP_NDNUM);
+		
+		if(plocs == NULL) { rv = MCPP_ERR_FIELDSMISSING; goto error; }    	
+		
+		int i = 0;
+		int msl = plocs[i++], sl = plocs[i++], vinsl = plocs[i++], vidiml = plocs[i++], 
+			vimodel = plocs[i++], vill = plocs[i++], dexl = plocs[i++], 
+			daxl = plocs[i++];
+		
+		if(msl < 0) { rv = MCPP_ERR_FIELDSMISSING; goto error; }
+		memcpy(p->maxsteps, bfs[msl].val.i, bfs[msl].size);	// Print the maxsteps array
+		
+		if(sl < 0) { 
+			int *steps = get_steps_array(p->tmode, p->maxsteps, p->nCycles, p->nDims, p->nt);
+			if(steps != NULL) {
+				memcpy(p->steps, steps, (p->steps_size)*sizeof(unsigned int));
+			} else {
+				p->steps = NULL;
+			}
+		} else {
+			memcpy(p->steps, bfs[sl].val.ui, bfs[sl].size);
+		}
+		
+		if(p->nVaried > 0) { // We only need to do this if it's varied along a dimension or cycle
+			if(vinsl < 0 || vidiml < 0 || vimodel < 0 || vill < 0) { rv = MCPP_ERR_FIELDSMISSING; goto error; }
+			
+			memcpy(p->v_ins, bfs[vinsl].val.i, bfs[vinsl].size);
+			
+			int j = 0;
+			for(i = 0; i < p->nVaried; i++) {
+				p->v_ins_dim[i] = (int)bfs[vidiml].val.uc[i];
+				p->v_ins_mode[i] = (int)bfs[vimodel].val.uc[i];
+				
+				memcpy(p->v_ins_locs[i], &(bfs[vill].val.i[j]), p->max_n_steps*si);
+				j+= p->max_n_steps;
+			}
+			
+			int nvi = p->nVaried;
+			int ns = nvi;
+			if(dexl >= 0) {
+				p->delay_exprs = get_nc_strings(bfs[dexl].val.c, &ns);
+				
+				if(ns != nvi) {
+					rv = MCPP_ERR_INVALID_NC_STRING;
+					goto error;
+				}
+			}
+			
+			if(daxl >= 0) {
+				p->data_exprs = get_nc_strings(bfs[daxl].val.c, &ns);
+				
+				if(ns != nvi) {
+					rv = MCPP_ERR_INVALID_NC_STRING;
+					goto error;
+				}
+			}
+		}
+		
+		free(plocs);
+		plocs = NULL;
+	}
+	
+	// Read out things related to analog outputs (if necessary)
+	pl = glocs[MCPP_AOORD];
+	if(p->nAout > 0) {
+		if(pl < 0) { rv = MCPP_ERR_NOAOUT; goto error; }
+		
+		buff = malloc(fs[pl].size);
+		memcpy(buff, fs[pl].val.c, fs[pl].size);
+		
+		bfs = read_all_fsaves_from_char(buff, &rv, &bfs_size, fs[pl].size);
+	
+		free(buff);
+		buff = NULL;
+		
+		nsize = bfs_size;
+		names = malloc(sizeof(char *)*nsize);
+		for(i = 0; i < bfs_size; i++) { names[i] = NULL; }
+
+		for(i = 0; i < bfs_size; i++) {
+			names[i] = malloc(bfs[i].ns);
+			memcpy(names[i], bfs[i].name, bfs[i].ns);
+			if(names[i][bfs[i].ns-1] != '\0') {
+				rv = MCPP_ERR_MALFORMED_FNAME;
+				goto error;
+			}
+		}
+
+		
+		char *aonames[MCPP_AONUM] = {MCPP_AOVARIED, MCPP_AODIM, MCPP_AOVALS, MCPP_AOCHANS, MCPP_AOEXPRS};
+		plocs = strings_in_array(names, aonames, nsize, MCPP_AONUM);
+		
+		if(plocs == NULL) { rv = MCPP_ERR_FIELDSMISSING; goto error; }
+		
+		int ao_varl = plocs[0], ao_diml = plocs[1], ao_valsl = plocs[2];
+		int ao_chansl = plocs[3], ao_exprsl = plocs[4];
+		
+		if(ao_varl < 0) { rv = MCPP_ERR_FIELDSMISSING; goto error; }
+		if(ao_valsl < 0) { rv = MCPP_ERR_FIELDSMISSING; goto error; }
+		
+		int avsize, point = 0;
+		for(i = 0; i < p->nAout; i++) {
+			p->ao_varied[i] = (int)(bfs[ao_varl].val.uc[i]);
+			p->ao_dim[i] = (int)(bfs[ao_diml].val.uc[i]);
+			
+			// Dynamically allocate the ao_vals array, then copy it over and implement index
+			// This delinearizes the array as we go along.
+			if(p->ao_varied[i]) {
+				avsize = p->maxsteps[p->ao_dim[i] + p->nCycles];
+			} else {
+				avsize = 1;
+			}
+			
+			p->ao_vals[i] = malloc(avsize *= sd);
+			
+			memcpy(p->ao_vals[i], &(bfs[ao_valsl].val.d[point]), avsize);
+			point += avsize;
+		}
+		
+		// Get the nc_strings from the remaining two.
+		int na = p->nAout;
+		int ns = na;
+		
+		p->ao_chans = get_nc_strings(bfs[ao_chansl].val.c, &na);
+		if(na != ns) {
+			rv = MCPP_ERR_INVALID_NC_STRING;
+			goto error;
+		}
+		
+		p->ao_exprs = get_nc_strings(bfs[ao_exprsl].val.c, &na);
+		if(na != ns) {
+			rv = MCPP_ERR_INVALID_NC_STRING;
+			goto error;
+		}
+		
+		free(plocs);
+		plocs = NULL;
+		
+		names = free_string_array(names, nsize);
+		nsize = 0;
+		
+		bfs = free_fsave_array(bfs, bfs_size);
+		bfs_size = 0;
+	}
+	
+	
+	// Now the skips
+	pl = glocs[MCPP_SKIPORD];
+	if(p->skip) {
+		if(pl < 0) {
+			rv = MCPP_ERR_FIELDSMISSING;
+			goto error;
+		}
+		
+		buff = malloc(fs[pl].size);
+		memcpy(buff, fs[pl].val.c, fs[pl].size);
+		
+		bfs = read_all_fsaves_from_char(buff, &rv, &bfs_size, fs[pl].size);
+	
+		free(buff);
+		buff = NULL;
+		
+		nsize = bfs_size;
+		names = malloc(sizeof(char *)*nsize);
+		for(i = 0; i < bfs_size; i++) { names[i] = NULL; }
+
+		for(i = 0; i < bfs_size; i++) {
+			names[i] = malloc(bfs[i].ns);
+			memcpy(names[i], bfs[i].name, bfs[i].ns);
+			if(names[i][bfs[i].ns-1] != '\0') {
+				rv = MCPP_ERR_MALFORMED_FNAME;
+				goto error;
+			}
+		}
+		
+		char *skipnames[MCPP_SKIPNUM] = {MCPP_SKIPEXPR, MCPP_SKIPLOCS};
+		plocs = strings_in_array(names, skipnames, nsize, MCPP_SKIPNUM);
+		
+		int skexl = plocs[0], sll = plocs[1];
+		
+		if(bfs[skexl].size <= 0) {
+			p->skip = 0;
+			free(p->skip_expr);
+			p->skip_expr = NULL;
+		} else {
+			p->skip_expr = realloc(p->skip_expr, bfs[skexl].size);
+			memcpy(p->skip_expr, bfs[skexl].val.c, bfs[skexl].size);
+			
+			memcpy(p->skip_locs, bfs[sll].val.i, bfs[sll].size);
+		}
+		
+		free(plocs);
+		plocs = NULL;
+	}
+	
+	error:
+	free_flocs(&fl);
+	fs = free_fsave_array(fs, fs_size);
+	bfs = free_fsave_array(bfs, bfs_size);
+	
+	if(glocs != NULL) { free(glocs); }
+	if(plocs != NULL) { free(plocs); }
+	if(names != NULL) { free_string_array(names, nsize); }
+	if(buff != NULL) { free(buff); }
+	if(ilist != NULL) { free(ilist); }
+	
+	if(rv != 0) {
+		free_pprog(p);
+		p = NULL;
+	}
+	
+	*ev = rv;
+	return p;
+}
+
+PINSTR *read_pinstr_from_char(char *array, int n_inst, int *ev) {
+	// Pass this the contents of the FS_CUSTOM struct that contains an array
+	// of instructions, this will read that out into an array of PINSTRs.
+	
+	if(array == NULL) { *ev = MCPP_ERR_NOSTRING; return NULL; }
+	if(n_inst <= 0) { *ev = MCPP_ERR_NOINSTRS; return NULL; }
+	
+	PINSTR *in = NULL;
+	char **c = NULL;
+	int rv = 0, i;
+	int *locs = NULL;
+	void *val = NULL;
+	unsigned int n_entries, c_size = 0, ns;
+	size_t si = sizeof(unsigned int), si8 = sizeof(unsigned char), sd = sizeof(double);
+	
+	char *pos = array;
+	memcpy(&n_entries, pos, si);
+	pos += si;
+	
+	if(n_entries == 0) { rv = MCF_ERR_CUST_NOENTRIES; goto error; } // TODO: Fix
+	
+	in = malloc(sizeof(PINSTR)*n_inst);
+	c = calloc(n_entries, sizeof(char *));
+	c_size = n_entries;
+	
+	// Read out the field names (gives order)
+	for(i = 0; i < n_entries; i++) { 
+		memcpy(&ns, pos, si);
+		pos += si;
+		
+		if(ns == 0) { continue; }
+		
+		c[i] = malloc(ns);
+		memcpy(c[i], pos, ns);
+		pos += ns + si8;		// Skip the type.
+	}
+	
+	void *ifields[MCPP_INSTNUMFIELDS];
+	unsigned int inst_sizes[MCPP_INSTNUMFIELDS], types[MCPP_INSTNUMFIELDS] = MCPP_INST_TYPES;
+	for(i = 0; i < MCPP_INSTNUMFIELDS; i++) { 	// Field sizes
+		inst_sizes[i] = get_fs_type_size(types[i]);
+	}
+	
+	char *names[MCPP_INSTNUMFIELDS] = MCPP_INST_NAMES;
+	
+	locs = strings_in_array(names, c, MCPP_INSTNUMFIELDS, n_entries);	// Find the locations as stored
+	
+	// Read them out into the various instr arrays.
+	int j, l = 0;
+	val = malloc(sd);	// Big enough to contain the largest item
+	for(i = 0; i < n_inst; i++) {
+		ifields[0] = &(in[i].flags);
+		ifields[1] = &(in[i].instr);
+		ifields[2] = &(in[i].instr_data);
+		ifields[3] = &(in[i].trigger_scan);
+		ifields[4] = &(in[i].instr_time);
+		ifields[5] = &(in[i].time_units);
+		
+		for(j = 0; j < n_entries; j++) {
+			l = locs[j];
+			if(l < 0) { continue; }	// Skip if it's not found
+			
+			// Read out the value.
+			memset(val, 0, sd);	// Zero it out first - > may not be necessary
+			memcpy(val, pos, inst_sizes[l]); 
+			pos += inst_sizes[l];
+			
+			switch(types[l]) {
+				case FS_INT:
+				case FS_UCHAR:
+					*(int *)ifields[l]  = *(int *)val;
+					break;
+				case FS_UINT:
+					*(unsigned int*)ifields[l] = *(unsigned int *)val;
+					break;
+				case FS_DOUBLE:
+					*(double*)ifields[l] = *(double *)val;
+					break;
+			}
+		}
+	}
+	
+	error:
+	if(c != NULL && c_size > 0) { free_string_array(c, c_size); }
+	if(locs != NULL) { free(locs); }
+	if(val != NULL) { free(val); }
+	
+	if(rv != 0) {
+		free(in);
+		in = NULL;
+	}
+	
+	*ev = rv;
+	return in;
+}
+
+int SavePulseProgram(PPROGRAM *p, char *filename, int safe) {
+	// Save a program to file
+
+	// Try to open the file
+	int rv = 0, locked = 0;
+	FILE *f = NULL;
+	char *tname = NULL;
+	char *new_fname = NULL;
+	char *fname = NULL, *ext = NULL;
+	
+	if(filename == NULL) { return MCPP_ERR_NOFILE; }
+	
+	if(p == NULL) { 
+		p = safe?get_current_program_safe():get_current_program();
+		if(p == NULL) {
+			rv = MCPP_ERR_NOPROG;
+			goto error;
+		}
+	}
+	
+	// Make sure it's got the right extension.
+	ext = get_extension(filename);
+	if(ext == NULL || strlen(ext) < 3 || strcmp(ext+1, PPROG_EXTENSION)) {
+		// Append the extension.
+		int nl = strlen(filename);
+		if(ext != NULL) { nl -= strlen(ext); }
+		
+		fname = calloc(nl+strlen(PPROG_EXTENSION)+1, 1);
+		strncpy(fname, filename, nl);
+		strcat(fname, ".");
+		strcat(fname, PPROG_EXTENSION);
+	} else {
+		fname = malloc(strlen(filename)+1);
+		strcpy(fname, filename);
+	}
+	
+	// Start by creating a temporary filename.
+	tname = temp_file(PPROG_EXTENSION);
+	
+	if(tname == NULL) { 
+		rv MCPP_ERR_TEMP_FILE_NAME;
+		goto error;
+	}
+	
+	// Open a temporary file for writing
+	f = fopen(tname, "wb+");
+	if(f == NULL) { 
+		rv = MCPP_ERR_TEMP_FILE;
+		goto error; 
 	}
 	
 	if(safe) {
@@ -211,715 +748,648 @@ PPROGRAM *LoadPulseProgram(char *filename, int safe, int *err_val) {
 		locked = 1;
 	}
 	
-	if(ev = DDC_OpenFileEx(filename, tdms?"TDMS":"TDM", 1, &p_file))
-		goto error;
+	rv = save_pprogram(p, f);
 	
-	// Need to get a list of the groups available.
-	if(ev = DDC_GetNumChannelGroups(p_file, &ng))
-		goto error;
-	else if (ng < 1) {
-		ev = -249;
-		goto error;
-	}
+	fclose(f);
+	f = NULL;
 	
-	groups = malloc(sizeof(TDMSChannelGroupHandle)*ng);
-	
-	if(ev = DDC_GetChannelGroups(p_file, groups, ng))
-		goto error;
-	
-	// Search for the program group in the list of groups.
-	int i, len;
-	int g = 40, s = 40;
-	name_buff = malloc(g);
-	for(i = 0; i < ng; i++) {
-		if(ev = DDC_GetChannelGroupStringPropertyLength(groups[i], TDMS_CHANNELGROUP_NAME, &len))
-			goto error;
-		
-		if(g < ++len)
-			name_buff = realloc(name_buff, g+=((int)((len-g)/s)+1)*s);
-		
-		if(ev = DDC_GetChannelGroupProperty(groups[i], TDMS_CHANNELGROUP_NAME, name_buff, len))
-			goto error;
-		
-		if(strcmp(name_buff, MCTD_PGNAME) == 0) {
-			pcg = groups[i];
-			break;
-		}
-	}
-	
-	free(name_buff);
-	free(groups);
-	groups = NULL;
-	name_buff = NULL;
+	int err = 0;
+	if(file_exists(fname)) {
+		err = remove(fname);
 
-	if(i >= ng) {
-		ev = -248;
-		goto error;
-	}
-	
-	p = load_program(pcg, &ev);
-	
-	error:
-
-	if(p_file != NULL) { DDC_CloseFile(p_file); }
-	if(groups != NULL) { free(groups); }
-	if(name_buff != NULL) { free(name_buff); }
-	
-	if(safe && locked) { CmtReleaseLock(lock_tdm); }
-	
-	err_val[0] = ev;
-	
-	return p;
-}
-
-int save_program(DDCChannelGroupHandle pcg, PPROGRAM *p) {
-	// Save program as either a TDM or TDMS. 
-
-	int i;
-	int *idata = NULL;
-	double *ddata = NULL;
-	unsigned char *skip_locs = NULL;
-	char *data_exprs = NULL, *delay_exprs = NULL, *ao_exprs = NULL, *ao_chans = NULL;
-	
-	// We're going to start out with a bunch of properties										
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PNP, DDC_Int32, p->np);						// Number of points
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PSR, DDC_Double, p->sr);						// Sampling Rate
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PNT, DDC_Int32, p->nt);						// Number of transients
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PTMODE, DDC_Int32, (p->tmode>=0)?p->tmode:-1);	// Transient acquisition mode.
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PSCAN, DDC_Int32, p->scan);					// Whether or not there's a scan
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PTRIGTTL, DDC_Int32, p->trigger_ttl);    		// Trigger TTL
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PTOTTIME, DDC_Double, p->total_time);			// Total time
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PNINSTRS, DDC_Int32, p->n_inst);    			// Base number of instructions
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PNUINSTRS, DDC_Int32, p->nUniqueInstrs);  		// Total number of unique instructions
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PVAR, DDC_Int32, p->varied);					// Whether or not it's varied
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PNVAR, DDC_Int32, p->nVaried);					// Number of varied instructions
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PNDIMS, DDC_Int32, p->nDims);					// Number of dimensions
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PNCYCS, DDC_Int32, p->nCycles);				// Number of phase cycles
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PSKIP, DDC_Int32, p->skip);					// Whether or not there are skips
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PMAX_N_STEPS, DDC_Int32, p->max_n_steps);		// Total number of steps in the experiment
-	DDC_CreateChannelGroupProperty(pcg, MCTD_PREAL_N_STEPS, DDC_Int32, p->real_n_steps);	// Total number of steps - those skipped
-	DDC_CreateChannelGroupProperty(pcg, MCTD_NFUNCS, DDC_Int32, p->nFuncs);					// Number of functions actually used
-	DDC_CreateChannelGroupProperty(pcg, MCTD_TFUNCS, DDC_Int32, p->tFuncs);					// Total number of functions available
-	DDC_CreateChannelGroupProperty(pcg, MCTD_NAOUT, DDC_Int32, p->nAout);					// Number of analog outputs
-	DDC_CreateChannelGroupProperty(pcg, MCTD_NAOVAR, DDC_Int32, p->n_ao_var);				// Number of analog outputs which vary.
-	
-	// Now we'll save the main instructions
-	DDCChannelHandle flags_c, time_c, ins_c, insd_c, us_c ; // Instruction channels.
-
-	// Now create and populate the channels for the instructions.
-	int nui = p->nUniqueInstrs;
-	idata = malloc(sizeof(int)*nui);
-	ddata = malloc(sizeof(double)*nui);
-	
-	// Flags
-	DDC_AddChannel(pcg, DDC_Int32, MCTD_PROGFLAG, "Binary flags for each unique instruction", "", &flags_c);
-	for(i = 0 ; i < nui; i++)
-		idata[i] = p->instrs[i]->flags;	// Get the flags as an array of ints.
-	DDC_AppendDataValues(flags_c, idata, nui); // Save the flags
-
-	// Instruction delay
-	DDC_AddChannel(pcg, DDC_Double, MCTD_PROGTIME, "Instruction delay times for each instruction", "ns", &time_c);
-	for(i = 0 ; i < nui; i++)
-		ddata[i] = p->instrs[i]->instr_time;	
-	DDC_AppendDataValues(time_c, ddata, nui);
-	
-	// Instruction
-	DDC_AddChannel(pcg, DDC_Int32, MCTD_PROGINSTR, "The instruction value for each unique instruction", "", &ins_c);
-	for(i = 0; i < nui; i++)
-		idata[i] = p->instrs[i]->instr;
-	DDC_AppendDataValues(ins_c, idata, nui);
-	
-	// Instruction Data
-	DDC_AddChannel(pcg, DDC_Int32, MCTD_PROGID, "Instruction data for each unique instruction", "", &insd_c);
-	for(i = 0; i < nui; i++)
-		idata[i] = p->instrs[i]->instr_data;
-	DDC_AppendDataValues(insd_c, idata, nui);
-	
-	// Units and scan
-	DDC_AddChannel(pcg, DDC_Int32, MCTD_PROGUS, "Bit 0 is whether or not to scan, the remaining bits are units for each instr", "", &us_c);
-	for(i = 0; i < nui; i++) { 
-		idata[i] = p->instrs[i]->trigger_scan + 2*(p->instrs[i]->time_units);
-	}
-	
-	DDC_AppendDataValues(us_c, idata, nui);
-	
-	free(idata);
-	free(ddata);
-	
-	// Now add the analog outputs
-	if(p->nAout) {
-		// Figure out if we want to save any expressions.
-		int save_exprs = 0;
-		
-		for(i = 0; i < p->nAout; i++) {
-			if(p->ao_varied[i] == 2) {
-				save_exprs = 1;
-				break;
-			}
-		}
-		
-		// All the channel handles
-		DDCChannelHandle ao_var_c, ao_dim_c, ao_vals_c;
-		
-		// Create all the channels we'll need.
-		DDC_AddChannel(pcg, DDC_Int32, MCTD_AOVAR, "Array containing variation state of each Analog output.", "", &ao_var_c);
-		DDC_AddChannel(pcg, DDC_Int32, MCTD_AODIM, "Dimension along which each output varies.", "", &ao_dim_c);
-		DDC_AddChannel(pcg, DDC_Double, MCTD_AOVALS, "Linearly-indexed array of analog output voltages.", "V", &ao_vals_c);
-		
-		// Save the expressions as a property of MCTD_AOVAR if necessary.
-		if(save_exprs) {
-			ao_exprs = generate_nc_string(p->ao_exprs, p->nAout, NULL);
-			
-			DDC_CreateChannelProperty(ao_var_c, MCTD_AOEXPRS, DDC_String, ao_exprs);
-			
-			free(ao_exprs);
-			ao_exprs = NULL;
-		}
-		
-		// Save the simple arrays now.
-		DDC_AppendDataValues(ao_var_c, p->ao_varied, p->nAout);
-	 	DDC_AppendDataValues(ao_dim_c, p->ao_dim, p->nAout);
-		
-		// Channels are saved as a string property on ao_var_c
-		ao_chans = generate_nc_string(p->ao_chans, p->nAout, NULL);
-		DDC_CreateChannelProperty(ao_var_c, MCTD_AOCHANS, DDC_String, ao_chans);
-		free(ao_chans);
-		ao_chans = NULL;
-		
-		// Now we need to save the values array. This is just sequential (linear indexing)
-		int nv;
-		for(i = 0; i < p->nAout; i++) {
-			if(p->ao_dim[i] >= 0) {
-				nv = p->maxsteps[p->ao_dim[i]+p->nCycles];
-			} else {
-				nv = 1;
-			}
-			DDC_AppendDataValues(ao_vals_c, p->ao_vals[i], nv);	
-		}
-	}
-	
-	// Save the maxsteps if necessary
-	if(p->varied) {
-		DDCChannelHandle msteps_c;
-		
-		// Maxsteps
-		DDC_AddChannel(pcg, DDC_Int32, MCTD_PMAXSTEPS, "Size of the acquisition space", "", &msteps_c);
-		DDC_AppendDataValues(msteps_c, p->maxsteps, (p->nDims+p->nCycles));
-	}
-	
-	// The next bit only has to happen if this is a varied experiment
-	if(p->nVaried) {
-		// All the channel handles
-		DDCChannelHandle v_ins_c, v_ins_dims_c, v_ins_mode_c; 
-		DDCChannelHandle v_ins_locs_c = NULL, delay_exprs_c, data_exprs_c;
-		
-		// Again, we create a bunch of channels here and populate them as necessary
-		// Varied instructions, dims and modes
-		DDC_AddChannel(pcg, DDC_Int32, MCTD_PVINS, "List of the varied instructions", "", &v_ins_c);
-		DDC_AddChannel(pcg, DDC_Int32, MCTD_PVINSDIM, "What dimension(s) the instrs vary along", "", &v_ins_dims_c);
-		DDC_AddChannel(pcg, DDC_Int32, MCTD_PVINSMODE, "Variation mode", "", &v_ins_mode_c);
-		
-		DDC_AppendDataValues(v_ins_c, p->v_ins, p->nVaried);
-		DDC_AppendDataValues(v_ins_dims_c, p->v_ins_dim, p->nVaried);
-		DDC_AppendDataValues(v_ins_mode_c, p->v_ins_mode, p->nVaried);
-		
-		// Save the delay and data expressions as a single string property on the v_ins channel.
-		delay_exprs = generate_nc_string(p->delay_exprs, p->nVaried, NULL);
-		data_exprs = generate_nc_string(p->data_exprs, p->nVaried, NULL);
-	  
-		DDC_CreateChannelProperty(v_ins_c, MCTD_PDELEXPRS, DDC_String, delay_exprs);
-		DDC_CreateChannelProperty(v_ins_c, MCTD_PDATEXPRS, DDC_String, data_exprs);
-		
-		free(delay_exprs);
-		free(data_exprs);
-		
-		// This is a bit trickier - TDMS doesn't seem to support multi-dimensional arrays, so we're going to
-		// do this in a linear-indexed fashion.
-		DDC_AddChannel(pcg, DDC_Int32, MCTD_PVINSLOCS, "Instruction indexes, multidimensional linear-indexed array", "", &v_ins_locs_c);
-	
-		for(i = 0; i < p->nVaried; i++) 
-			DDC_AppendDataValues(v_ins_locs_c, p->v_ins_locs[i], p->max_n_steps); 
-		
-		// Now we can save the skip stuff, if necessary.
-		if(p->skip & 2) {
-			// First we add the property, because at this point we just know that we saved a skip expression
-			DDC_CreateChannelGroupProperty(pcg, MCTD_PSKIPEXPR, DDC_String, p->skip_expr);
-			
-			// Now generate the skip locs array.
-			if(p->skip & 1 && (p->skip_locs != NULL)) {
-				DDCChannelHandle skip_locs_c;
-				DDC_AddChannel(pcg, DDC_UInt8, MCTD_PSKIPLOCS, "An array of where the skips occur", "", &skip_locs_c);
-				skip_locs = malloc(sizeof(unsigned char)*p->max_n_steps);
-				for(i = 0; i < p->max_n_steps; i++)
-					skip_locs[i] = (unsigned char)p->skip_locs[i];
-				
-				DDC_AppendDataValues(skip_locs_c, skip_locs, p->max_n_steps);
-				free(skip_locs);
-			} else 
-				p->skip -= p->skip & 1;
-		}
-	
-
-	}
-	
-	return 0;	
-}
-
-int save_program_safe(DDCChannelGroupHandle pcg, PPROGRAM *p) {
-	CmtGetLock(lock_tdm);
-	int rv = save_program(pcg, p);
-	CmtReleaseLock(lock_tdm);
-	
-	return rv;
-}
-
-PPROGRAM *load_program(DDCChannelGroupHandle pcg, int *err_val) {
-	// Loads programs from the Channel Group "pcg" in a TDM streaming library
-	
-	// Variable declarations
-	PPROGRAM *p = malloc(sizeof(PPROGRAM));
-	int on = 0, *idata = NULL, ev = 0, nvi = 0, *vfound = NULL, nchans = 0;
-	double *ddata = NULL;
-	DDCChannelHandle *handles = NULL;
-	char **names = NULL, *delay_exprs = NULL, *data_exprs = NULL;
-	char *ao_exprs = NULL, *ao_chans = NULL;
-	unsigned char *skip_locs = NULL;
-	err_val[0] = ev;
-	
-	// We're going to start out by getting a bunch of properties
-	int si = sizeof(int), sd = sizeof(double);
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNP, &p->np, si)) {					// Number of points
-		if(ev != DDC_PropertyDoesNotExist)
-			goto error;
-		else 
-			GetCtrlVal(pc.np[1], pc.np[0], &p->np);
-	}
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSR, &p->sr, sd)) {					// Sampling Rate
-		if(ev != DDC_PropertyDoesNotExist)
-			goto error;
-		else
-			GetCtrlVal(pc.sr[1], pc.sr[0], &p->sr);
-	}
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNT, &p->nt, si)) {					// Number of transients
-		if(ev != DDC_PropertyDoesNotExist) { goto error; }
-		GetCtrlVal(pc.nt[1], pc.nt[0], &p->nt);
-	}
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTMODE, &p->tmode, si)) {
-		if(ev != DDC_PropertyDoesNotExist) { goto error; }
-		GetCtrlVal(pc.tfirst[1], pc.tfirst[0], &p->tmode);
-	}
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_NAOUT, &p->nAout, si)) 
-	{ 
-		if(ev != DDC_PropertyDoesNotExist) { goto error; }
-		p->nAout = 0;
-	}
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_NAOVAR, &p->n_ao_var, si)) {
-		if(ev != DDC_PropertyDoesNotExist) { goto error; }
-		p->n_ao_var = 0;
-	}
-	
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSCAN, &p->scan, si)){ goto error; } 
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTRIGTTL, &p->trigger_ttl, si)){ goto error; } 
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PTOTTIME, &p->total_time, sd)){ goto error; } 
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNINSTRS, &p->n_inst, si)){ goto error; } 
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNUINSTRS, &p->nUniqueInstrs, si)) { goto error; } 
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PVAR, &p->varied, si)) { goto error; } 
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNVAR, &p->nVaried, si)) { goto error; }
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNDIMS, &p->nDims, si)) { goto error; }
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PNCYCS, &p->nCycles, si))	{ goto error; }
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSKIP, &p->skip, si)) { goto error; }
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PMAX_N_STEPS, &p->max_n_steps, si)) { goto error; }
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PREAL_N_STEPS, &p->real_n_steps, si)) { goto error; }
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_NFUNCS, &p->nFuncs, si)) { goto error; }
-	if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_TFUNCS, &p->tFuncs, si)) { goto error; }
-	
-	
-	// Now we need to go through one by one and get the channel handles.
-	int i, j, k = 0;
-	int nchan_names = 14; 
-	DDCChannelHandle flags_c, time_c, ins_c, us_c, insd_c;
-	DDCChannelHandle msteps_c, vins_c, vi_dim_c, vi_mode_c, vi_locs_c, s_locs_c;
-	DDCChannelHandle ao_var_c, ao_dim_c, ao_vals_c;
-	flags_c = time_c = ins_c = us_c = insd_c = msteps_c = vins_c = vi_dim_c = NULL;
-	vi_mode_c = vi_locs_c = s_locs_c = ao_var_c = ao_dim_c = ao_vals_c = NULL;
-	
-	char *chan_names[] = {MCTD_PROGFLAG, MCTD_PROGTIME, MCTD_PROGINSTR, MCTD_PROGUS, MCTD_PROGID, MCTD_PMAXSTEPS, 
-						  MCTD_PVINS, MCTD_PVINSDIM, MCTD_PVINSMODE, MCTD_PVINSLOCS, MCTD_PSKIPLOCS, MCTD_AOVAR, 
-						  MCTD_AODIM, MCTD_AOVALS};
-	DDCChannelHandle *chan_hs[] = {&flags_c, &time_c, &ins_c, &us_c, &insd_c, &msteps_c, &vins_c, &vi_dim_c, 
-								   &vi_mode_c, &vi_locs_c, &s_locs_c, &ao_var_c, &ao_dim_c, &ao_vals_c};
-	
-	
-	// Get the number of channels and a list of the channel handles.
-	if(ev = DDC_GetNumChannels(pcg, &nchans)) { goto error; }
-	
-	handles = malloc(sizeof(DDCChannelHandle)*nchans);
-
-	if(ev = DDC_GetChannels(pcg, handles, nchans)) { goto error; }
-	
-	// Get the names of all the channels
-	names = calloc(nchans, sizeof(char*));	// Null-initialized array of names
-	int len;
-	
-	for(i = 0; i < nchans; i++) {
-		if(ev = DDC_GetChannelStringPropertyLength(handles[i], DDC_CHANNEL_NAME, &len)) { goto error; }
-		
-		names[i] = malloc(++len);
-		
-		if(ev = DDC_GetChannelProperty(handles[i], DDC_CHANNEL_NAME, names[i], len)) { goto error; }
-	}
-
-	// Match the names of the elements to the strings
-	int *matches = strings_in_array(names, chan_names, nchans, nchan_names);
-	
-	// Go through and associate the channels with the matches.
-	for(i = 0; i < nchan_names; i++) { 
-		if(matches[i] >= 0) { memcpy(chan_hs[i], &handles[matches[i]], sizeof(DDCChannelHandle)); }
-	}
-
-	free(handles);
-	handles = NULL;
-	names = free_string_array(names, nchans);
-	
-	// At this point, we should have more than enough to complete the allocation of the p file.
-	create_pprogram(p);
-	on = 1;
-	
-	// First we'll read out the instructions
-	int nui = p->nUniqueInstrs;
-	idata = malloc(si*nui);
-	ddata = malloc(sd*nui);
-	
-	// Flags
-	if(ev = DDC_GetDataValues(flags_c, 0, nui, idata)) { goto error; }
-	for(i = 0; i < nui; i++) { 
-		p->instrs[i]->flags = idata[i];
-	}
-	
-	// Instruction Delay
-	if(ev = DDC_GetDataValues(time_c, 0, nui, ddata)) { goto error; }
-	for(i = 0; i < nui; i++) {
-		p->instrs[i]->instr_time = ddata[i];
-	}
-	
-	// Instructions
-	if(ev = DDC_GetDataValues(ins_c, 0, nui, idata)) { goto error; }
-	for(i = 0; i < nui; i++) {
-		p->instrs[i]->instr = idata[i];
-	}
-	
-	// Units and scan
-	if(ev = DDC_GetDataValues(us_c, 0, nui, idata)) { goto error; }
-	for(i = 0; i < nui; i++) {
-		p->instrs[i]->trigger_scan = 1 & idata[i];
-		p->instrs[i]->time_units = (int)(idata[i]>>1);
-	}
-	
-	// Instruction Data
-	if(ev = DDC_GetDataValues(insd_c, 0, nui, idata)) { goto error; }
-	for(i = 0; i < nui; i++) {
-		p->instrs[i]->instr_data = idata[i];
-	}
-	
-	free(idata);
-	free(ddata);
-	idata = NULL;
-	ddata = NULL;
-	
-	// Get the stuff you need to if the experiment's varied.
-	nvi = p->nVaried;
-	if(p->varied) {
-		// MaxSteps  
-		if(ev = DDC_GetDataValues(msteps_c, 0, p->nCycles+p->nDims, p->maxsteps)) { goto error; }
-	}
-	
-	// Now if the instructions are varied.
-	if(nvi) {
-		// VIns, VInsDims, VInsMode
-		if(ev = DDC_GetDataValues(vins_c, 0, p->nVaried, p->v_ins)) { goto error; }
-		if(ev = DDC_GetDataValues(vi_dim_c, 0, p->nVaried, p->v_ins_dim)) { goto error; }
-		if(ev = DDC_GetDataValues(vi_mode_c, 0, p->nVaried, p->v_ins_mode)) { goto error; }
-		
-		// Delay and data instructions are stored as a property on VIns.
-		int ldel, ldat;
-		if(ev = DDC_GetChannelStringPropertyLength(vins_c, MCTD_PDELEXPRS, &ldel)) { goto error; }
-		if(ev = DDC_GetChannelStringPropertyLength(vins_c, MCTD_PDATEXPRS, &ldat)) { goto error; }
-		
-		delay_exprs = malloc(++ldel);
-		data_exprs = malloc(++ldat);
-		
-		if(ev = DDC_GetChannelProperty(vins_c, MCTD_PDELEXPRS, delay_exprs, ldel)) { goto error; }
-		if(ev = DDC_GetChannelProperty(vins_c, MCTD_PDATEXPRS, data_exprs, ldat)) { goto error; }
-		
-		// Now we need to get those data expressions as an array.
-		int ns = nvi;
-		p->delay_exprs = free_string_array(p->delay_exprs, nvi);
-		p->delay_exprs = get_nc_strings(delay_exprs, &ns);
-		
-		if(ns != nvi) {
-			ev = -250;
-			goto error;
-		}
-		
-		p->data_exprs = free_string_array(p->data_exprs, nvi);
-		p->data_exprs = get_nc_strings(data_exprs, &ns);
-		if(ns != nvi) {
-			ev = -250;
-			goto error;
-		}
-		
-		// Now we need to read the v_ins_locs, which has been stored as a single array, into a 2D array.
-		for(i = 0; i < nvi; i++) {
-			if(ev = DDC_GetDataValues(vi_locs_c, i*p->max_n_steps, p->max_n_steps, p->v_ins_locs[i])) { goto error; }
-		}
-		
-		// Now we get the delay and data expressions
-	
-		if(p->skip & 2) {
-			// First we get the skip expression if it's been saved.
-			if(ev = DDC_GetChannelGroupStringPropertyLength(pcg, MCTD_PSKIPEXPR, &len)) { goto error; }
-			
-			if(p->skip_expr == NULL) {
-				p->skip_expr = malloc(++len);
-			} else {
-				p->skip_expr = realloc(p->skip_expr, ++len);
+		if(err) {
+			int len = strlen(fname)+1;
+			new_fname = malloc(len+8);
+			int i;
+			for(i = len; i > 0; i--) {
+				if(fname[i] == '.') { break ; }
 			}
 			
-			if(ev = DDC_GetChannelGroupProperty(pcg, MCTD_PSKIPEXPR, p->skip_expr, len)) { goto error; }
+			fname[i] = '\0';
 			
-			if(p->skip & 1 && s_locs_c != NULL) {
-				skip_locs = malloc(sizeof(unsigned char)*p->max_n_steps);
-				if(ev = DDC_GetDataValues(s_locs_c, 0, p->max_n_steps, skip_locs)) { goto error; }
-			
-				// Copy this over. There's an implicit cast involved, so I'm not using memcpy.
-				for(i = 0; i < p->max_n_steps; i++) { p->skip_locs[i] = skip_locs[i]; }
-				
-				free(skip_locs);
-				skip_locs = NULL;
+			for(int j = 1; j < 100; i++) { 
+				sprintf(new_fname, "%s(%d).pp", fname, j);
+				if(!file_exists(new_fname)) { break; }
 			}
-		}
-	}
-	
-	// Get the analog outputs.
-	if(p->nAout) {
-		if(DDC_GetDataValues(ao_var_c, 0, p->nAout, p->ao_varied)) { goto error; }
-		if(DDC_GetDataValues(ao_dim_c, 0, p->nAout, p->ao_dim)) { goto error; }
-		
-		int get_exprs = 0;
-		for(i = 0; i < p->nAout; i++) { 
-			if(p->ao_varied[i] == 2) {
-				get_exprs = 1;
-				break;
-			}
-		}
-		
-		int ns = p->nAout;
-		
-		// Get the channels
-		if(ev = DDC_GetChannelStringPropertyLength(ao_var_c, MCTD_AOCHANS, &len)) { goto error; }
-		ao_chans = malloc(++len);
-		
-		if(ev = DDC_GetChannelProperty(ao_var_c, MCTD_AOCHANS, ao_chans, len)) { goto error; }
-		
-		p->ao_chans = get_nc_strings(ao_chans, &ns);
-		if(ns != p->nAout) {
-			ev = -250;
-			goto error;
-		}
-		
-		// Get expressions if necessary
-		if(get_exprs) {
-			if(ev = DDC_GetChannelStringPropertyLength(ao_var_c, MCTD_AOEXPRS, &len)) { goto error; }
 			
-			ao_exprs = malloc(++len);
-			
-			if(ev = DDC_GetChannelProperty(ao_var_c, MCTD_AOEXPRS, ao_exprs, len)) { goto error; }
-			
-			p->ao_exprs = get_nc_strings(ao_exprs, &ns);
-			free(ao_exprs);
-			
-			if(ns != p->nAout) {
-				ev = -25;
+			if(file_exists(new_fname)) { 
+				int rv = -MCPP_ERR_FILE_MOVING;
 				goto error; 
 			}
 		}
-		
-		// Now grab the values array, it's stored sequentially.
-		int nv, k = 0;
-		for(i = 0; i < p->nAout; i++) { 
-			if(p->ao_dim[i] >= 0) {
-				nv = p->maxsteps[p->ao_dim[i]+p->nCycles];
-			} else {
-				nv = 1;
-			}
-			
-			p->ao_vals[i] = malloc(sizeof(double)*nv);
-			
-			if(ev = DDC_GetDataValues(ao_vals_c, k, nv, p->ao_vals[i])) { goto error; }
-
-			k+=nv;
-		}
+	}
+	
+	if(new_fname == NULL) { 
+		err = rename(tname, fname);
+	} else { 
+		err = rename(tname, new_fname);
+		free(new_fname);
+		new_fname = NULL;
+	}
+	
+	if(safe && locked) {
+		CmtReleaseLock(lock_tdm);	
 	}
 	
 	error:
-	
-	err_val[0] = ev;
-	
-	if(ao_chans != NULL) { free(ao_chans); }
-	if(ao_exprs != NULL) { free(ao_exprs); }
-	if(data_exprs != NULL) { free(data_exprs); }
-	if(delay_exprs != NULL) { free(delay_exprs); }
-	
-	if(idata != NULL) { free(idata); }
-	if(ddata != NULL) { free(ddata); }
-	
-	if(skip_locs != NULL) { free(skip_locs); }
-
-	if(ev) { 
-		if(!on) {
-			free(p);
-		} else {
-			free_pprog(p);
-		}
-		
-		p = NULL;
+	if(f != NULL) { fclose(f); }
+	if(fname != NULL) { free(fname); }
+	if(tname != NULL)  {
+		if(file_exists(tname)) { remove(tname); }
+		free(tname);
 	}
-	
-	free_string_array(names, nchans);
-	
-	return p;
-}
-
-PPROGRAM *load_program_safe(DDCChannelGroupHandle pcg, int *err_val) {
-	CmtGetLock(lock_tdm);
-	PPROGRAM *rv = load_program(pcg, err_val);
-	CmtReleaseLock(lock_tdm);
+	if(new_fname != NULL) { 
+		free(new_fname);	
+	}
 	
 	return rv;
 }
+ 
+int save_pprogram(PPROGRAM *p, FILE *f) {
+	// Save the pulse program to a file "fname"
 
-int get_name(char *pathname, char *name, char *ending) {
-	// Gets the base name without the ending. Pass NULL if you don't
-	// care about the ending, pass the specified ending (no .) if you 
-	// have one in mind, and pass "*" if the ending is not known.
+	// Vars
+	int rv = 0;
+	char *buff = NULL;
+	fsave header = null_fs(), instrs = null_fs();
+	fsave ao = null_fs(), nd = null_fs(), skip = null_fs();
 	
-	SplitPath(pathname, NULL, NULL, name);
+	PINSTR *ilist = NULL;
 	
-	if(ending == NULL)
-		return 0;
+	if(f == NULL) { 
+		rv = MCPP_ERR_NOFILE;
+		goto error;
+	}
 	
-	if(ending[0] == '*') {
-		for(int i = strlen(name)-1; i--; i >= 0) {
-			if(name[i] == '.') {
-				name[i] = '\0';
-				break;
-			}
+	if(p == NULL) { 
+		rv = MCPP_ERR_NOPROG;
+		goto error;
+	}
+	
+	int s = 0;
+	size_t written;
+	size_t sd = sizeof(double), si = sizeof(int), si8 = sizeof(unsigned char);
+	
+	// First the main "Pulse Program" header
+	char *hstr = MCPP_PROGHEADER;
+	int len = strlen(hstr)+1;
+	
+	// Write the title
+	fwrite(&len, si, 1, f); 
+	fwrite(hstr, si8, len, f);
+	
+	// Get the position for later.
+	fpos_t pos_marked;
+	unsigned int pos_init, pos_done;
+	unsigned char type = FS_CONTAINER;
+	
+	fwrite(&type, sizeof(unsigned char), 1, f);
+	
+	fgetpos(f, &pos_marked);
+	fwrite(&len, si, 1, f); // Write as a placeholder for size
+	
+	pos_init = ftell(f);
+
+	// Header first
+	header = generate_header(p, &rv);
+	if(rv != 0) { goto error; }
+	
+	if(rv = fwrite_fs(f, &header)) { goto error; }
+	
+	header = free_fsave(&header);
+	
+	// Now that we have the header written, we want to start writing 
+	// some of the arrays. We'll start with the instruction array, as that's
+	// the most important thing.
+
+	ilist = malloc(sizeof(PINSTR)*p->nUniqueInstrs);
+	for(int i = 0; i < p->nUniqueInstrs; i++) {
+		ilist[i] = *(p->instrs[i]);	
+	}
+	
+	instrs = generate_instr_array(ilist, p->nUniqueInstrs, MCPP_INSTHEADER);
+	if(instrs.type == FS_NULL) {
+		rv = MCPP_ERR_NOINSTRS;
+		goto error;
+	}
+	
+	if(rv = fwrite_fs(f, &instrs)) { goto error; }
+	
+	instrs = free_fsave(&instrs);
+	
+	// Next write the array of things relating to analog outputs (if necessary)
+	if(p->nAout > 0) {
+		ao = generate_ao(p, &rv);
+		if(rv != 0) {
+			rv = MCPP_ERR_NOAOUT;
+			goto error;
 		}
 		
-		return 0;
+		if(rv = fwrite_fs(f, &ao)) { goto error; }
+		
+		ao = free_fsave(&ao);
 	}
 	
-	if(strlen(name) > strlen(ending) && strcmp(&name[strlen(name)-strlen(ending)], ending) == 0)
-		name[strlen(name)-strlen(ending)] = '\0';
-	
-	return 0;
-}
-
-char *generate_nc_string(char **strings, int numstrings, int *len) {
-	// We're going to store arrays of strings as a single newline-delimited char array. 
-	// len returns the full length of the array with newlines and \0. 
-	//
-	// The array is malloced, so you need to free it when you are done.
-	
-	int i, l=0;
-	for(i = 0; i < numstrings; i++)
-		l += strlen(strings[i])+((strlen(strings[i]) > 0)?1:2);	// Add one for the newline.
-	
-	char *out = malloc(++l);	// Adds one for the null. (Keeping the trailing \n)
-	out[0] = '\0';
-	if(len != NULL)
-		len[0] = l;
-	
-	// Generate the array
-	for(i = 0; i < numstrings; i++) {
-		strcat(out, (strlen(strings[i]) > 0)?strings[i]:" ");
-		strcat(out, "\n");
-	}
-	
-	return out;
-}
-
-char **get_nc_strings(char *string, int *ns) {
-	// Performs the reverse operation of generate_nc_string ns should be your best guess as
-	// to how many strings there are. If you don't know, a value of 0 or less defaults to 10.
-	//
-	// TODO: Make it so you can pass -1 or something to ns and it counts the strings.
-	
-	
-	int n = 0, g = ((ns != NULL) && (*ns > 0))?*ns:10, s = g, i;
-	char **out = malloc(sizeof(char*)*s), *p = strtok(string, "\n");
-
-	while(p != NULL) {
-		i = n++;	// Index is one less than n.
-		if(n > g) {	// Increment the counter.
-			g += s;		// Get more space.
-			out = realloc(out, sizeof(char*)*g);
+	// Now the multidimensional stuff.
+	if(p->varied) {
+		nd = generate_nd(p, &rv);
+		if(rv != 0) {
+			rv = MCPP_ERR_NOND;	
+			goto error;
 		}
-								 
-		// Put the string in the array.
-		out[i] = malloc(strlen(p)+1);
-
-		if(p[0] == ' ')
-			strcpy(out[i], "");
-		else
-			strcpy(out[i], p);
-			
-		p = strtok(NULL, "\n");
+		
+		if(rv = fwrite_fs(f, &nd)) { goto error; }
+		
+		nd = free_fsave(&nd);
 	}
 	
-	if(ns != NULL)
-		ns[0] = n;	// This is the number of strings.
+	// Now the skip array
+	if(p->skip) {
+		skip = generate_skip_fs(p, &rv);
+		if(rv != 0) { 
+			rv = MCPP_ERR_NOSKIP;
+			goto error;
+		}
+		
+		if(rv = fwrite_fs(f, &skip)) { goto error; }
+		
+		skip = free_fsave(&skip);
+	}
+	
+	// Now the first-run instructions
+	instrs = generate_instr_array(p->frins, p->frnInstrs, MCPP_FRINSTHEADER);
+	if(instrs.type == FS_NULL) {
+		rv = MCPP_ERR_NOFRINSTRS;
+		goto error;
+	}
+	
+	if(rv = fwrite_fs(f, &instrs)) { goto error; }
+	
+	instrs = free_fsave(&instrs);
+	
+	// Now the last-run instructions
+	instrs = generate_instr_array(p->lrins, p->lrnInstrs, MCPP_LRINSTHEADER);
+	if(instrs.type == FS_NULL) {
+		rv = MCPP_ERR_NOFRINSTRS;
+		goto error;
+	}
+	
+	if(rv = fwrite_fs(f, &instrs)) { goto error; }
+	instrs = free_fsave(&instrs);
+	
+	// Get the final position
+	pos_done = ftell(f);
+
+	// Write the difference back at the beginning
+	unsigned int size = pos_done - pos_init;
+	fpos_t pos_end;
+	
+	fgetpos(f, &pos_end);
+	fsetpos(f, &pos_marked);
+	
+	fwrite(&size, sizeof(unsigned int), 1, f);	// This will break for programs bigger than
+												// 4GB. Be aware of this extremely common scenario.
+
+	error:
+	if(buff != NULL) { free(buff); }
+	
+	if(header.type != FS_NULL) { free_fsave(&header); }
+	if(instrs.type != FS_NULL) { free_fsave(&instrs); }
+	if(ao.type != FS_NULL) { free_fsave(&ao); }
+	if(nd.type != FS_NULL) { free_fsave(&nd); }
+	if(skip.type != FS_NULL) { free_fsave(&skip); }
+	
+	return rv;	
+}
+
+fsave generate_header(PPROGRAM *p, int *ev) {
+	// Generates the header as an unsigned char array
+	// Must be freed when you're done with it.
+	
+	int rv = 0;
+	int h_f = MCPP_PROPSNUM, cf = 0;
+	fsave *fs = NULL, out = null_fs();
+	char *header = NULL;
+
+	if(p == NULL) { 
+		rv = MCPP_ERR_NOPROG;
+		goto error; 
+	}
+	
+	double version = PPROG_VERSION;
+
+	// Create an fsave array
+	fs = calloc(h_f, sizeof(fsave));
+	
+	// Version (Double)
+	fs[cf] = make_fs(MCPP_VERSION);
+	if(rv = put_fs(&fs[cf], &version, FS_DOUBLE, 1)) { goto error; }
+	
+	// Num Points (Int)
+	fs[++cf] = make_fs(MCPP_NP);
+	if(rv = put_fs(&fs[cf], &(p->np), FS_INT, 1)) { goto error; }
+	
+	// Sampling Rate (Double)
+	fs[++cf] = make_fs(MCPP_SR);
+	if(rv = put_fs(&fs[cf], &(p->sr), FS_DOUBLE, 1)) { goto error; }
+	
+	// Num Transients (Int)
+	fs[++cf] = make_fs(MCPP_NT);
+	if(rv = put_fs(&fs[cf], &(p->nt), FS_INT, 1)) { goto error; }
+	
+	// Trigger TTL  (UChar)
+	fs[++cf] = make_fs(MCPP_TRIGTTL);
+	if(rv = put_fs(&fs[cf], &(p->trigger_ttl), FS_UCHAR, 1)) { goto error; }
+	
+	// Transient mode (UChar)
+	fs[++cf] = make_fs(MCPP_TMODE);
+	if(rv = put_fs(&fs[cf], &(p->tmode), FS_UCHAR, 1)) { goto error; }
+	
+	// Scan (UChar)
+	fs[++cf] = make_fs(MCPP_SCAN);
+	if(rv = put_fs(&fs[cf], &(p->scan), FS_UCHAR, 1)) { goto error; }
+	
+	// Use PB (UChar)
+	fs[++cf] = make_fs(MCPP_USE_PB);
+	if(rv = put_fs(&fs[cf], &(p->use_pb), FS_UCHAR, 1)) { goto error; }
+	
+	// Varied (UChar)
+	fs[++cf] = make_fs(MCPP_VARIED);
+	if(rv = put_fs(&fs[cf], &(p->varied), FS_UCHAR, 1)) { goto error; }
+	
+	// Num Instrs (Int)
+	fs[++cf] = make_fs(MCPP_NINST);
+	if(rv = put_fs(&fs[cf], &(p->n_inst), FS_INT, 1)) { goto error; }
+	
+	// NUniqueInstrs (Int)
+	fs[++cf] = make_fs(MCPP_NUINSTRS);
+	if(rv = put_fs(&fs[cf], &(p->nUniqueInstrs), FS_INT, 1)) { goto error; }
+
+	// First run number of instructions
+	fs[++cf] = make_fs(MCPP_FRNINSTRS);
+	if(rv = put_fs(&fs[cf], &(p->frnInstrs), FS_INT, 1)) { goto error; }
+	
+	// First run number of repetitions
+	fs[++cf] = make_fs(MCPP_FRNREPS);
+	if(rv = put_fs(&fs[cf], &(p->frnReps), FS_INT, 1)) { goto error; }
+	
+	// First run on or off
+	fs[++cf] = make_fs(MCPP_FRON);
+	if(rv = put_fs(&fs[cf], &(p->fr), FS_INT, 1)) { goto error; }
+
+	// Last run number of instructions
+	fs[++cf] = make_fs(MCPP_LRNINSTRS);
+	if(rv = put_fs(&fs[cf], &(p->lrnInstrs), FS_INT, 1)) { goto error; }
+	
+	// Last run number of repetitions
+	fs[++cf] = make_fs(MCPP_LRNREPS);
+	if(rv = put_fs(&fs[cf], &(p->lrnReps), FS_INT, 1)) { goto error; }
+	
+	// Last run on or off
+	fs[++cf] = make_fs(MCPP_LRON);
+	if(rv = put_fs(&fs[cf], &(p->lr), FS_INT, 1)) { goto error; }
+
+	// Total time (Double)
+	fs[++cf] = make_fs(MCPP_TOTALTIME);
+	if(rv = put_fs(&fs[cf], &(p->total_time), FS_DOUBLE, 1)) { goto error; }
+
+	// Num dims (Int)
+	fs[++cf] = make_fs(MCPP_NDIMS);
+	if(rv = put_fs(&fs[cf], &(p->nDims), FS_INT, 1)) { goto error; }
+	
+	// Num cycles (Int)
+	fs[++cf] = make_fs(MCPP_NCYCS);
+	if(rv = put_fs(&fs[cf], &(p->nCycles), FS_INT, 1)) { goto error; }
+
+	// Num Varied (Int)
+	fs[++cf] = make_fs(MCPP_NVARIED);
+	if(rv = put_fs(&fs[cf], &(p->nVaried), FS_INT, 1)) { goto error; }
+	
+	// Max num steps (Int)
+	fs[++cf] = make_fs(MCPP_MAXNSTEPS);
+	if(rv = put_fs(&fs[cf], &(p->max_n_steps), FS_INT, 1)) { goto error; }
+	
+	// Real num steps (Int)
+	fs[++cf] = make_fs(MCPP_REALNSTEPS);
+	if(rv = put_fs(&fs[cf], &(p->real_n_steps), FS_INT, 1)) { goto error; }
+	
+	// Skip (UChar)
+	fs[++cf] = make_fs(MCPP_SKIP);
+	if(rv = put_fs(&fs[cf], &(p->skip), FS_UCHAR, 1)) { goto error; }
+	
+	// nAout (Int)
+	fs[++cf] = make_fs(MCPP_NAOUT);
+	if(rv = put_fs(&fs[cf], &(p->nAout), FS_INT, 1)) { goto error; }
+	
+	// Num AO Varying (Int)
+	fs[++cf] = make_fs(MCPP_NAOVAR);
+	if(rv = put_fs(&fs[cf], &(p->n_ao_var), FS_INT, 1)) { goto error; }
+	
+	// Generate the container
+	out = make_fs(MCPP_PROPHEADER);
+	if(rv = put_fs_container(&out, fs, h_f)) { goto error; }
+
+	error:
+	if(fs != NULL) { free_fsave_array(fs, h_f); }
+	if(header != NULL) { free(header); }
+	*ev = rv;
+
+	return out;
+}
+
+fsave generate_instr_array(PINSTR *inst, int n_instr, char *header) {
+	// Generates a sequential array of instructions.
+	if(inst == NULL) { return null_fs(); }
+	char *c = NULL;
+
+	// Define the struct.
+	unsigned int types[MCPP_INSTNUMFIELDS] = MCPP_INST_TYPES;
+	char *names[MCPP_INSTNUMFIELDS] = MCPP_INST_NAMES;
+	size_t size = 0, si = sizeof(unsigned int), si8 = sizeof(unsigned char), sd = sizeof(double);
+	
+	// Go through and create the char array.
+	int i;
+	for(i = 0; i < MCPP_INSTNUMFIELDS; i++) {
+		size += get_fs_type_size(types[i]); 
+	}
+	
+	c = malloc(size*n_instr);
+	char *pos = c;
+	
+	
+	// Must be harmonized with MCPP_INST_NAMES!
+	// Current order is:
+	// flags, instr, instr_data, trigger_scan, instr_time, time_units
+	unsigned char ucbuff;
+	for(i = 0; i < n_instr; i++) {
+		memcpy(pos, &(inst[i].flags), si);
+		pos += si;
+		
+		memcpy(pos, &(inst[i].instr), si);
+		pos += si;
+		
+		memcpy(pos, &(inst[i].instr_data), si);
+		pos += si;
+		
+		ucbuff = (unsigned char)(inst[i].trigger_scan);
+		memcpy(pos, &ucbuff, si8);
+		pos += si8;
+
+		memcpy(pos, &(inst[i].instr_time), sd);
+		pos += sd;
+		
+		ucbuff = (unsigned char)(inst[i].time_units);
+		memcpy(pos, &ucbuff, si8);
+		pos += si8;
+	}
+	
+	fsave fs = make_fs(header);
+	put_fs_custom(&fs, c, MCPP_INSTNUMFIELDS, types, names, n_instr);
+
+	error:
+	if(c != NULL) { free(c); }
+	
+	return fs;
+}
+
+fsave generate_ao(PPROGRAM *p, int *ev) {
+	// Generates the information relating to analog outputs
+	fsave out = null_fs();
+	char *val = NULL, *ao_chans = NULL, *ao_exprs = NULL;
+	double *ao_vals = NULL;
+	int i, rv = 0;
+	fsave *fs = NULL;
+	unsigned char *ucbuff = NULL;
+	size_t sd = sizeof(double), si = sizeof(unsigned int), si8 = sizeof(unsigned char);
+	
+	
+	if(p == NULL) { 
+		rv = -200;
+		goto error; 
+	}
+
+	// Generate field array
+	int nf = MCPP_AONUM;
+	fs = malloc(sizeof(fsave)*nf);
+	int cf = 0;
+	
+	// AOut Varied (UChar)
+	ucbuff = malloc(si8*p->nAout);
+	for(i = 0; i < p->nAout; i++) {
+		ucbuff[i] = (unsigned char)(p->ao_varied[i]);	
+	}
+	
+	fs[cf] = make_fs(MCPP_AOVARIED);
+	if(rv = put_fs(&fs[cf], ucbuff, FS_UCHAR, p->nAout)) { goto error; }
+	
+	// AOut Dimension (UChar)
+	for(i = 0; i < p->nAout; i++) {
+		ucbuff[i] = (unsigned char)(p->ao_dim[i]);
+	}
+	
+	fs[++cf] = make_fs(MCPP_AODIM);
+	if(rv = put_fs(&fs[cf], ucbuff, FS_UCHAR, p->nAout)) { goto error; }
+	
+	free(ucbuff);
+	ucbuff = NULL;
+	
+	// AO Vals (Double, linearized array)
+	size_t s_vals = p->nAout-p->n_ao_var; 
+	ao_vals = malloc(sd*((s_vals == 0)?1:s_vals));
+
+	if(p->n_ao_var > 0) {
+		size_t c_size = 0;
+		for(i = 0; i < p->nAout; i++) {
+			if(p->ao_varied[i]) {
+				c_size = p->maxsteps[p->nCycles+p->ao_dim[i]];
+			} else {
+				c_size = 1;
+			}
+		
+			if(c_size > 1) {
+				s_vals += c_size;
+				ao_vals = realloc(ao_vals, s_vals*sd);
+			}
+			
+			memcpy(&ao_vals[s_vals - c_size], p->ao_vals[i], sd*c_size); // Copy into the linearized array
+		}
+	} else {
+		for(i = 0; i < p->nAout; i++) {
+			ao_vals[i] = p->ao_vals[i][0];
+		}
+	}
+	
+	fs[++cf] = make_fs(MCPP_AOVALS);
+	if(rv = put_fs(&fs[cf], ao_vals, FS_DOUBLE, s_vals)) { goto error; }
+	
+	// AOChans and AOExprs - Stored as newline-delimited strings (Char)
+	int s_chans = 0, s_exprs = 0;
+	ao_chans = generate_nc_string(p->ao_chans, p->nAout, &s_chans);
+	ao_exprs = generate_nc_string(p->ao_exprs, p->nAout, &s_exprs);
+	
+	fs[++cf] = make_fs(MCPP_AOCHANS);
+	if(rv = put_fs(&fs[cf], ao_chans, FS_CHAR, s_chans)) { goto error; }
+	
+	fs[++cf] = make_fs(MCPP_AOEXPRS);
+	if(rv = put_fs(&fs[cf], ao_exprs, FS_CHAR, s_exprs)) { goto error; }
+
+	// Finally generate the container
+	out = make_fs(MCPP_AOHEADER);
+	if(rv = put_fs_container(&out, fs, nf)) { goto error; }
+	
+	error:
+	if(ucbuff != NULL) { free(ucbuff); }
+	if(fs != NULL) { free_fsave_array(fs, nf); }
+	if(ao_chans != NULL) { free(ao_chans); }
+	if(ao_exprs != NULL) { free(ao_exprs); }
+	if(ao_vals != NULL) { free(ao_vals); }
+
+	*ev = rv;
+	
+	if(rv != 0) {
+		if(out.val.c != NULL) { free_fsave(&out); }
+		
+		out = null_fs();
+	}
 	
 	return out;
 }
 
-void display_ddc_error(int err_val) {
-	switch(err_val) {	
-		case -247:
-			MessagePopup("TDM Error", "Invalid/NULL pulse program.");
-		case -248:
-			MessagePopup("TDM Error", "Program Channel Group Not Found");
-			break;
-		case -249:
-			MessagePopup("TDM Error", "No Channel groups found in this file");
-			break;
-		case -250:
-			MessagePopup("TDM Error", "File type not valid.");
-		default:
-			MessagePopup("TDM Error", DDC_GetLibraryErrorDescription(err_val));
+fsave generate_nd(PPROGRAM *p, int *ev) {
+	// Save the ND-related instructions
+	int rv = 0;
+	int *v_ins_locs = NULL;
+	fsave out = null_fs(), *fs = NULL;
+	char *val = NULL, *delay_exprs = NULL, *data_exprs = NULL;
+	unsigned char *ucbuff = NULL;
+	size_t sd = sizeof(double), si = sizeof(unsigned int), si8 = sizeof(unsigned char);
+	
+	int nf = MCPP_NDNUM, cf = 0;
+	fs = malloc(sizeof(fsave)*nf);
+
+	// Maxsteps (Int array, size p->nVaried)
+	fs[cf] = make_fs(MCPP_MAXSTEPS);
+	if(rv = put_fs(&fs[cf], p->maxsteps, FS_INT, p->nDims + p->nCycles)) { goto error; }
+	
+	fs[++cf] = make_fs(MCPP_STEPS);
+	if(rv = put_fs(&fs[cf], p->steps, FS_UINT, p->steps_size)) { goto error; } 
+	
+	if(p->nVaried > 0) { 
+		// Varied instructions (Int array, size: p->nVaried)
+		fs[++cf] = make_fs(MCPP_VINS);
+		if(rv = put_fs(&fs[cf], p->v_ins, FS_INT, p->nVaried)) { goto error; }
+	
+		// Varied instruction dimensions (UChar array, Size: p->nVaried)
+		ucbuff = malloc(p->nVaried*si8);
+		for(int i = 0; i < p->nVaried; i++) {
+			ucbuff[i] = (unsigned char)p->v_ins_dim[i];		
+		}
+	
+		fs[++cf] = make_fs(MCPP_VINSDIM);
+		if(rv = put_fs(&fs[cf], ucbuff, FS_UCHAR, p->nVaried)) { goto error; }
+	
+		// Varied instruction mode (UChar array, Size: p->nVaried)
+		for(int i = 0; i < p->nVaried; i++) { 
+			ucbuff[i] = (unsigned char)p->v_ins_mode[i];	
+		}
+	
+		fs[++cf] = make_fs(MCPP_VINSMODE);
+		if(rv = put_fs(&fs[cf], ucbuff, FS_UCHAR, p->nVaried)) { goto error; }
+	
+		free(ucbuff);
+		ucbuff = NULL;
+	
+		// Now store the linearized v_ins_locs array.
+		v_ins_locs = malloc(si*p->nVaried*p->max_n_steps);
+		int k = 0;
+		for(int i = 0; i < p->nVaried; i++) {
+			memcpy(&(v_ins_locs[k]), p->v_ins_locs[i], p->max_n_steps*si);
+			k += p->max_n_steps;
+		}
+		
+		fs[++cf] = make_fs(MCPP_VINSLOCS);
+		if(rv = put_fs(&fs[cf], v_ins_locs, FS_INT, p->max_n_steps*p->nVaried)) { goto error; }
+		
+		// Delay expressions - newline-delimited string array
+		unsigned int s_delay = 0, s_data = 0;
+		delay_exprs = generate_nc_string(p->delay_exprs, p->nVaried, &s_delay);
+		fs[++cf] = make_fs(MCPP_DELAYEXPRS);
+		if(rv = put_fs(&fs[cf], delay_exprs, FS_CHAR, s_delay)) { goto error; }
+	
+		// Data expressions - newline-delimited string array
+		data_exprs = generate_nc_string(p->data_exprs, p->nVaried, &s_data);
+		fs[++cf] = make_fs(MCPP_DATAEXPRS);
+		if(rv = put_fs(&fs[cf], data_exprs, FS_CHAR, s_data)) { goto error; } 
 	}
+	
+	cf++;	// Convert from index to number actually written.
+	
+	// Generate the container
+	out = make_fs(MCPP_NDHEADER);
+	if(rv = put_fs_container(&out, fs, cf)) { goto error; }
+
+	error:
+	if(v_ins_locs != NULL) { free(v_ins_locs); }
+	if(ucbuff != NULL) { free(ucbuff); }
+	if(val != NULL) { free(val); }
+	if(delay_exprs != NULL) { free(delay_exprs); }
+	if(data_exprs != NULL) { free(data_exprs); }
+	if(fs != NULL) { free_fsave_array(fs, cf); }
+	
+	*ev = rv;
+	
+	if(rv != 0) {
+		out = free_fsave(&out);
+	}
+	
+	return out;
 }
 
-void display_tdms_error(int err_val) {
-	switch(err_val) {
-		case -247:
-			MessagePopup("TDMS Error", "Invalid/NULL pulse program.");
-		case -248:
-			MessagePopup("TDMS Error", "Program Channel Group Not Found");
-			break;
-		case -249:
-			MessagePopup("TDMS Error", "No Channel groups found in this file");
-			break;
-		default:
-			MessagePopup("TDMS Error", TDMS_GetLibraryErrorDescription(err_val));
+fsave generate_skip_fs(PPROGRAM *p, int *ev) {
+	// Save the ND-related instructions
+	int rv = 0;
+	fsave out = null_fs(), *fs = NULL;
+	char *val = NULL;
+	unsigned char *ucbuff = NULL;
+	
+	int nf = MCPP_SKIPNUM, cf = 0;
+	fs = malloc(sizeof(fsave)*nf);
+
+	// First the skip expression	(Char Array - single string)
+	fs[cf] = make_fs(MCPP_SKIPEXPR);
+	if(rv = put_fs(&fs[cf], p->skip_expr, FS_CHAR, strlen(p->skip_expr)+1)) { goto error; }
+	
+	// Then the skip_locs linearized array	(Linearized UChar array)
+	ucbuff = malloc(sizeof(unsigned char)*p->max_n_steps);
+	for(int i = 0; i < p->max_n_steps; i++) {
+		ucbuff[i] = (unsigned char)p->skip_locs[i];	
 	}
+	
+	fs[++cf] = make_fs(MCPP_SKIPLOCS);
+	if(rv = put_fs(&fs[cf], ucbuff, FS_UCHAR, p->max_n_steps)) { goto error; }
+	
+	free(ucbuff);
+	ucbuff = NULL;
+	
+	// Generate the container
+	out = make_fs(MCPP_SKIPHEADER);
+	if(rv = put_fs_container(&out, fs, nf)) { goto error; }
+
+	error:
+	if(ucbuff != NULL) { free(ucbuff); }
+	if(val != NULL) { free(val); }
+	if(fs != NULL) { free_fsave_array(fs, nf); }
+	
+	*ev = rv;
+	
+	if(rv != 0) {
+		out = free_fsave(&out);
+	}
+	
+	return out;
+	
 }
+
 
 //////////////////////////////////////////////////////////////
 // 															//
@@ -1020,19 +1490,23 @@ int program_pulses(PINSTR *ilist, int n_inst, int verbose) {
 				instr_data = fid[instr_data];
 		}
 		
+		if(in == LONG_DELAY) { instr_data--; }
+		
 		fid[i] = pb_inst_pbonly(ilist[i].flags, in, instr_data, ilist[i].instr_time);
 		if(fid[i] < 0) {
 			rv = -3;
 			break;
 		}
 	}
+	char *err = NULL;
+	
+	if(rv == -3) { err = pb_get_error(); }
 	
 	pb_stop_programming();
 	
 	// Error processing.
 	if(rv == -3) {
 		if(verbose) {
-			char *err = pb_get_error();
 			char *err_str = malloc(strlen(err)+strlen("Error in Instruction 0000: \n\n")+10);
 			sprintf(err_str, "Error in Instruction %d:\n\n %s", i, err);
 			MessagePopup("Error Programming Board", err_str);
@@ -1090,18 +1564,20 @@ int update_status_safe(int verbose) {
 //////////////////////////////////////////////////////////////
 /******************** General UI Functions *********************/
 PPROGRAM *get_current_program() { // This function gets the current program from the UI controls and dumps it into a PPROGRAM
-	PPROGRAM *p = malloc(sizeof(PPROGRAM));	// Dynamically allocate a PPROGRAM first
+	PPROGRAM *p = calloc(1, sizeof(PPROGRAM));	// Dynamically allocate a PPROGRAM first
 
 	ui_cleanup(0); // Clean up the interface and uipc variable so that we can trust it.
 
 	// Grab what statics we can from the uipc variable
-
 	p->n_inst = uipc.ni;								// Number of instructions
 	p->nCycles = uipc.nc;								// Number of cycles
 	p->nDims = uipc.nd;									// Number of indirect dimensions
 	p->nAout = uipc.anum;
+	p->use_pb = uipc.uses_pb;
+	p->valid = 1;
 	
 	int i;
+	int *steps = NULL;
 	
 	p->n_ao_var = 0;
 	for(i = 0; i < uipc.anum; i++) {
@@ -1260,16 +1736,17 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	p->nFuncs = nFuncs;
 	
 	// Now before we allocate the arrays, just the other statics we know.
-	if(p->skip)									
+	if(p->skip) {									
 		p->real_n_steps = uipc.real_n_steps;
-	else
+	} else {
 		p->real_n_steps = p->max_n_steps;
+	}
 	
 	// Whether or not there's a scan.
+	p->scan = !p->use_pb;
 	for(i = 0; i<uipc.ni; i++) {
+		if(p->scan) { break; }  
 		GetCtrlVal(pc.inst[i], pc.scan, &p->scan);
-		if(p->scan)
-			break;
 	}
 	
 	GetCtrlVal(pc.np[1], pc.np[0], &p->np);
@@ -1278,12 +1755,28 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	p->total_time = uipc.total_time;
 	
 	
+	GetCtrlVal(pc.FRCPan, pc.fron, &p->fr);
+	GetCtrlVal(pc.FRCPan, pc.fninst, &p->frnInstrs);
+	GetCtrlVal(pc.FRCPan, pc.fnrep, &p->frnReps);
+	
+	GetCtrlVal(pc.LRCPan, pc.fron, &p->lr);
+	GetCtrlVal(pc.LRCPan, pc.fninst, &p->lrnInstrs);
+	GetCtrlVal(pc.LRCPan, pc.fnrep, &p->lrnReps);
+	
 	// Now allocate the arrays.
 	create_pprogram(p);
 	
 	// Now we can assign what arrays we've got already.
-	for(i=0; i<nDims+nCycles; i++) 
-		p->maxsteps[i] = maxsteps[i];
+	if(p->varied) {
+		memcpy(p->maxsteps, maxsteps, sizeof(int)*(p->nDims+p->nCycles));
+	
+		steps = get_steps_array(p->tmode, p->maxsteps, p->nCycles, p->nDims, p->nt);
+		if(steps != NULL) {
+			memcpy(p->steps, steps, sizeof(int)*p->steps_size);
+			free(steps);
+			steps = NULL;
+		}
+	}
 	
 	// Add in the analog outputs
 	if(p->nAout) {
@@ -1313,6 +1806,15 @@ PPROGRAM *get_current_program() { // This function gets the current program from
 	// Grab the instructions from the UI.
 	for(i=0; i<nInst; i++)
 		get_instr(p->instrs[i], i);
+	
+	// Check first-run
+	for(i = 0; i < p->frnInstrs; i++) {
+		p->frins[i] = get_fr_instr_panel(pc.finst[i]);				
+	}
+	
+	for(i = 0; i < p->lrnInstrs; i++) {
+		p->lrins[i] = get_fr_instr_panel(pc.linst[i]);	
+	}
 	
 	if(p->nVaried) {
 		// First what we've already gotten when we were getting nUniqueInstrs.
@@ -1499,6 +2001,52 @@ PPROGRAM *get_current_program_safe() {
 	return p;
 }
 
+int *get_steps_array(int tmode, int *maxsteps, int nc, int nd, int nt) {
+	int *steps = NULL;
+	int size = get_steps_array_size(tmode, nc, nd);
+	
+	if(size <= 0) { goto error; }
+	
+	steps = malloc(sizeof(int)*size);
+	
+	switch(tmode) {
+		case MC_TMODE_ID:
+			steps[nd] = nt;
+			memcpy(steps, maxsteps + nc, sizeof(int)*nd);
+			break;
+		case MC_TMODE_TF:
+			steps[0] = nt;
+			memcpy(steps+1, maxsteps+nc, sizeof(int)*nd);
+			break;
+		case MC_TMODE_PC:
+			steps[nc+nd] = nt/nc;
+			memcpy(steps, maxsteps, sizeof(int)*(nd+nc));
+			break;
+	}
+	
+	error:
+	
+	return steps;
+}
+
+int get_steps_array_size(int tmode, int nc, int nd) {
+	// Determine the size of the steps array
+	
+	if(tmode == MC_TMODE_PC && nc <= 0) {
+		tmode = MC_TMODE_ID;
+	}
+	
+	switch(tmode) {
+		case MC_TMODE_ID:
+		case MC_TMODE_TF:
+			return nd + 1;
+		case MC_TMODE_PC:
+			return nd+nc+1;
+		default:
+			return MCPP_ERR_INVALIDTMODE;
+	}	
+}
+
 void set_current_program(PPROGRAM *p) { // Set the current program to the program p
 	// Sets the UI and uipc variables as necessary.
 	if(p == NULL)
@@ -1550,9 +2098,14 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 	SetCtrlVal(pc.np[1], pc.np[0], p->np);
 	change_np_or_sr(0);
 	
-	if(p->tmode >= 0)
+	// Whether or not to use the PulseBlaster
+	uipc.uses_pb = p->use_pb;
+	SetCtrlVal(pc.uses_pb[1], pc.uses_pb[0], p->use_pb);
+	
+	if(p->tmode >= 0) {
 		SetCtrlVal(pc.tfirst[1], pc.tfirst[0], p->tmode);
-
+	}
+	
 	// Turn on the instructions if they should be on.
 	int *cstep = NULL, len;
 	int *nd_data, *nd_units;
@@ -1643,6 +2196,9 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 				if(constant_array_double(nd_delays, steps))
 					del = 0;
 			
+				// Turn on the thing.
+				update_nd_state(num, (p->v_ins_mode[i] & PP_V_ID_EXPR)?2:1);
+				
 				// Set the initial and final controls.
 				if(del) {
 					// Initial delay
@@ -1652,16 +2208,36 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 					// Final delay
 					SetCtrlIndex(pc.cinst[num], pc.delu_fin, nd_units[steps-1]);
 					SetCtrlVal(pc.cinst[num], pc.del_fin, nd_delays[steps-1]/pow(1000, nd_units[steps-1]));
+				} else {
+					PINSTR ibuff = *(p->instrs[num]);
+					double tbuff = ibuff.instr_time/pow(1000, ibuff.time_units);
+					
+					SetCtrlVal(pc.cinst[num], pc.del_init, tbuff);
+					SetCtrlVal(pc.cinst[num], pc.del_inc, 0.0);
+					SetCtrlVal(pc.cinst[num], pc.del_fin, tbuff);
+					
+					SetCtrlVal(pc.cinst[num], pc.delu_init, ibuff.time_units);
+					SetCtrlVal(pc.cinst[num], pc.delu_inc, 0);
+					SetCtrlVal(pc.cinst[num], pc.delu_fin, ibuff.time_units);
 				}
 			
 				if(dat) {
 					SetCtrlVal(pc.cinst[num], pc.dat_init, nd_data[0]);
 					SetCtrlVal(pc.cinst[num], pc.dat_fin, nd_data[steps-1]);
+				} else {
+					int dbuff;
+					GetCtrlVal(pc.inst[num], pc.instr_d, &dbuff);
+					
+					SetCtrlVal(pc.cinst[num], pc.dat_init, dbuff);
+					SetCtrlVal(pc.cinst[num], pc.dat_inc, 0);
+					SetCtrlVal(pc.cinst[num], pc.dat_fin, dbuff);
 				}
+				
+				// Update the dimension (increments and such)
+				SetCtrlIndex(pc.cinst[num], pc.dim, dim);
+				change_dimension(num);
 		
 				if(p->v_ins_mode[i] & PP_V_ID_EXPR) {
-					update_nd_state(num, 2);
-				
 					// Load the expressions
 					len = strlen(p->data_exprs[i]);
 					if(len > 0)
@@ -1673,13 +2249,9 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 				
 					update_nd_from_exprs(num);
 				} else {
-					update_nd_state(num, 1);
+					update_nd_increment(num, MC_INC);	
 				}
-			
-				// Update the dimension (increments and such)
-				SetCtrlIndex(pc.cinst[num], pc.dim, dim);
-				change_dimension(num);
-			
+
 				// Now if this was arbitrary, copy over the nd_data and nd_delay tables.
 				if(p->v_ins_mode[i] & PP_V_ID_ARB) {
 					for(j = 0; j < uipc.ndins; j++) {
@@ -1769,7 +2341,39 @@ void set_current_program(PPROGRAM *p) { // Set the current program to the progra
 		}
 	}
 
+	// Set the first run stuff
+	if(p->frnInstrs && p->frins != NULL) {
+		change_fr_num_instrs(p->frnInstrs, 0);
+		SetCtrlVal(pc.FRCPan, pc.fninst, p->frnInstrs);
+		
+		for(i = 0; i < p->frnInstrs; i++) {
+			set_fr_instr_panel(pc.finst[i], p->frins[i]);	
+		}
+	}
+	
+	if(p->frnReps) {
+		SetCtrlVal(pc.FRCPan, pc.fnrep, p->frnReps);	
+	}
 
+	SetCtrlVal(pc.FRCPan, pc.fron, p->fr);
+
+	// Set the last run stuff
+	if(p->lrnInstrs && p->lrins != NULL) {
+		change_fr_num_instrs(p->lrnInstrs, 1);
+		SetCtrlVal(pc.LRCPan, pc.fninst, p->lrnInstrs);
+		
+		for(i = 0; i < p->lrnInstrs; i++) {
+			set_fr_instr_panel(pc.linst[i], p->lrins[i]);	
+		}
+	}
+	
+	if(p->lrnReps) {
+		SetCtrlVal(pc.LRCPan, pc.fnrep, p->lrnReps);
+	}
+	
+	SetCtrlVal(pc.LRCPan, pc.fron, p->lr);
+	
+	
 	if(cstep != NULL)
 		free(cstep);
 }
@@ -1784,17 +2388,32 @@ void set_current_program_safe(PPROGRAM *p) {
 void load_prog_popup() {
 	// Function that generates a popup and allows the user to load a program from file.
 	char *path = malloc(MAX_FILENAME_LEN+MAX_PATHNAME_LEN);
-	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", "*.tdm", ".tdm;.tdms", "Load Program From File", VAL_LOAD_BUTTON, 0, 0, 1, 1, path);
+	char *dfs = malloc(strlen(PPROG_EXTENSION)+3);
+	sprintf(dfs, "*.%s", PPROG_EXTENSION);
+	
+	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", dfs, PPROG_ALLEXTS, "Load Program From File", VAL_LOAD_BUTTON, 0, 0, 1, 1, path);
 
+	free(dfs);
+	
 	if(rv == VAL_NO_FILE_SELECTED) {
 		free(path);
 		return;
-	} else 
+	} else {
 		add_prog_path_to_recent_safe(path);
+	}
 
-	int err_val;
-	PPROGRAM *p = LoadPulseProgram(path, 1, &err_val);
-
+	int err_val = 0;
+	PPROGRAM *p = NULL;
+	
+	char *ext = get_extension(path);
+	if(ext != NULL && strcmp(ext, ".tdm") == 0) {
+		p = LoadPulseProgramDDC(path, 1, &err_val);	
+	} else {
+		p = LoadPulseProgram(path, 1, &err_val);	
+	}
+	
+	if(ext != NULL) { free(ext); }
+	
 	if(err_val != 0)
 		display_ddc_error(err_val);
 
@@ -1808,8 +2427,13 @@ void load_prog_popup() {
 
 void save_prog_popup() {
 	char *path = malloc(MAX_FILENAME_LEN+MAX_PATHNAME_LEN);
-	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", "*.tdm", ".tdm", "Save Program To File", VAL_SAVE_BUTTON, 0, 0, 1, 1, path);
+	char *dfs = malloc(strlen(PPROG_EXTENSION)+3);
+	sprintf(dfs, "*.%s", PPROG_EXTENSION);
 
+	int rv = FileSelectPopup((uipc.ppath != NULL)?uipc.ppath:"Programs", dfs, PPROG_ALLEXTS, "Save Program To File", VAL_SAVE_BUTTON, 0, 0, 1, 1, path);
+
+	free(dfs);
+	
 	if(rv == VAL_NO_FILE_SELECTED) {
 		free(path);
 		return;
@@ -1818,10 +2442,10 @@ void save_prog_popup() {
 
 	PPROGRAM *p = get_current_program_safe();
 
-	int err_val = SavePulseProgram(path, 1, p);
+	int err_val = SavePulseProgram(p, path, 1);
 
 	if(err_val != 0) 
-		display_ddc_error(err_val);
+		display_error(err_val);
 	
 	if(p != NULL) { free_pprog(p); }
 	free(path);
@@ -1862,6 +2486,8 @@ void clear_program() {
 	// Clear all the instructions
 	for(int i = 0; i < uipc.max_ni; i++) { clear_instruction(i); }
 	for(int i = 0; i < uipc.max_anum; i++) { clear_aout(i); }
+	for(int i = 0; i < uipc.fr_max_ni; i++) { clear_fr_instr(i, 0); }
+	for(int i = 0; i < uipc.lr_max_ni; i++) { clear_fr_instr(i, 1); }
 	
 	// Update the number of instructions and analog outputs
 	SetCtrlVal(pc.ninst[1], pc.ninst[0], 1);
@@ -1869,6 +2495,15 @@ void clear_program() {
 	
 	SetCtrlVal(pc.anum[1], pc.anum[0], 0);
 	change_num_aouts();
+	
+	int pans[2] = {pc.FRCPan, pc.LRCPan};
+	for(int i = 0; i < 2; i++) {
+		SetCtrlVal(pans[i], pc.fninst, 1);
+		SetCtrlVal(pans[i], pc.fnrep, 1);
+		SetCtrlVal(pans[i], pc.fron, 0);
+
+		change_fr_num_instrs(1, i);
+	}
 	
 	// Update the ND information
 	SetCtrlVal(pc.numcycles[1], pc.numcycles[0], 0);
@@ -2165,36 +2800,36 @@ int ui_cleanup_safe(int verbose) {
 
 void change_instr_units(int panel) {
 	// Function for changing the units of a given instruction.
-	// Old units can be inferred from max value.
-	int newunits;
-	
-	// Minimum step size for spincore is 10ns, and apparently the number
-	// of steps is stored in 31 bits, so the maximum single delay value
-	// is (2^31)*10.
-	const double m_val = 21474836480.0; 
-	GetCtrlIndex(panel, pc.delayu, &newunits);
-	double max = m_val/pow(1000, newunits);
-	double min = 0; 	// Minimum is 0ns
-	double oldmax, oldmin;
-	
-	GetCtrlAttribute(panel, pc.delay, ATTR_MAX_VALUE, &oldmax);
-	GetCtrlAttribute(panel, pc.delay, ATTR_MIN_VALUE, &oldmin);
-	
-	// Deal with overflows.
-	double delay;
-	GetCtrlVal(panel, pc.delay, &delay);
-	SetCtrlAttribute(panel, pc.delay, ATTR_MAX_VALUE, m_val/pow(1000, newunits));  
-	SetCtrlAttribute(panel, pc.delay, ATTR_MIN_VALUE, 100/pow(1000, newunits));
-	
-	// If it would be coerced, just keep the actual value as represented by
-	// the original units.
-	if (delay == oldmax || delay == oldmin) {
-		GetCtrlAttribute(panel, pc.delay, ATTR_DFLT_VALUE, &delay);
-		SetCtrlVal(panel, pc.delay, delay);
-	} else if(delay > max || delay < min)
-		SetCtrlAttribute(panel, pc.delay, ATTR_DFLT_VALUE, delay); 
+	change_any_instr_units(panel, pc.delay, pc.delayu);
 	
 	change_instr_delay(panel);
+}
+
+void change_any_instr_units(int panel, int del, int unit) {
+	int newunits;
+	GetCtrlVal(panel, unit, &newunits);
+				 
+	double unitm = pow(1000, newunits);
+	double min = MCPP_MIN_TIME/unitm;	// In ns (should be 0 anyway)
+	double max = MCPP_MAX_TIME/unitm; // In nanoseconds
+	
+	// Deal with overflows and set the new values.
+	double delay, oldmax, oldmin;
+	GetCtrlVal(panel, del, &delay);
+
+	// Normally we just keep the nomainal "delay", but if we're going to run
+	// into an overflow, we'll actually interpret the value.
+	if(delay > max || delay < min) {
+		double old_max;
+		GetCtrlAttribute(panel, del, ATTR_MAX_VALUE, &old_max);
+		
+		delay /= old_max/max;
+		SetCtrlVal(panel, del, delay);
+	}
+	
+	SetCtrlAttribute(panel, del, ATTR_MIN_VALUE, min);
+	SetCtrlAttribute(panel, del, ATTR_MAX_VALUE, max);
+	
 }
 
 /********************* Basic Program Setup *********************/
@@ -2289,6 +2924,41 @@ void get_instr_panel(PINSTR *instr, int panel) {
 		instr->instr_time *= pow(1000, instr->time_units);
 }
 
+PINSTR get_fr_instr(int num) {
+	int ni;
+	GetCtrlVal(pc.FRPan, pc.fninst, &ni);
+	if(num >= ni || num < 0) {
+		return null_pinstr();	
+	}
+	
+	return get_fr_instr_panel(pc.finst[num]);
+}
+
+PINSTR get_fr_instr_panel(int panel) {
+	PINSTR ins = null_pinstr();
+	
+	ins.flags = get_fr_flags_panel(panel);
+	ins.trigger_scan = 0;
+	
+	GetCtrlVal(panel, pc.fr_instr, &(ins.instr));
+	GetCtrlVal(panel, pc.fr_inst_d, &(ins.instr_data));
+	GetCtrlVal(panel, pc.fr_delay, &(ins.instr_time));
+	GetCtrlVal(panel, pc.fr_delay_u, &(ins.time_units));
+	
+	if(ins.time_units) {
+		ins.instr_time *= pow(1000, ins.time_units);	
+	}
+	
+	return ins;
+}
+
+int get_fr_flags(int num) {
+	return get_fr_flags_panel(pc.finst[num]);
+}
+
+int get_fr_flags_panel(int panel) {
+	return get_flags_range(panel, pc.fr_TTLs, 0, 23);	
+}
 
 int get_flags(int num) {
 	// Convenience function for getting the flags from a given instruction number.
@@ -2298,10 +2968,10 @@ int get_flags(int num) {
 
 int get_flags_panel(int panel) {
 	// Function for getting the flags for a given panel.   
-	return get_flags_range(panel, 0, 23);	
+	return get_flags_range(panel, pc.TTLs, 0, 23);	
 }
 
-int get_flags_range(int panel, int start, int end) {
+int get_flags_range(int panel, int TTLs[], int start, int end) {
 	int flags = 0, ttlon;
 	if(start > end) {
 		int buff = end;
@@ -2310,21 +2980,75 @@ int get_flags_range(int panel, int start, int end) {
 	}
 	
 	for(int i = start; i <= end; i++) {
-		GetCtrlVal(panel, pc.TTLs[i], &ttlon);
+		GetCtrlVal(panel, TTLs[i], &ttlon);
 		flags = flags|(ttlon<<i);
 	}
 	
 	return flags;
 }
 
-/***************** Set Instruction Parameters ******************/ 
+/***************** Set Instruction Parameters ******************/
+PINSTR null_pinstr() {
+	PINSTR ins = {
+		.flags = 0,
+		.instr = 0,
+		.instr_data = 0,
+		.trigger_scan = 0,
+		.instr_time = MCPP_DEFAULT_DELAY,
+		.time_units = MCPP_DEFAULT_UNITS
+	};
+	
+	return ins;
+}
+
+int set_fr_instr(int num, PINSTR instr, int lr) {
+	// Pass this the program controls, instr number and it sets the controls appropriately.
+	int ni, panel;
+	
+	if(lr) {
+		GetCtrlVal(pc.LRCPan, pc.fninst, &ni);
+		panel = pc.linst[num];
+	} else {
+		GetCtrlVal(pc.FRCPan, pc.fninst, &ni);
+		panel = pc.finst[num];
+	}
+	
+	if(num > ni) {
+		return MCUI_ERR_INVALID_INST;	
+	}
+
+	set_fr_instr_panel(panel, instr);
+	
+	return 0;
+}
+
+void set_fr_instr_panel(int panel, PINSTR instr) {
+	int i;
+	
+	set_fr_flags_panel(panel, instr.flags);
+	
+	SetCtrlIndex(panel, pc.fr_inst, instr.instr);
+	double delay = instr.instr_time/(instr.time_units?pow(1000, instr.time_units):1);
+	
+	SetCtrlVal(panel, pc.fr_delay, delay);
+	SetCtrlIndex(panel, pc.delayu, instr.time_units);
+	
+	if(takes_instr_data(instr.instr)) {						 
+		SetCtrlAttribute(panel, pc.fr_inst_d, ATTR_DIMMED, 0);
+		SetCtrlVal(panel, pc.fr_inst_d, instr.instr_data);
+	} else {
+		SetCtrlAttribute(panel, pc.fr_inst_d, ATTR_DIMMED, 0);
+		SetCtrlVal(panel, pc.fr_inst_d, 0);
+	}
+}
+
 int set_instr(int num, PINSTR *instr) {
 	// Pass this the program controls, instruction number and the instr and it sets the controls appropriately
 	
 	int ni;
 	GetCtrlVal(pc.ninst[1], pc.ninst[0], &ni);			// For error checking
 	if(num >= ni)											// Can't set an instruction if it's not there
-		return -1;											// Error -> Instruction invalid
+		return MCUI_ERR_INVALID_INST;						// Error -> Instruction invalid
 	
 	int panel = pc.inst[num];					
 	set_instr_panel(panel, instr);
@@ -2335,17 +3059,12 @@ int set_instr(int num, PINSTR *instr) {
 void set_instr_panel(int panel, PINSTR *instr) {
 	int i;
 	
-	PINSTR ins = {											// The default instruction. Must not be 
-		.flags = 0,											// declared in an if loop and arrays can
-		.instr = 0,											// only be set this way while declaring.
-		.instr_data = 0,
-		.trigger_scan = 0,
-		.instr_time = 100000000.0,
-		.time_units = 2
-	};
+	PINSTR ins;
 	
-	if(instr == NULL)									// If you pass a NULL pointer it sets it 
+	if(instr == NULL) {
+		ins = null_pinstr();
 		instr = &ins;
+	}
 	
 	// Set the flags
 	set_flags_panel(panel, instr->flags);
@@ -2362,7 +3081,6 @@ void set_instr_panel(int panel, PINSTR *instr) {
 		}
 	} else {
 		SetCtrlAttribute(panel, pc.delay, ATTR_DIMMED, 0);	// Undim them if it's an atomic function
-		SetCtrlAttribute(panel, pc.delay, ATTR_DIMMED, 0);
 	}
 	
 	// Undim the instruction data control if it needs it, otherwise, set to 0 and dim it.
@@ -2406,6 +3124,16 @@ void set_scan_panel(int panel, int state) {
 	// Called when you try and toggle the scan button. Sets the val and the trigger ttl
 	SetCtrlVal(panel, pc.scan, state);
 	SetCtrlVal(panel, pc.TTLs[uipc.trigger_ttl], state);
+}
+
+void change_fr_instr_delay(int panel) {
+	double val;
+	int units;
+	
+	GetCtrlVal(panel,  pc.fr_delay, &val);
+	GetCtrlVal(panel, pc.fr_delay_u, &units);
+	
+	SetCtrlAttribute(panel, pc.fr_delay, ATTR_PRECISION, get_precision(val, MCUI_DEL_PREC));
 }
 
 void change_instr_delay(int panel) {
@@ -2494,6 +3222,25 @@ void change_instruction_panel(int panel) {
 		SetCtrlVal(panel, pc.instr_d, 0);
 	
 	SetCtrlAttribute(panel, pc.instr_d, ATTR_DIMMED, !takes_instr_data(ind));
+}
+
+void change_fr_instr(int num, int lr) {
+	change_fr_instr_pan(lr?pc.linst[num]:pc.finst[num]);
+}
+
+void change_fr_instr_pan(int panel) {
+	int ind;
+	GetCtrlVal(panel, pc.fr_inst, &ind);
+	
+	// The up the minimum
+	int min = instr_data_min(ind);
+	SetCtrlAttribute(panel, pc.fr_inst_d, ATTR_MIN_VALUE, min);
+	
+	if(!takes_instr_data(ind)) {
+		SetCtrlVal(panel, pc.fr_inst_d, 0);
+	}
+	
+	SetCtrlAttribute(panel, pc.fr_inst_d, ATTR_DIMMED, !takes_instr_data(ind));
 }
 
 void swap_ttl(int to, int from) {
@@ -2588,10 +3335,10 @@ void move_ttl_panel(int panel, int to, int from) {
 		return;
 	
 	// Slightly slower, but more general.
-	int flags = get_flags_range(panel, to, from);
+	int flags = get_flags_range(panel,pc.TTLs,  to, from);
 	flags = move_bit_skip(flags, uipc.broken_ttls, to, from);
 	
-	set_flags_range(panel, flags, to, from);
+	set_flags_range(panel, pc.TTLs, flags, to, from);
 	return; 
 	
 	int toh = to>from; 	// High if to is the higher one.
@@ -2721,19 +3468,22 @@ void set_ttl_trigger(int panel, int ttl, int on) {
 	}
 }
 
-void set_flags(int num, int flags) {
-	// Convenience function.
+void set_fr_flags(int num, int flags) {
 	int panel = pc.inst[num];
-	set_flags_panel(panel, flags);
+	set_fr_flags_panel(panel, flags);
+}
+
+void set_fr_flags_panel(int panel, int flags) {
+	set_flags_range(panel, pc.fr_TTLs, flags, 0, 23);	
 }
 
 void set_flags_panel(int panel, int flags) {
 	// Sets the flags of panel to be the appropriate thing.
 	
-	set_flags_range(panel, flags, 0, 23);
+	set_flags_range(panel, pc.TTLs, flags, 0, 23);
 }
 
-void set_flags_range(int panel, int flags, int start, int end) {
+void set_flags_range(int panel, int TTLs[], int flags, int start, int end) {
 	// Sets all the flags in a given range.
 	if(start > end) {
 		int buff = end;
@@ -2742,7 +3492,7 @@ void set_flags_range(int panel, int flags, int start, int end) {
 	}
 	
 	for(int i = start; i <= end; i++)
-		SetCtrlVal(panel, pc.TTLs[i], (flags&(1<<i))?1:0);
+		SetCtrlVal(panel, TTLs[i], (flags&(1<<i))?1:0);
 		
 }
 
@@ -2987,7 +3737,7 @@ void update_nd_state(int num, int state) {	// Changes the state of a given ND co
 		if(ind < 0) {				// only need to update if we're not already there.
 			uipc.ndins++;			// Increment the number of instructions varied 
 			
-			// Memory allocation is important.
+			// Memory allocation is important. (Replace these with realloc_if_needed)
 			if(uipc.dim_ins == NULL)
 				uipc.dim_ins = malloc(sizeof(int)*uipc.ndins);
 			else
@@ -3606,10 +4356,7 @@ void update_nd_from_exprs(int num) {// Generate the experiment from the exprs (s
 	}
 	
 	// Build the basic cstep
-	cstep = malloc(sizeof(int)*(uipc.nc+uipc.nd));
-	for(i = 0; i<(uipc.nc+uipc.nd); i++)
-		cstep[i] = 0;	// Just set everything we don't care about to the first one, it's not important
-	
+	cstep = calloc(uipc.nd+uipc.nc, sizeof(int));
 	
 	int err_del = 0, err_dat = 0;			// Error values
 	constants *c = setup_constants(); 		// Initializes the static constants
@@ -4332,13 +5079,13 @@ void update_cyc_instr(int num, PINSTR *instr, int step) {
 
 	// Make this array the right size.
 	if(uipc.c_instrs[num] == NULL) {
-		uipc.c_instrs[num] = malloc(sizeof(PINSTR*)*(step+1));
+		uipc.c_instrs[num] = calloc((step+1), sizeof(PINSTR*));
 	} else if (uipc.max_cinstrs[num] <= step) {
 		uipc.c_instrs[num] = realloc(uipc.c_instrs[num], sizeof(PINSTR*)*(step+1));
 	}
 	
 	if(step >= uipc.max_cinstrs[num]) {					// Matches exclusively both of the above conditions
-		memset(&uipc.c_instrs[num], 0, sizeof(PINSTR*)*((step-uipc.max_cinstrs[num])+1));
+		memset(uipc.c_instrs[num]+step, 0, sizeof(PINSTR*)*((step-uipc.max_cinstrs[num])+1));
 		uipc.max_cinstrs[num] = step+1;
 	}
 	
@@ -4447,9 +5194,8 @@ void set_phase_cycle_expanded(int num, int state) {
 		InstallCtrlCallback(panel, pc.pcstep, ChangePhaseCycleStepExpanded, (void*)info);
 
 	} else {
-		int ind = get_index(uipc.cyc_ins, num, uipc.ncins);
-		if(ind < 0)
-			return;
+		int ind = int_in_array(uipc.cyc_ins, num, uipc.ncins);
+		if(ind < 0)  { return; }
 		
 		SetPanelAttribute(panel, ATTR_FRAME_STYLE, VAL_HIDDEN_FRAME);
 		SetPanelAttribute(panel, ATTR_FRAME_THICKNESS, 0);
@@ -4923,6 +5669,69 @@ int move_instruction_safe(int to, int from) {
 	return rv;
 }
 
+
+int move_fr_inst(int to, int from, int lr) {
+	// Moves first-run instructions.
+	//
+	// 0 on no change
+	// 1 on success.
+	int ni;
+	int *inst;
+	
+	if(lr) {
+		ni = uipc.lr_ni;
+		inst = pc.linst;
+	} else {
+		ni = uipc.fr_ni;
+		inst = pc.finst;
+	}
+	
+	if(to > uipc.ni || from > uipc.ni || from < 0 || to < 0 || from == to) {
+		return 0;
+	}
+	
+	int *n_array = generate_mover_array(to, from, ((to>from)?to:from)+1);
+	if(n_array == NULL) { return 0; }
+	
+	int pan_height;
+	GetPanelAttribute(inst[0], ATTR_HEIGHT, &pan_height);
+	
+	int i, j;
+	
+	int s, e;
+	if(to > from) {
+		s = from;
+		e = to+1;
+	} else {
+		s = to;
+		e = from+1;
+	}
+				  
+	int *inst_buff = malloc(sizeof(int)*e);
+	memcpy(inst_buff, inst, sizeof(int)*e);
+	
+	for(i = s; i < e; i++) {
+		j = n_array[i];
+		SetPanelAttribute(inst_buff[j], ATTR_TOP, MC_FR_INST_OFF+(pan_height+MC_FR_INST_SEP)*i);
+		SetCtrlVal(inst_buff[j], pc.fr_inum, i);
+		
+		inst[i] = inst_buff[j];
+	}
+	
+	free(inst_buff);
+	free(n_array); 
+	
+	return 1;
+}
+
+int move_fr_inst_safe(int to, int from, int lr) {
+	CmtGetLock(lock_uipc);
+	int rv = move_fr_inst(to, from, lr);
+	CmtReleaseLock(lock_uipc);
+	
+	return rv;
+}
+
 void clear_instruction(int num) {
 	// Takes an instruction and restores it to defaults.
 	
@@ -4998,6 +5807,10 @@ void clear_instruction_safe(int num) {
 	CmtReleaseLock(lock_uipc);
 }
 
+void clear_fr_instr(int num, int lr) {
+	 set_fr_instr_panel((lr)?pc.linst[num]:pc.finst[num], null_pinstr()); // Really quite simple now.
+}
+
 void change_number_of_instructions() {
 	// Gets "num" from pc.ninst and changes the number of instructions. If num < uipc.ni, t
 	// the instructions at the end are hidden. if uipc.max_ni > num > uipc > uipc.ni, the 
@@ -5009,7 +5822,7 @@ void change_number_of_instructions() {
 	
 	if(num == uipc.ni)
 		return;			// No change needed
-	
+																   
 	if(num<uipc.ni) {						// In this case, we just hide the panels
 		for(i = num; i<uipc.max_ni; i++) {
 			HidePanel(pc.inst[i]);
@@ -5091,6 +5904,92 @@ void change_number_of_instructions_safe() {
 	CmtReleaseLock(lock_uipc);
 }
 
+void change_fr_num_instrs(int num, int lr) {
+	// Change the number of instructions in the "first run" instructions.
+	int i;
+	
+	if(num < 1) {
+		num = 1;	
+	}
+	
+	int ni, max_ni, parent;
+	int *pni, *pmni, *inst;
+	if(lr) {					
+		pni = &(uipc.lr_ni);
+		pmni = &(uipc.lr_max_ni);
+		inst = pc.linst;
+		
+		parent = pc.LRCPan;
+	} else {
+		pni = &(uipc.fr_ni);
+		pmni = &(uipc.fr_max_ni);
+		inst = pc.finst;
+		
+		parent = pc.FRCPan;
+	}
+	
+	ni = *pni;
+	max_ni = *pmni;
+	
+	if(num == ni) {
+		return;
+	}
+	
+	if(num < ni) {
+		for(i = num; i < max_ni; i++) {
+			HidePanel(inst[i]);
+		}
+		
+		*pni = num;
+		return;
+	}
+
+	if(num > max_ni) {
+		int left, height;
+		GetPanelAttribute(inst[0], ATTR_HEIGHT, &height);
+		GetPanelAttribute(inst[0], ATTR_LEFT, &left);
+		
+		if(lr) {
+			pc.linst = realloc(pc.linst, sizeof(int)*(num+5));
+			inst = pc.linst;
+		} else {
+			pc.finst = realloc(pc.finst, sizeof(int)*num);
+			inst = pc.finst;
+		}
+		
+		double del;
+		
+		for(i = max_ni; i < num; i++) {
+			inst[i] = LoadPanel(parent, MC_UI, pc.fr_inst);
+			
+			SetPanelPos(inst[i], MC_FR_INST_OFF+(height+MC_FR_INST_SEP)*i, left);
+			SetCtrlAttribute(inst[i], ATTR_DISABLE_PANEL_THEME, 1);
+			
+			GetCtrlVal(inst[i], pc.fr_delay, &del);
+			SetCtrlAttribute(inst[i], pc.fr_delay, ATTR_PRECISION, get_precision(del, MCUI_DEL_PREC));
+			
+			SetCtrlVal(inst[i], pc.fr_inum, i);
+			
+			DisplayPanel(inst[i]);
+		}
+		
+		*pmni = num;
+		setup_broken_ttls();
+	}
+	
+	for(i = ni; i < num; i++) {
+		DisplayPanel(inst[i]);	
+	}
+	
+	*pni = num;
+}
+
+void change_fr_num_instrs_safe(int num, int lr) {
+	CmtGetLock(lock_uipc);
+	change_fr_num_instrs(num, lr);
+	CmtReleaseLock(lock_uipc);
+}
+
 void delete_instruction(int num) {
 	// Deletes an instruction by clearing the value, moving it to the end and
 	// reducing the number of instructions available.
@@ -5108,6 +6007,37 @@ void delete_instruction(int num) {
 void delete_instruction_safe(int num) {
 	CmtGetLock(lock_uipc);
 	delete_instruction(num);
+	CmtReleaseLock(lock_uipc);
+}
+
+void delete_fr_instr(int num, int lr) {
+	clear_fr_instr(num, lr);
+	
+	int ni, max_ni, panel;
+	
+	if(lr) {
+		ni = uipc.lr_ni;
+		max_ni = uipc.lr_max_ni;
+		panel = pc.LRCPan;
+	} else {
+		ni = uipc.fr_ni;
+		max_ni = uipc.fr_max_ni;
+		panel = pc.FRCPan;
+	}
+	
+	if(ni == 1) {
+		return;
+	}
+		
+	move_fr_inst(max_ni-1, num, lr);
+	
+	SetCtrlVal(panel, pc.fninst, ni-1);
+	change_fr_num_instrs(ni-1, lr);
+}
+
+void delete_fr_instr_safe(int num, int lr) {
+	CmtGetLock(lock_uipc);
+	delete_fr_instr(num, lr);
 	CmtReleaseLock(lock_uipc);
 }
 
@@ -5967,7 +6897,7 @@ constants *setup_constants_safe() {
 }
 
 void update_constants(constants *c, int *cstep) { // Updates the constants for a given position in acq. space
-	// cstep must be a position in acqusition space of size uipc.nd+uipc.nc
+	// cstep must be a position in acqusition space of size uipc.nd+uipc.nc+1
 	char *current_var = malloc(5);
 	int i;
 	
@@ -6001,8 +6931,17 @@ void create_pprogram(PPROGRAM *p) { // Initially allocates the PPROGRAM space
 
 	if(p->varied) {
 		p->maxsteps = malloc(sizeof(int)*(p->nDims+p->nCycles)); 				// Allocate the maximum position point
+		
+		p->steps_size = get_steps_array_size(p->tmode, p->nCycles, p->nDims);
+		
+		if(p->steps_size > 0) {
+			p->steps = malloc(p->steps_size*sizeof(unsigned int));
+		} else {
+			p->steps = NULL;	
+		}
 	} else {
 		p->maxsteps = NULL;
+		p->steps = NULL;
 	}
 	
 	if(p->nVaried) {
@@ -6049,6 +6988,18 @@ void create_pprogram(PPROGRAM *p) { // Initially allocates the PPROGRAM space
 		memset(p->ao_dim, -1, sizeof(int)*p->nAout);
 	}
 	
+	if(p->frnInstrs > 0) {
+		p->frins = calloc(p->frnInstrs, sizeof(PINSTR));	
+	} else {
+		p->frins = NULL;	
+	}
+	
+	if(p->lrnInstrs > 0) {
+		p->lrins = calloc(p->lrnInstrs, sizeof(PINSTR));
+	} else {
+		p->lrins = NULL;	
+	}
+	
 	if(p->nFuncs)
 		p->func_locs = malloc(sizeof(int)*p->nFuncs);			// Allocate the array of function indexes
 
@@ -6083,6 +7034,9 @@ void free_pprog(PPROGRAM *p) {
 			free(p->skip_expr);
 		}
 	}
+	
+	if(p->steps != NULL) { free(p->steps); }
+	
 	// Free all the dynamically allocated pointers in these arrays of pointers
 	for(int i = 0; i<p->nFuncs; i++)			// The condition will never be met if nFuncs == 0 
 		free(p->funcs[i]);
@@ -6178,15 +7132,18 @@ PINSTR *copy_pinstr(PINSTR *instr_in, PINSTR *instr_out) {
 	return instr_out;
 }
 
-PINSTR *generate_instructions(PPROGRAM *p, int *cstep, int *n_inst) {
+PINSTR *generate_instructions(PPROGRAM *p, int cind, int *n_inst) {
 	// Generates the list of instructions that you want for the given cstep.
 	// Return value is a list of instructions. Outputs the new number of instructions
 	// to n_inst, which need not be set to the right initial value. The return value
 	// is dynamically allocated, and must be freed.
-	
+
+	*n_inst = -1;
 	if(p == NULL) { return NULL; }
 	
-	int lindex = get_lindex(cstep, p->maxsteps, p->nCycles+p->nDims);
+	int lindex = get_var_ind(p, cind);
+	if(lindex < 0) { return NULL; }
+	
 	int ni = p->n_inst;
 	
 	PINSTR *ilist = malloc(sizeof(PINSTR)*ni), *inst;
@@ -6212,9 +7169,11 @@ PINSTR *generate_instructions(PPROGRAM *p, int *cstep, int *n_inst) {
 		// Conditions for removal.
 		if((ilist[i].instr_time < 100.0) || ilist[i].instr_data < instr_data_min(ilist[i].instr)) {
 			if(ilist[i].instr == LOOP) {
-				num = find_end_loop_instrs(i, ilist, ni);
-				if(num <= i)
+				num = find_end_loop_instrs(i, ilist+i+1, ni-i-1);
+				if(num < 0)
 					goto error;
+				
+				num += i+1;
 				
 				removed = (num-i)+1;
 			} else {
@@ -6247,6 +7206,231 @@ PINSTR *generate_instructions(PPROGRAM *p, int *cstep, int *n_inst) {
 	return NULL;
 }
 
+int get_transient(PPROGRAM *p, int cind) {
+	if(p == NULL) { return MCPP_ERR_NOPROG; }
+	
+	int ct = cind;
+	
+	if(p->varied) {
+		int *cs = malloc(p->steps_size*sizeof(int));
+	
+		get_cstep(cind, cs, p->steps, p->steps_size);
+		
+		ct = get_transient_from_step(p, cs);
+		
+		free(cs);
+	}
+	
+	return ct;
+}
+
+int get_transient_from_step(PPROGRAM *p, int *step) {
+	// Get the current transient from a step variable.
+	// This is the kind of variable you'd get from get_cstep
+	// on the p->steps array.
+	
+	if(p == NULL) { return MCPP_ERR_NOPROG; }
+	if(step == NULL) { return MCPP_ERR_NOARRAY; }
+	
+	int ct;
+
+	if(!p->varied || p->tmode == MC_TMODE_TF) {
+		ct = step[0];
+	} else {	// This is also the starting point for MC_TMODE_PC
+		ct = step[p->steps_size-1];
+	}
+	
+	if(p->tmode == MC_TMODE_PC) {
+		for(int i = 0; i < p->nCycles; i++) {
+			ct *= step[i];
+		}
+	}
+	
+	return ct;
+}
+
+int get_dim_step(PPROGRAM *p, int cind, int *dim_step) {
+	// Get dimension-only step information from the PPROGRAM
+	
+	if(p == NULL) { return MCPP_ERR_NOPROG; }
+	
+	int *cs = malloc(p->steps_size*sizeof(int));
+	int *ds = dim_step;
+	
+	get_cstep(cind, cs, p->steps, p->steps_size);
+
+	if(p->tmode == MC_TMODE_ID) {
+		memcpy(ds, cs, p->nDims * sizeof(int));
+	} else if (p->tmode == MC_TMODE_TF) {
+		memcpy(ds, cs + 1, p->nDims * sizeof(int));
+	} else if (p->tmode == MC_TMODE_PC) {
+		memcpy(ds, cs + p->nCycles, p->nDims * sizeof(int));
+	} else {
+		free(cs);
+		return MCPP_ERR_INVALIDTMODE;
+	}
+	
+	free(cs);
+	return 0;
+}
+
+int get_cyc_step(PPROGRAM *p, int cind, int *cyc_step) {
+	// Get the the cycle-only step information from the PPROGRAM.
+	
+	if(p == NULL) { return MCPP_ERR_NOPROG; }
+	if(p->nCycles <= 0) { return 1; }
+	
+	if(cyc_step == NULL) { return MCPP_ERR_NOARRAY; }
+	
+	int *cs = malloc(p->steps_size*sizeof(int));
+	int *ds = cyc_step;
+	
+	get_cstep(cind, cs, p->steps, p->steps_size);
+	int ct;
+	
+	if(p->tmode == MC_TMODE_ID) {
+		ct = cs[p->steps_size - 1];
+	} else if (p->tmode == MC_TMODE_TF) {
+		ct = cs[0];
+	} else if (p->tmode == MC_TMODE_PC) {
+		cs[p->nCycles] = cs[p->steps_size-1];
+		int *as = malloc((p->nCycles+1)*sizeof(int));
+		memcpy(as, p->steps, (p->nCycles)*sizeof(int));
+		
+		as[p->steps_size] = p->nt;
+		ct = get_lindex(cs, as, p->nCycles+1);
+		free(as);
+		
+		memcpy(ds, cs, (p->nCycles+1)*sizeof(int));
+	} else {
+		free(cs);
+		return MCPP_ERR_INVALIDTMODE;
+	}
+	
+	free(cs);
+	return 0;	
+}
+
+int get_var_ind(PPROGRAM *p, int cind) {
+	// Get the linear index from the cstep index (excludes transients)
+	
+	int rv = -1;
+	int *cs = malloc((p->nCycles+p->nDims)*sizeof(int));
+	
+	if(p->varied) {
+		if(p->nCycles) {
+			if(rv = get_cyc_step(p, cind, cs)) { goto error; }	
+		}
+		if(p->nDims) {
+			if(rv = get_dim_step(p, cind, cs + p->nCycles)) { goto error; } 
+		}
+	
+		rv = get_lindex(cs, p->maxsteps, p->nDims+p->nCycles);
+	} else {
+		rv = cind;	
+	}
+	
+	error:
+	
+	free(cs);
+	return rv;
+}
+									
+int convert_lindex(PPROGRAM *p, int index, int old_mode, int new_mode) {
+	// Convert the linear index as stored in the PPROGRAM to a
+	// linear index from a new mode.
+	if(p == NULL) { return MCPP_ERR_NOPROG; }
+
+	int mode = p->tmode;
+	int rv = 0;
+	int *maxstep = NULL, *step = NULL;
+	
+	// Need this part for later indexing.
+	int tdiv = 1, nt = p->nt;
+	if(new_mode != old_mode && new_mode == MC_TMODE_PC || old_mode == MC_TMODE_PC) {
+		if(p->nCycles) {
+			for(int i = 0; i < p->nCycles; i++) {
+				tdiv *= p->maxsteps[i]; 		
+			}
+			
+			nt /= tdiv;
+			if(nt < 1) {
+				return MCPP_ERR_INVALIDTMODE;
+			} else if(nt == 1 && new_mode == MC_TMODE_PC) {
+				new_mode = MC_TMODE_TF;
+			}
+		} else {
+			new_mode = MC_TMODE_ID;
+		}
+	}
+	
+	// Check if conversion needs to be done. No need
+	// to convert the first index or if the modes are the
+	// same. Additionally, all modes operate the same way
+	// when there are no indirect dimensions.
+	//
+	// MC_TMODE_PC is equivalent to MC_TMODE_ID when there
+	// are no phase cycles.
+	if(index == 0 || old_mode == new_mode || p->nDims < 1) {
+		return index;
+	}
+	
+	p->tmode = old_mode;
+	
+	int step_size = p->nDims + ((new_mode == MC_TMODE_PC)?p->nCycles:1);
+	maxstep = malloc(sizeof(unsigned int)*step_size);
+	step = malloc(sizeof(unsigned int)*step_size);
+	
+	int *dim_step = NULL;
+	int t = get_transient(p, index);
+	if(t < 0) {
+		rv = t;
+		goto error;
+	}
+	
+	switch(new_mode) {
+		case MC_TMODE_TF:
+			step[0] = t;
+			dim_step = step+1;
+			
+			maxstep[0] = nt;
+			memcpy(maxstep+1, p->maxsteps+p->nCycles, sizeof(unsigned int)*p->nDims);
+			break;
+		case MC_TMODE_ID:
+			step[p->nDims] = t;
+			dim_step = step;
+			
+			maxstep[p->nDims] = nt;
+			memcpy(maxstep, p->maxsteps+p->nCycles, sizeof(unsigned int)*p->nDims);
+			break;
+		case MC_TMODE_PC:
+			step[p->nCycles+p->nDims] = t;
+			dim_step = step+p->nCycles;
+			if(rv = get_cyc_step(p, index, step)) { goto error; }
+			
+			maxstep[p->nCycles+p->nDims] = nt;
+			memcpy(maxstep, p->maxsteps, sizeof(unsigned int)*(p->nDims+p->nCycles));
+			
+			break;
+		default:
+			rv = MCPP_ERR_INVALIDTMODE;
+			goto error;
+	}
+	
+	if(rv = get_dim_step(p, index, dim_step)) { goto error; }
+	
+	rv = get_lindex(step, maxstep, step_size);
+	
+	error:
+	if(step != NULL) { free(step); }
+	if(maxstep != NULL) { free(maxstep); }
+	
+	p->tmode = mode;
+	
+	return rv;
+}
+
+
 
 //////////////////////////////////////////////////////////////
 // 															//
@@ -6255,8 +7439,7 @@ PINSTR *generate_instructions(PPROGRAM *p, int *cstep, int *n_inst) {
 //////////////////////////////////////////////////////////////
 
 /*********************** Linear Indexing ***********************/ 
-
-int get_maxsteps(int *maxsteps) {
+ int get_maxsteps(int *maxsteps) {
 	// Retrieves the maxsteps array as well as max_n_steps. Return value 
 	// is max_n_steps. maxsteps has size uipc.nc+uipc.nd;
 	int i, max_n_steps = 1;
@@ -6281,60 +7464,125 @@ int get_maxsteps_safe(int *maxsteps) {
 	return rv;
 }
 
-int get_lindex(int *cstep, int *maxsteps, int size)
-{
-	// Give this a position in space maxsteps, which is an array of size "size"
-	// It returns the linear index of cstep
-	// We'll assume you can figure out whether or not this is the end of the array
-	
-	if(cstep == NULL)
-		return -3;			// Not varied.
-	
-	if(size == 0)
-		return -2;			// Size of array is 0.
-	
-	int lindex = cstep[0];	// Start with the least signficant bit.
-	int place = 1;
-	for(int i=1; i<size; i++) {
-		place*=maxsteps[i-1];		// This is the "place" place. In decimal, you have [10 10 10] = 1s, 10s, 100s.
-		lindex+=cstep[i]*place;		// The same thing goes here. [3 4 2] = 1s place, 3s places, 12s place.
-	}
-	
-	return lindex;
-}
-
-int get_cstep(int lindex, int *cstep, int *maxsteps, int size) {
-	// Give this a linear index value and it will return an array of size "size"
-	// containing the place in sampling space maxsteps that the lienar index points to
-	// cstep must already be allocated.
-	if(size-- == 0)
-		return -2; 				// Size cannot be 0.
-	
-	int i, place = 1;
-	for(i = 0; i<size; i++)
-		place*=maxsteps[i];		
-	
-	if(place == 0 || lindex < 0)
-		return -2; 				// Size is 0 or other issue
-
-	if(lindex == maxsteps[size]*place)
-		return -1;				// End of array condition met
-	
-	int remainder = lindex, step;
-	for(i=size; i>= 0; --i) {		// Start at the end and work backwards
-		step = remainder;	// Initialize step to whatever's left. When we first get started, it's everything
-		step /= place;		// Divide by the place. This number is by definition bigger than the product 
-		cstep[i] = step;	// of all the numbers before it, so rounding down gets the most signficant digit
-
-		remainder -= place*step;	// Get the remainder for the next iteration
-		if(i>0)
-			place /= maxsteps[i-1];	// Update the place
-	}
-	
-	return 1;	// Successful.
-}
 
 /********************** Loop Manipulation **********************/ 
+double calc_prog_time(PPROGRAM *p, int cind, int *ev) {
+	// Calculates how long the program will take to execute, starting from
+	// position "cind". Doesn't include first and last runs.
+	double t = 0.0;
+	int i;
+	int rv = 0;
+	
+	// In this situation it's straightforward to calculate.
+	if(!p->nVaried) {
+		int n = p->real_n_steps*p->nt;
+		n -= cind;
+		
+		t = n*calc_list_time(*(p->instrs), 0, p->n_inst, &rv);
+	} else {
+		// Rather than prematurely optimize, we'll just step through every point in the 
+		// program and add that shit up. If it turns out to be slow, there are many 
+		// ways to fix this, like not repeating calculations for every transient, figuring
+		// out the "static" portions of each list, etc.
+		
+		int n_inst = 0;
+		PINSTR *ilist = NULL;
+		
+		for(cind; cind < p->max_n_steps*p->nt; cind++) {
+			if(p->skip && p->skip_locs[cind]) {
+				continue;		
+			}
+			
+			ilist = generate_instructions(p, cind, &n_inst);
+			t += calc_list_time(ilist, 0, n_inst, &rv);
+			free(ilist);
+			
+			if(rv < 0) {
+				break;	
+			}
+		}
+	}	 
+	
+	if(ev != NULL) { *ev = rv; }
+	return t;
+}
+
+double calc_list_time(PINSTR *ilist, int istart, int n_items, int *ev) {
+	// Calculate how long it takes to execute a given span in an ilist.
+	// Supports LOOPS, but branches and subroutines are treated as "CONTINUE"
+	//
+	// istart is the instruction number of the first instruction in the ilist.
+	//
+	// Calls itself recursively.
+	
+	int rv = 0;
+	
+	if(ilist == NULL) {
+		rv = MCPP_ERR_NOPROG;
+		return 0.0;
+	}
+	
+	if(n_items == 0) { return 0; }
+	
+	int end = n_items-1;
+	
+	// Need to know if it is a loop (the whole thing)
+	int is_loop = 0;
+	int start_span = 0;
+	double t = 0.0;  // Time in seconds.
+	
+	if((ilist[0].instr == LOOP && ilist[end].instr == END_LOOP && 
+		ilist[end].instr_data == istart)) {
+		
+		if(ilist[0].instr_data == 0) { return 0.0; }
+		
+		start_span = 1;	
+		t = ilist[0].instr_time/1e9; // Convert to seconds.
+	}
+	
+	
+	int span_start = is_loop?1:0;
+	int l_end = 0;
+	PINSTR *il = NULL;
+	int is = 0;
+	
+	for(int i = span_start; i < n_items; i++) {
+		switch(ilist[i].instr) {
+			case LONG_DELAY:
+				t += ilist[i].instr_time*ilist[i].instr_data/1e9;
+				break;
+			case STOP:
+				rv = 1;
+				break;
+			case LOOP:
+				il = ilist+i;
+				is = i+istart;
+				
+				l_end = find_end_loop_instrs(is, il+1, n_items-i-1);
+				t += calc_list_time(il, is, l_end+1, &rv); 
+				break; 
+			default:
+				t += ilist[i].instr_time/1e9;
+		}
+		
+		if(rv != 0) { break; }
+	}						  
+	
+	
+	if(is_loop) {
+		if(rv == 1) {
+			// This is an error
+			rv = MCPP_ERR_BADLOOP;
+		} else {
+			t *= ilist[0].instr_data;	
+		}
+	}
+
+	if(ev != NULL) { *ev = rv; }
+	return t;
+	
+		
+}
 
 int find_end_loop (int instr) {
 	// Feed this an instruction which is a loop, it finds the corresponding END_LOOP instruction.
@@ -6367,18 +7615,17 @@ int find_end_loop (int instr) {
 }
 
 int find_end_loop_instrs(int instr, PINSTR *instrs, int n_instrs) {
-	// Same as find_end_loop, but it works from a list of PINSTRs
-	// rather than from the UI controls. Returns negative on failure.
+	// Find the end of the loop that started at "instr" in the list instrs.
+	// The best thing to do is pass  a lost of instrs starting with the first one
+	// after the loop.
 	
-	if(instr >= n_instrs)
-		return -1;
-	
-	for(int i = instr+1; i < n_instrs; i++) {
-		if(instrs[i].instr == END_LOOP && instrs[i].instr_data == instr)
-			return i;
+	for(int i = 0; i < n_instrs; i++) { 
+		if(instrs[i].instr == END_LOOP && instrs[i].instr_data == instr) {
+			return i;		
+		}
 	}
 	
-	return -2;
+	return -1;
 }
 
 int in_loop(int instr, int big) {
@@ -6390,7 +7637,6 @@ int in_loop(int instr, int big) {
 	// If big = 0, find the smallest loop that our instruction is in.
 	
 	int end_instr;
-	
 	
 	// Find all the loops, find their corresponding END_LOOPs, and if this is within that, then yeah, it's a loop.
 	if (big) {
@@ -6443,68 +7689,6 @@ void change_control_mode (int panel, int *ctrls, int num, int mode) {
 
 /********************* Array Manipulation **********************/
 
-void remove_array_item(int *array, int index, int num_items) {
-	// Removes the item at index from *array, an array of size num_items
-	// This does not re-allocate space for the array, so if the item you
-	// are removing is the last one, it doesn't do anything, otherwise
-	// it moves everything over one.
-	
-	for(int i=index; i<num_items-1; i++)
-		array[i] = array[i+1];
-	
-}
-
-void remove_array_item_void(void *array, int index, int num_items, int type) {
-	// Same as remove_array_item, but for any type.
-	// Pass 0 for double
-	// Pass 1 for char
-	// Pass 2 for int*
-	// Pass 3 for double*
-	
-	if(type == 0) {
-		double *ar = (double*)array;
-	 	for(int i=index; i<num_items-1; i++)
-			ar[i] = ar[i+1];
-	} else if(type == 1) {
-		char *ar = (char*)array;
-		for(int i=index; i<num_items-1; i++)
-			ar[i] = ar[i+1];
-	} else if(type == 2) {
-		int **ar = (int**)array;
-		for(int i=index; i<num_items-1; i++)
-			ar[i] = ar[i+1];
-	} else if(type == 3) {
-		double **ar = (double**)array;
-		for(int i=index; i<num_items-1; i++)
-			ar[i] = ar[i+1];
-	}
-
-}
-
-int constant_array_double(double *array, int size) {
-	// Give this an array of doubles and the size of the array
-	// and it checks to see if the array is the same everywhere.
-	
-	for(int i=1; i<size; i++) {
-		if(array[i] != array[0])	// If it's not the same as the first one
-			return 0;				// it's not the same everywhere.
-	}
-
-	return 1;
-}
-
-int constant_array_int(int *array, int size) {
-	// Give this an array of ints and the size of the array
-	// and it checks to see if the array is the same everywhere.
-	
-	for(int i=1; i<size; i++) {
-		if(array[i] != array[0])	// If it's not the same as the first one
-			return 0;				// it's not the same everywhere.
-	}
-
-	return 1;
-}
-
 int constant_array_pinstr(PINSTR **array, int size) {
 	// Give this an array of PINSTRs and the size of the array
 	// and it checks to see if the array is the same everywhere.
@@ -6517,301 +7701,158 @@ int constant_array_pinstr(PINSTR **array, int size) {
 	return 1;
 }
 
-int get_index(int *array, int val, int size) {
-	// Returns the index where "val" occurs in array. If it's not there, 
-	// return -1. Size should be the number of elements in the array.
-	
-	int i;
-	
-	for(i = 0; i < size; i++) {
-		if(array[i] == val)
-			break;
-	}
-	
-	if(i >= size)
-		return -1;
-	else
-		return i;
-}
-
-int realloc_if_needed(char *array, int len, int new_len, int inc) {
-	// Reallocates "array" in chunks of size "inc" such that it is
-	// greater than or equal to new_len. Return value is the new
-	// length of the array. No change if new_len < len;
-	
-	if(new_len <= len)
-		return len;
-	
-	len += ((int)((new_len-len)/inc)+1)*inc;
-	array = realloc(array, len);
-	return len;
-}
-
-/*************************** Sorting ***************************/ 
-
-void sort_linked(int **array, int num_arrays, int size) {
-	// Feed this an array of arrays of ints and it sorts by the first array.
-	// Uses insertion sort, which is efficient for small data sets.
-	// Sorts so that the first element is the smallest.
-	// Pass an array of size size*sizeof(int) to *index if you'd like the index
-	// from the sort, otherwise pass NULL.
-
-	int i, j, k;
-	
-	int *buff = malloc(sizeof(int)*num_arrays); 	// Buffer array for the integers we're moving around.
-	
-	// The insertion sort.
-	for(i=0; i<size; i++) {
-		for(j=0; j<num_arrays; j++)					// Move the element into the buffer
-			buff[j] = array[j][i];
-		
-		for(j=i; j>0; j--) {
-			if(buff[0] >= array[0][j-1])
-				break;
-			else {
-				for(k=0; k<num_arrays; k++) 
-					array[k][j] = array[k][j-1];	// Everything moves over one
-			}
-		}
-		
-		// Put the element into the array now that it's in its proper spot
-		for(k=0; k<num_arrays; k++) {
-			array[k][j] = buff[k];
-		}
-	}
-}
-
-/********************* String Manipulation *********************/
-
-char **generate_char_num_array(int first, int last, int *elems) {
-	// Generates an array of strings that are just numbers, starting with
-	// first, ending with last.
-	// *c needs to be freed. *elems is the number of items in
-	// the list - make sure to iterate through c and free all the elements
-	
-	// Some people don't understand that the last thing comes AFTER the
-	// first thing, fix it if that's a problem.
-	if(first > last) {
-		int buff = first;
-		first = last;
-		last = buff;
-	}
-	
-	// Need the length of the longest entry.
-	int maxlen;
-	if(last == 0 && last == first)			// log10(0) is undefined.
-		maxlen = 2;		
-	else if(last <= 0)
-		maxlen=(int)log10(abs(first))+2; 	// Need to allocate space for the sign
-	else									// and the null termination
-		maxlen=(int)log10(abs(last))+1;
-	
-	int elements = last-first+1;
-	char **c = malloc(sizeof(char*)*elements);
-	for(int i=0; i<elements; i++) {
-		c[i] = malloc(maxlen+1);
-		sprintf(c[i], "%d", first+i);
-	}
-	
-	if(elems != NULL)
-		elems[0] = elements;
-	
-	return c;
-}
-
-char *generate_expression_error_message(char *err_message, int *pos, int size) { 
-	// Pass this an error message and a cstep and it makes a nice little message
-	// that displays the position of the error and the reason for it.
-	// The output of this is dynamically allocated, so you need to free it.
-	
-	// Error checking
-	if(err_message == NULL)
-		return NULL;
-	
-	// Need to do some stuff to allocate the size of the message
-	int max_num = 0;
-	for(int i=0; i<size; i++) {
-		if(pos[i] > max_num)
-			max_num = pos[i];
-	}
-	
-	int num_char_len = ((int)log10(max_num)+1)*size;	// Characters to allocate per number.
-	int commas = 2*(size-1);				// How many commas to generate.
-	char *text;
-	
-	if(size == 1)
-		text = "\n\nGenerated at step ";
-	else 
-		text = "\n\nGenerated at point [";
-	
-	int total_len = num_char_len+commas+strlen(text)+strlen(err_message)+2;	// One for the null, one for either ] or .
-	
-	// Build the full output string.
-	char *output = malloc(total_len);
-	sprintf(output, "%s%s%d", err_message, text, pos[0]);
-	
-	for(int i=1; i<size; i++)
-		sprintf(output, "%s%s%d", output, ", ", pos[i]);
-	
-	if(size == 1)
-		strcat(output, "]");
-	else
-		strcat(output, ".");
-	
-	return output;
-	
-}
-
-/**************************** Math *****************************/
-int calculate_units(double val) {
-	// Returns the correct units.
-	if(val == 0)
-		return 0;
-	
-	int a = (int)((log10(fabs(val)))/3);
-	if(a < 0)
-		return 0;
-	if(a > 3)
-		return 3;
-	else
-		return a;
-}
-
-int get_precision (double val, int total_num) {
-	// Feed this a value, then tell you how many numbers you want to display total.
-	// This will give you the number of numbers to pad out after the decimal place.
-	// If the number to be displayed has more digits after the decimal point than 
-	// total_num, it returns 0.
-
-	if(--total_num <= 1)  	// Always need one thing before the decimal place.
-		return 0;
-	
-	if(val == 0)
-		return total_num;
-
-	int a = log10(fabs(val)); // The number of digits is the base-10 log, plus 1 - since we subtracted off the 1 from total_num, we're good..
-	
-	if(a >= total_num) // If we're already at capacity, we need nothing after the 0.
-		return 0;
-	
-	return total_num-a; // Subtract off the number being used by the value, that's your answer.
-}
-
-int get_bits(int in, int start, int end) {
-	// Get the bits in the span from start to end in integer in. Zero-based index.
-	
-	if(start > end || start < 0)
-		return -1;
-	
-	if(end > 31)
-		return -2; // Maxint
-	
-	return get_bits_in_place(in, start, end)>>start;
-}
-
-int get_bits_in_place(int in, int start, int end) {
-	// Gets the bits you want and preserves them in place.
-	if(start > end || start < 0)
-		return -1;
-	
-	if(end > 31)
-		return -2; // Maxint
-
-	return (in & (1<<end+1)-(1<<start));
-}
-
-int move_bit_skip(int in, int skip, int to, int from) {
-	// Same as move_bit, but this also skips anything high in "flags"
-	if(((1<<to)|(1<<from)) & skip)
-		return -1; // Error.
-	
-	int bits = move_bit(in, to, from); // Start off by not skipping anything.
-	int i, toh = to>from, inc = toh?-1:1;
-
-	// Now we go through bit by bit and swap each broken bit into its original
-	// place. If to>from, that involves swapping with the bit 1 size bigger, 
-	// if from > to, you swap with the bit 1 size smaller.
-	for(i = to; toh?(i > from):(i < from); i+=inc) {
-		if((1<<i) & skip)
-			bits = move_bit(bits, i, i+inc); // Swap with the appropriate adjacent bit.
-	}
-
-	return bits;
-}
-
-int move_bit(int in, int to, int from) {
-	// Move a bit from one place to another, shifting everything as you go
-	// Two examples: 1101101, from 1->end or from end->1 (big-endian)
-	
-	if(to == from)
-		return in;
-	
-	int toh = to > from;
-	int high = toh?to:from, low = toh?from:to;
-	
-	// Start by getting only the stuff we care about.
-	int bits = get_bits_in_place(in, low, high); // 1101101 -> 110110
-	int mask = in - bits;
-	bits = bits >> low;
-	
-	// Put the "from" flag into a buffer
-	int from_flag = bits & 1<<(from-low); // 1->end: 0, end->1: 100000  
-	
-	// Subtract off the "from" flag
-	bits -= from_flag; // 1e: 110110, e1: 010110
-	
-	// If the from flag is high, we need to multiply by 2, otherwise subtract
-	bits = (toh ? bits/2 : bits*2); // 1e: 011011, e1: 101100
-	
-	// Now we transform from_flag to be a flag in the right spot.
-	from_flag = toh?from_flag<<(to-from):from_flag>>(from-to); // 1e: 0->0, e1: 100000 -> 1
-	
-	// Finally we add it back in.
-	bits += from_flag; 	// 1e: 011011->011011, e1: 101100->101101
-	
-	// Then we need to put it back in place.
-	bits = bits << low;  // 1e: 0110110, e1: 1011010
-	bits = mask|bits; // 1e: 0110111, e1: 1011011
-	
-	return bits; // Final results: 1101101 -> 1e: 0110111, e1: 1011011
-}
-
 //////////////////////////////////////////////////////////////
 // 															//
-//						Vestigial							//
+//					Thread Safe Functions					//
 // 															//
 //////////////////////////////////////////////////////////////
 
-int get_vdim(int panel, int varyctrl, int dimctrl) {
-	// Get the dimension along which this instruction varies.
-	// If panel is an MDInstr, varyctrl should be pc.vary and dimctrl should be pc.dim
-	// If panel is a PulseInstP, varyctrl should be pc.pcon and dimctrl should be pc.pclevel
-	int dim, nl, von;
+/******************** Safe PulseBlaster Functions *********************/ 
+int pb_initialize(int verbose) {
+	int rv = pb_init();
 
-	GetCtrlVal(panel, varyctrl, &von); 	// Determine if it's even on.
-	if(!von)
-		return 0;						// Dimension = 0 means it's not on.
+	if(rv < 0 && verbose)
+		MessagePopup("Error Initializing PulseBlaster", pb_get_error());
 	
-	GetNumListItems(panel, dimctrl, &nl);
-	if(nl <= 0)
-		return -1; 						// Something's wrong.
+	pb_set_clock(100.0);	
 	
-	GetCtrlVal(panel, dimctrl, &dim);	// Everything's good
-	return dim;
+	if(rv >= 0)
+		SetInitialized(1);
+
+	return rv;
 }
 
-int get_vsteps(int panel, int varyctrl, int nsteps) {
-	// Get the number of steps across which this instruction varies
-	// If panel is an MDInstr, varyctrl should be pc.vary and nsteps should be pc.nsteps
-	// If panel is a PulseInstP, varyctrl should be pc.pcon and dimctrl should be pc.pcsteps
-	int steps, von;
+int pb_init_safe (int verbose)
+{
+	CmtGetLock(lock_pb);
+	int rv = pb_initialize(verbose);
+	CmtReleaseLock(lock_pb);
 
-	GetCtrlVal(panel, varyctrl, &von); 	// Determine if it's even on.
-	if(!von)
-		return 0;						// Dimension = 0 means it's not on.
-	
-	GetCtrlVal(panel, nsteps, &steps);	// Everything's good
-	return steps;
+	return rv;
 }
 
+int pb_start_programming_safe(int verbose, int device)
+{
+	CmtGetLock(lock_pb);
+	int rv = pb_start_programming(device);
+	CmtReleaseLock(lock_pb);
+	
+	if(rv != 0 && verbose)
+		MessagePopup("Error Starting PulseBlaster Programming", pb_get_error());
 
+	return rv;
+}
+
+int pb_stop_programming_safe(int verbose)
+{
+	int rv = pb_stop_programming();
+	CmtReleaseLock(lock_pb);
+	
+	if(rv <0 && verbose)
+		MessagePopup("Error", pb_get_error());
+
+	return rv;
+}
+
+int pb_inst_pbonly_safe (int verbose, unsigned int flags, int inst, int inst_data, double length)
+{
+	CmtGetLock(lock_pb);
+	int rv = pb_inst_pbonly(flags, inst, inst_data, length);
+	CmtReleaseLock(lock_pb);
+		
+	if(rv <0 && verbose)
+		MessagePopup("Error Programming PulseBlaster", pb_get_error());
+
+	return rv;
+}
+	
+
+int pb_close_safe (int verbose)
+{
+	CmtGetLock(lock_pb);
+	int rv = pb_close();
+	CmtReleaseLock(lock_pb);
+	if(rv < 0 && verbose)
+		MessagePopup("Error Closing PulseBlaster", pb_get_error());
+	
+	SetInitialized(0);
+		
+	return rv;
+}
+
+int pb_read_status_or_error(int verbose) {
+	int rv = 0;
+	if(!GetInitialized()) {
+		rv = pb_initialize(verbose);
+		if(rv < 0)
+			goto error;
+	}
+
+	rv = pb_read_status();
+	
+	error:
+	if((rv <= 0 || rv > 32) && verbose)
+	{
+		int i, length = (int)((log10(abs(rv))/log10(2))+1);
+		char *status = malloc(length+1);
+		
+		for(i = 0; i<length; i++)
+			if(rv & (int)pow(2, i))
+				status[length-i-1] = '1';
+			else
+				status[length-i-1] = '0';
+		status[length] = '\0';
+		
+		
+		char *err = pb_get_error();		// No need to free, not malloced.
+		char *err_str = malloc(strlen(err)+strlen(status)+strlen(", Status: \n")+2);
+		
+		sprintf(err_str, "%s, Status: %s\n", err, status);
+		MessagePopup("Read Pulseblaster Status Error", err_str);
+		
+		free(err_str);
+	}
+	
+	return rv;
+}
+
+int pb_read_status_safe(int verbose)
+{
+	CmtGetLock(lock_pb);
+	int rv = pb_read_status_or_error(verbose);
+	CmtReleaseLock(lock_pb);
+
+	return rv;
+}
+
+int pb_start_safe(int verbose)
+{
+	int rv = 0;
+
+	if(!GetInitialized()) {
+		rv = pb_init_safe(verbose);
+		if(rv < 0)  { return rv; }
+	}
+	
+	CmtGetLock(lock_pb);
+	rv = pb_start();
+	CmtReleaseLock(lock_pb);
+
+	if(rv < 0 && verbose)
+		MessagePopup("PulseBlaster Start Error", pb_get_error());
+
+	return rv;
+}
+
+int pb_stop_safe(int verbose)
+{
+	
+	CmtGetLock(lock_pb);
+	int rv = pb_stop();
+	CmtReleaseLock(lock_pb);
+	
+	if(rv < 0 && verbose)
+		MessagePopup("PulseBlaster Stop Error", pb_get_error());
+	
+	return rv;
+}

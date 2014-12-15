@@ -110,16 +110,19 @@ Descrip	: Since changing over to this new system, you've broken all the
 
 /******************************* Includes *********************************/
 
-#include <userint.h>					// Start with the standard libraries
 #include <cvirte.h>		
-#include <stdio.h>
 #include <stdlib.h>
+#include <ansi_c.h>
+#include <NIDAQmx.h>   
+
+#include <Version.h>
+
+#include <userint.h>					// Start with the standard libraries
+#include <stdio.h>
 #include <stdarg.h>
 #include <math.h>
 #include <windows.h>
 #include <analysis.h>
-#include <utility.h>
-#include <ansi_c.h>
 #include "pathctrl.h"
 #include "toolbox.h"
 #include "asynctmr.h"
@@ -127,23 +130,27 @@ Descrip	: Since changing over to this new system, you've broken all the
 #include <ctype.h>
 #include <string.h>
 
-#include <spinapi.h>					// Then the external libraries
-#include <NIDAQmx.h>
 
-#include <Magnetometer Controller.h>	// Then the libraries specific to
-#include <PulseProgramTypes.h>			// this software.
-#include <cvitdms.h>
-#include <cviddc.h>
-#include <UIControls.h>
-#include <MathParserLib.h>
-#include <MCUserDefinedFunctions.h>
 #include <MC10.h> 
+#include <MathParserLib.h>
+
 #include <DataLib.h>
 #include <PulseProgramLib.h>
 #include <SaveSessionLib.h>
-#include <General.h>
 
-static TaskHandle acquireSignal, counterTask;    
+#include <PPConversion.h>
+#include <UIControls.h>
+#include <FileSave.h>
+#include <MCUserDefinedFunctions.h> 
+#include <ErrorLib.h>
+#include <utility.h>
+
+#include <General.h>  
+#include <spinapi.h>					// Then the external libraries
+
+
+#include <Magnetometer Controller.h>	// Then the libraries specific to
+
 extern PVOID RtlSecureZeroMemory(PVOID ptr, SIZE_T cnt);
 
 // Multithreading variable declarations
@@ -153,10 +160,15 @@ DefineThreadSafeScalarVar(int, DoubleQuitIdle, 0);
 DefineThreadSafeScalarVar(int, Status, PB_STOPPED);
 DefineThreadSafeScalarVar(int, Running, 0);
 DefineThreadSafeScalarVar(int, Initialized, 0);
+DefineThreadSafeScalarVar(int, PhaseUpdating, 0);
 
 int lock_pb, lock_DAQ, lock_tdm; 		// Thread locks
 int lock_uidc, lock_uipc, lock_ce, lock_af;
-PPROGRAM *gp = NULL;
+
+int plot_update_thread = 0;
+
+
+PPROGRAM *gp = NULL;	// For testing.
 
 //////////////////////////////////////////////////////
 //                                                  //
@@ -170,17 +182,20 @@ int main (int argc, char *argv[])
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_pb);
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_DAQ);
 	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_tdm);
-	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_uidc);
-	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_uipc);
-	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_ce);
-	CmtNewLock(NULL, OPT_TL_PROCESS_EVENTS_WHILE_WAITING, &lock_af);
+	
+	CmtNewLock(NULL, 0, &lock_ce);
+	CmtNewLock(NULL, 0, &lock_af);
 
+	CmtNewLock(NULL, 0, &lock_uidc);
+	CmtNewLock(NULL, 0, &lock_uipc);
+	
 	InitializeQuitUpdateStatus();
 	InitializeQuitIdle();
 	InitializeDoubleQuitIdle();
 	InitializeStatus();
 	InitializeInitialized();
 	InitializeRunning();
+	InitializePhaseUpdating();
 	
 	SetQuitUpdateStatus(0);
 	SetQuitIdle(0);
@@ -188,6 +203,7 @@ int main (int argc, char *argv[])
 	SetStatus(PB_STOPPED);
 	SetRunning(0);
 	SetInitialized(0);
+	SetPhaseUpdating(0);
 	
 	if (InitCVIRTE (0, argv, 0) == 0)
 		return -1;	/* out of memory */
@@ -215,6 +231,7 @@ int main (int argc, char *argv[])
 	UninitializeQuitUpdateStatus();
 	UninitializeInitialized();
 	UninitializeRunning();
+	UninitializePhaseUpdating();
 
 	return 0;
 }
@@ -235,24 +252,32 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			// is waiting for a trigger, it sends a software trigger.
 			
 			// Send a software trigger if it's waiting for one.
-			int status = update_status_safe(0);
-			if(status & PB_WAITING) {
-				pb_start_safe(1);
-				break;
+			
+			if(uipc.uses_pb) {
+				int status = update_status_safe(0);
+				if(status & PB_WAITING) {
+					pb_start_safe(1);
+					break;
+				}
+			
+				// Don't do anything if we're running.
+				if(status & PB_RUNNING || GetRunning())  { break; }
 			}
 			
-			// Don't do anything if we're running.
-			if(status & PB_RUNNING || GetRunning())  { break; }
-			
 			// Get the filename and description.
-			int len, len2;
-			char *path = NULL, *fname = NULL, *desc = NULL;
+			int len, len2, ev = 0;
+			char *path = NULL, *fname = NULL, *bfname = NULL, *desc = NULL, *npath = NULL;
+			char *ext = MCD_EXTENSION;
 			
 			// Pathname first
 			GetCtrlValStringLength(mc.path[1], mc.path[0], &len);
 			GetCtrlValStringLength(mc.basefname[1], mc.basefname[0], &len2);
-			path = malloc(len+len2+11);
+			
+			path = malloc(len+1);
+			bfname = malloc(len2+1);
+			
 			GetCtrlVal(mc.path[1], mc.path[0], path);
+			GetCtrlVal(mc.basefname[1], mc.basefname[0], bfname);
 			
 			if(!FileExists(path, NULL)) {
 				MessagePopup("Directory Not Found", "The data storage directory was not found. Please create it and get back to me.");
@@ -260,27 +285,40 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			}
 		
 			// Now the current filename.
-			fname = malloc(len2+5);
-			GetCtrlVal(mc.basefname[1], mc.basefname[0], fname);
-			if(get_current_fname(path, fname, 1) != 1) { goto error; }
-			
-			SetCtrlVal(mc.cdfname[1], mc.cdfname[0], fname);
-			if(path[strlen(path)-1] != '\\') {
-				sprintf(path, "%s\\", path);
+			int fns = get_current_fname(NULL, bfname, 1, NULL);
+			if(fns < 0) {
+				goto error;
+			} else {
+				fname = malloc(fns);
+				strcpy(fname, bfname);
 			}
 			
-			sprintf(path, "%s%s.tdm", path, fname);	// Update the path with the full filename
+			if(get_current_fname(path, fname, 1, NULL) < 0) { goto error; }
+			
+			SetCtrlVal(mc.cdfname[1], mc.cdfname[0], fname);
+			
+			// Get the full path, put it in path.
+			npath = get_full_path(path, fname, NULL, &ev);
+			if(ev != 0) { goto error; }
+			
+			free(path);
+			path = npath;
+			npath = NULL;
 			
 			// Copy these into the current experiment structure
 			CmtGetLock(lock_ce);
 			if(ce.path != NULL) { free(ce.path); }
 			if(ce.fname != NULL) { free(ce.fname); }
+			if(ce.bfname != NULL) { free(ce.bfname); }
 			
 			ce.path = malloc(strlen(path)+1);
 			strcpy(ce.path, path);
 			
 			ce.fname = malloc(strlen(fname)+1);
 			strcpy(ce.fname, fname);
+			
+			ce.bfname = malloc(strlen(bfname)+1);
+			strcpy(ce.bfname, bfname);
 			
 			SetCtrlVal(mc.cdfname[1], mc.cdfname[0], ce.fname);  // Update the UI appropriately
 			
@@ -300,8 +338,10 @@ int CVICALLBACK StartProgram (int panel, int control, int event, void *callbackD
 			
 			error:
 			
+			if(npath != NULL) { free(npath); }
 			if(path != NULL) { free(path); }
 			if(fname != NULL) { free(fname); }
+			if(bfname != NULL) { free(bfname); }
 			if(desc != NULL) { free(desc); }
 			
 			break;
@@ -374,7 +414,7 @@ void CVICALLBACK SaveConfig (int menuBar, int menuItem, void *callbackData,
 {
 	int ev = save_session(NULL, 1);
 	
-	if(ev) { display_tdms_error(ev); }
+	if(ev) { display_ddc_error(ev); }
 	
 }
 
@@ -389,7 +429,7 @@ void CVICALLBACK SaveConfigToFile (int menuBar, int menuItem, void *callbackData
 	int ev = save_session(filename, 1);
 	free(filename);
 
-	if(ev) { display_tdms_error(ev); }
+	if(ev) { display_ddc_error(ev); }
 }
 
 void CVICALLBACK LoadConfigurationFromFile (int menuBar, int menuItem, void *callbackData,
@@ -505,16 +545,23 @@ int CVICALLBACK ChangeLoadInfoMode (int panel, int control, int event,
 				name = malloc(len+5);
 				GetCtrlVal(mc.basefname[1], mc.basefname[0], name);
 				
-				GetCtrlValStringLength(mc.path[1], mc.path[0], &len);
-				path = malloc(len+strlen(name)+10);
-				GetCtrlVal(mc.path[1], mc.path[0], path); 
+				int fns = get_current_fname(NULL, name, 1, NULL);
 				
-				get_current_fname(path, name, 1);
-				
-				SetCtrlVal(mc.cdfname[1], mc.cdfname[0], name);
-				
+				if(fns > 0) {
+					name = realloc(name, fns);
+					
+					GetCtrlValStringLength(mc.path[1], mc.path[0], &len);
+					path = malloc(len+1);
+					GetCtrlVal(mc.path[1], mc.path[0], path); 
+					
+					if(get_current_fname(path, name, 1, NULL) == 0) {
+						SetCtrlVal(mc.cdfname[1], mc.cdfname[0], name);
+					}
+					
+					free(path);
+				}
+
 				free(name);
-				free(path);
 			}
 				
 				
@@ -600,33 +647,38 @@ int CVICALLBACK MoveInstButton (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			int diff;
+			if(control == pc.uparrow) {
+				diff = -1;	
+			} else {
+				diff = 1;	
+			}
+			
+			int to, from, top1, top2;
+			
+			GetCtrlVal(panel, pc.ins_num, &from);
+			to = from+diff;
+			
+			int ok = 1;
+			CmtGetLock(lock_uipc);
+			if(to < 0 || to > uipc.ni) {
+				ok = 0;
+			}
+			CmtReleaseLock(lock_uipc);
+			
+			if(!ok) { break; }
+			
 			// Where is the cursor now
 			POINT pos;
 			GetCursorPos(&pos);
 			
-			// What instruction called this
-			int num;
-			GetCtrlVal(panel, pc.ins_num, &num);
+			move_instruction_safe(to, from);
 			
-			// How far apart are the instructions - they're evenly spaced, so pick the first two.
-			CmtGetLock(lock_uipc);
-			if (uipc.ni > 1) {
-				int top1, top2;	 // We need to know how much we moved to know how much to move the cursor
-				GetCtrlAttribute(panel, control, ATTR_TOP, &top1);
-				
-				// Now we just decide if it was called by the up button or the down button and move the instruction.
-				if(control == pc.uparrow && num >= 1)
-					move_instruction(num-1, num);
-				else if(control == pc.downarrow && num < (uipc.ni-1)) 
-					move_instruction(num+1, num);
-				else
-					break;
-				
-				// Finally we find out how much it moved and move the cursor.
-				GetCtrlAttribute(panel, control, ATTR_TOP, &top2);
-				SetCursorPos(pos.x, pos.y+(top2-top1));
-			}
-			CmtReleaseLock(lock_uipc);
+			GetPanelAttribute(pc.inst[to], ATTR_TOP, &top1);
+			GetPanelAttribute(pc.inst[from], ATTR_TOP, &top2);
+			
+			SetCursorPos(pos.x, pos.y+top1-top2);
+			
 			break;
 	}
 	return 0;
@@ -1843,11 +1895,10 @@ void CVICALLBACK ChangeTransientView (int menuBar, int menuItem, void *callbackD
 	new = mc.vtviewopts[uidc.disp_update];
 	
 	// Update which one's checked.
-	if(new != old) {
-		SetMenuBarAttribute(mc.mainmenu, new, ATTR_CHECKED, 1);
-		SetMenuBarAttribute(mc.mainmenu, old, ATTR_CHECKED, 0);
+	for(int i = 0; i < 3; i++) {
+		SetMenuBarAttribute(mc.mainmenu, mc.vtviewopts[i], ATTR_CHECKED, (uidc.disp_update == i));	
 	}
-	
+		
 	CmtReleaseLock(lock_uidc);
 }
 
@@ -1860,6 +1911,21 @@ int CVICALLBACK ChangePolySubtract (int panel, int control, int event,
 	{
 		case EVENT_COMMIT:
 
+			CmtGetLock(lock_uidc);
+			int val;
+			GetCtrlVal(panel, control, &val);
+			
+			// Sync between both things.
+			int is_fid = (panel == dc.fid);
+			SetCtrlVal(is_fid?dc.spec:dc.fid, is_fid?dc.spolysub:dc.fpolysub, val);
+			
+			uidc.polyon = val?1:0;
+			
+			CmtReleaseLock(lock_uidc);
+			
+			set_data_from_nav_safe(dc.cloc[0]);
+			
+			
 			break;
 	}
 	return 0;
@@ -1872,19 +1938,60 @@ int CVICALLBACK ChangePolyFitOrder (int panel, int control, int event,
 	{
 		case EVENT_COMMIT:
 
+			CmtGetLock(lock_uidc);
+			GetCtrlVal(panel, control, &uidc.polyord);
+			
+			int is_fid = (panel == dc.fid);
+			SetCtrlVal(is_fid?dc.spec:dc.fid, is_fid?dc.spsorder:dc.fpsorder, uidc.polyord);
+			
+			CmtReleaseLock(lock_uidc);
+			
+			if(uidc.polyon) {
+				set_data_from_nav_safe(dc.cloc[0]);
+			}
+			
 			break;
 	}
 	return 0;
 }
 
 /***************** FID Specific ******************/ 
- int CVICALLBACK FIDGraphClick (int panel, int control, int event,
+ int CVICALLBACK GraphClick (int panel, int control, int event,
 		void *callbackData, int eventData1, int eventData2)
 {
 	switch (event)
 	{
-		case EVENT_COMMIT:
-
+		int RMSBorder;
+		case EVENT_LEFT_CLICK:
+		
+			/*GetCtrlVal(panel, FID_RMSBorders, &RMSBorder);
+			if(RMSBorder)
+				RMS_click(panel, control, eventData2, eventData1);
+			break;
+			
+		case EVENT_LEFT_CLICK_UP:
+			GetCtrlVal(panel, FID_RMSBorders, &RMSBorder);
+			if(RMSBorder)
+				RMS_click_up(panel, control, eventData2, eventData1);
+			break;
+		
+		case EVENT_MOUSE_MOVE:
+				GetCtrlVal(panel, FID_RMSBorders, &RMSBorder);
+				if(RMSBorder)
+					RMS_mouse_move(panel, control, eventData2, eventData1);
+				break;
+			*/
+			break;
+		case EVENT_RIGHT_CLICK:
+			int modifier;
+			GetGlobalMouseState(NULL, NULL, NULL, NULL, NULL, &modifier);
+			if(modifier&(VAL_SHIFT_MODIFIER|VAL_MENUKEY_MODIFIER))
+				break;
+			
+			RunPopupMenu(mc.rcmenu, mc.rcgraph, panel, eventData1, eventData2, 0, 0, 0, 0);
+			break;
+		case EVENT_KEYPRESS:
+			run_hotkey(panel, control, eventData1, eventData2);
 			break;
 	}
 	return 0;
@@ -1896,15 +2003,13 @@ int CVICALLBACK ToggleFIDChan (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
-			int num = -1, i;
-			for(i = 0; i < 8; i++) {
-				if(control == dc.fchans[i]) {
-					num = i;
-					break;
-				}
-			}
+			int num, val;
+			GetCtrlVal(panel, control, &val);
 			
-			toggle_fid_chan_safe(num);
+			num = int_in_array(dc.fchans, control, 8);
+			if(num >= 0) {
+				set_fid_chan_safe(num, val);	
+			}
 			
 			break;
 	}
@@ -1976,19 +2081,6 @@ int CVICALLBACK ChangeFIDChanColor (int panel, int control, int event,
 }
 
 /***************** FFT Specific ******************/
-
-int CVICALLBACK SpectrumCallback (int panel, int control, int event,
-		void *callbackData, int eventData1, int eventData2)
-{
-	switch (event)
-	{
-		case EVENT_COMMIT:
-
-			break;
-	}
-	return 0;
-}
-
 int CVICALLBACK ChangeSpectrumChannel (int panel, int control, int event,
 		void *callbackData, int eventData1, int eventData2)
 {
@@ -2013,16 +2105,13 @@ int CVICALLBACK ToggleSpecChan (int panel, int control, int event,
 	switch (event)
 	{
 		case EVENT_COMMIT:
+			int val;
+			GetCtrlVal(panel, control, &val);
 			
-			int num = -1, i;
-			for(i = 0; i < 8; i++) {
-				if(control == dc.schans[i]) {
-					num = i;
-					break;
-				}
+			int num = int_in_array(dc.schans, control, 8);
+			if(num >= 0) {
+				set_spec_chan_safe(num, val);
 			}
-			
-			toggle_spec_chan_safe(num);
 			
 			break;
 	}
@@ -2063,6 +2152,9 @@ int CVICALLBACK ChangePhaseCorrectionOrder (int panel, int control, int event,
 	return 0;
 }
 
+int calls = 0;
+int ends = 0;
+
 int CVICALLBACK ChangePhaseKnob (int panel, int control, int event,
 		void *callbackData, int eventData1, int eventData2)
 {
@@ -2074,9 +2166,10 @@ int CVICALLBACK ChangePhaseKnob (int panel, int control, int event,
 			
 			GetCtrlVal(panel, control, &phase);
 			GetCtrlVal(dc.sphorder[1], dc.sphorder[0], &order);
-			GetCtrlVal(panel, dc.scring, &chan);
-			
+			GetCtrlVal(panel, dc.scring, &chan); 
+
 			change_phase_safe(chan, phase, order);
+			
 			break;
 	}
 	return 0;
@@ -2139,16 +2232,48 @@ int CVICALLBACK ChangeSpectrumChanColor (int panel, int control, int event,
  void CVICALLBACK AutoscalingOnOff (int menuBar, int menuItem, void *callbackData,
 		int panel)
 {
+	int xy = -1, control = (panel == dc.spec)?dc.sgraph:dc.fgraph;
+
+	if(menuItem == mc.rcgraph_as)
+		xy = MC_XYAXIS;
+	else if(menuItem == mc.rcgraph_fh)
+		xy = MC_XAXIS;
+	else if(menuItem == mc.rcgraph_fv)
+		xy = MC_YAXIS;
+	
+	if(xy >= 0)
+		fit_graph(panel, control, xy);
 }
 
 void CVICALLBACK ZoomGraph (int menuBar, int menuItem, void *callbackData,
 		int panel)
 {
+	
+	int in = (menuItem == mc.rcgraph_zo);
+	int control = (menuItem == dc.spec)?dc.spec:dc.fid;
+	
+	zoom_graph(panel, control, in, MC_XYAXIS);	
 }
 
 void CVICALLBACK PanGraph (int menuBar, int menuItem, void *callbackData,
 		int panel)
 {
+	int dir;
+	int control = (panel == dc.spec)?dc.sgraph:dc.fgraph;
+	
+	if(menuItem == mc.rcgraph_pl)
+		dir = MC_LEFT;
+	else if(menuItem == mc.rcgraph_pr)
+		dir = MC_RIGHT;
+	else if(menuItem == mc.rcgraph_pu)
+		dir = MC_UP;
+	else if(menuItem == mc.rcgraph_pd)
+		dir = MC_DOWN;
+	else
+		dir = -1;
+
+	if (dir >= 0)
+		pan_graph(panel, control, dir);
 }
 
 
@@ -2431,6 +2556,436 @@ int CVICALLBACK TestCallback (int panel, int control, int event,
 				free_pprog(gp);
 				gp = NULL;
 			}
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeUsePB (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			CmtGetLock(lock_uipc);
+			
+			GetCtrlVal(panel, control, &(uipc.uses_pb));
+			
+			CmtReleaseLock(lock_uipc);
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK SaveExperimentalParams (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			
+			free_ep(&uiep);
+			uiep = save_ep();
+			
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK SaveAndCloseExperimentalParams (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			free_ep(&uiep);
+			uiep = save_ep();
+			
+			HidePanel(panel);
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK CancelExperimentalParameters (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			HidePanel(panel);
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ToggleEPParameter(int panel, int control, int event, void *callbackData, int eventData1, int eventData2) {
+	switch(event) {
+		case EVENT_COMMIT:
+			int val, nc  = -1;
+			GetCtrlVal(panel, control, &val);
+			
+			const int phys = ec.phys_led;
+			const int dev = ec.dev_led;
+			const int again = ec.again_led;
+			const int res = ec.res_led;
+			
+			if(control == ec.phys_led) {
+				nc = ec.phys_ring;	
+			} else if(control == ec.dev_led) {
+				nc = ec.dev_ring;
+			} else if(control == ec.again_led) {
+				nc = ec.again;
+			} else if(control == ec.res_led) {
+				nc = ec.res_val;
+			}
+			
+			if(nc >= 0) { 
+				SetCtrlAttribute(panel, nc, ATTR_DIMMED, !val);
+			}
+			
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ToggleEPFunction (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+void CVICALLBACK LaunchEParams (int menuBar, int menuItem, void *callbackData,
+		int panel)
+{
+	if(ec.ep < 0) {
+		ec.ep = LoadPanel(0, MC_UI, EParams);
+	}
+	
+	load_ep(uiep);
+	DisplayPanel(ec.ep);
+}
+
+int CVICALLBACK ChangeChannelName (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			int val, ind;
+			int sl;
+			char *sval = NULL;
+			
+			int nl = 0;
+			GetNumListItems(ec.ep, ec.chan, &nl);
+			
+			if(nl == 0) { 
+				InsertListItem(ec.ep, ec.chan, -1, "+ New Channel", -1);	
+				nl++;
+			}
+			
+			GetCtrlValStringLength(ec.ep, ec.name, &sl);
+			sval = malloc(++sl);
+			GetCtrlVal(ec.ep, ec.name, sval);
+			
+			GetCtrlVal(ec.ep, ec.chan, &val);
+			if(val == -1) {
+				ind = nl-1;
+			} else {
+				GetCtrlIndex(ec.ep, ec.chan, &ind);
+				DeleteListItem(ec.ep, ec.chan, ind, 1);
+				
+			}
+			
+			InsertListItem(ec.ep, ec.chan, ind, sval, ind);
+			SetCtrlIndex(ec.ep, ec.chan, ind);
+			
+			
+			if(sval != NULL) { free(sval); }
+			
+			break;
+	}
+	return 0;
+}
+
+// First Run Callbacks
+
+int CVICALLBACK MoveFRInst (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			int lr, parent,ni, *inst;
+			
+			GetPanelAttribute(panel, ATTR_PANEL_PARENT, &parent);
+			
+			CmtGetLock(lock_uipc);
+			if(parent == pc.LRCPan) {
+				lr = 1;
+				inst = pc.linst;
+				ni = uipc.lr_ni;
+			} else if(parent == pc.FRCPan) {
+				lr = 0;	
+				inst = pc.finst;
+				ni = uipc.fr_ni;
+			} else {
+				CmtReleaseLock(lock_uipc);
+				break;	
+			}
+			
+			int to, from;
+			from = int_in_array(inst, panel, ni);
+			
+			GetCtrlVal(panel, pc.fr_inum, &to);
+			
+			move_fr_inst(to, from, lr);
+			CmtReleaseLock(lock_uipc);
+			
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK MoveFRInstButton (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			int diff;
+			
+			if(control == pc.fr_upbutton) {
+				diff = -1;
+			} else if(control == pc.fr_downbutton) {
+				diff = 1;
+			} else {
+				break;	
+			}
+			
+			int to, from;
+			
+			GetCtrlVal(panel, pc.fr_inum, &from);
+			
+			to = from+diff;
+			
+			int lr, ni, *inst, parent;
+			
+			GetPanelAttribute(panel, ATTR_PANEL_PARENT, &parent);
+			
+			CmtGetLock(lock_uipc);
+			if(parent == pc.LRCPan) {
+				ni = uipc.lr_ni;
+				inst = pc.linst;
+				lr = 1;
+			} else if(parent == pc.FRCPan) {
+				ni = uipc.fr_ni;
+				inst = pc.finst;
+				lr = 0;
+			} else {
+				CmtReleaseLock(lock_uipc);
+				break;
+			}
+			
+			if(to >= ni || to < 0) {
+				break;
+			}
+			
+			move_fr_inst(to, from, lr);
+			CmtReleaseLock(lock_uipc);
+			
+			POINT pos;
+			GetCursorPos(&pos);
+			
+			int top1, top2;
+			
+			GetPanelAttribute(inst[to], ATTR_TOP, &top1);
+			GetPanelAttribute(inst[from], ATTR_TOP, &top2);
+			
+			SetCursorPos(pos.x, pos.y+top1-top2);
+			
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeFRInstDelay (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			change_fr_instr_delay(panel);
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK ChangeFRTUnits (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			
+			change_any_instr_units(panel, pc.fr_delay, pc.fr_delay_u);
+			change_fr_instr_delay(panel);
+			
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK InstrFRCallback (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			change_fr_instr_pan(panel);
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK InstrFRDataCallback (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK DeleteFRInstructionCallback (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			int lr, ni, *inst, parent;
+			
+			GetPanelAttribute(panel, ATTR_PANEL_PARENT, &parent);
+			
+			CmtGetLock(lock_uipc);
+			if(parent == pc.LRCPan) {
+				ni = uipc.lr_ni;
+				inst = pc.linst;
+				lr = 1;
+			} else if(parent == pc.FRCPan) {
+				ni = uipc.fr_ni;
+				inst = pc.finst;
+				lr = 0;
+			} else {
+				CmtReleaseLock(lock_uipc);
+				break;
+			}
+
+			int num = int_in_array(inst, panel, ni);
+			
+			delete_fr_instr_safe(num, lr);
+			
+			CmtReleaseLock(lock_uipc);
+			
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK InstNumFRChange (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			int num;
+			GetCtrlVal(panel, control, &num);
+			
+			change_fr_num_instrs_safe(num, (panel == pc.LRCPan));
+			
+			break;
+	}
+	return 0;
+}
+
+
+int CVICALLBACK ChangeFRNReps (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK RefreshFileBox (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+				refresh_dir_box();
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK LoadAsCurrent (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+
+			break;
+	}
+	return 0;
+}
+
+int CVICALLBACK CalculateProgramTime (int panel, int control, int event,
+		void *callbackData, int eventData1, int eventData2)
+{
+	switch (event)
+	{
+		case EVENT_COMMIT:
+			
+			PPROGRAM *p = get_current_program();
+			
+			int rv = 0;
+			double rtime = calc_prog_time(p, 0, &rv);
+			
+			if(rv < 0) {
+				display_error(rv);
+			} else {
+				int right, left, width;
+				GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_LEFT, &left);
+				GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_WIDTH, &width);
+				right = left+width;
+				
+				char *tstr = time_string(rtime, 0, 0);
+				
+				SetCtrlVal(mc.rtime[1], mc.rtime[0], tstr);
+				
+				GetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_WIDTH, &width); 
+				SetCtrlAttribute(mc.rtime[1], mc.rtime[0], ATTR_LEFT, right-width);
+				if(tstr != NULL) { free(tstr); }
+				
+			}
+			
+			
+			
 			break;
 	}
 	return 0;
